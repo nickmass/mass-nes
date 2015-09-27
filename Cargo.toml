@@ -1,0 +1,4 @@
+[package]
+name = "rust-nes"
+version = "0.1.0"
+authors = ["Nick Massey <nickmass@nickmass.com>"]
