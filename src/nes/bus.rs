@@ -1,12 +1,19 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-struct AddressBus {
+pub struct AddressBus {
     registered_reads: HashMap<u16, Box<Fn(u16) -> u8>>,
     registered_writes: HashMap<u16, Box<Fn(u16, u8)>>
 }
 
 impl AddressBus {
+    pub fn new() -> AddressBus {
+        AddressBus {
+            registered_reads: HashMap::new(),
+            registered_writes: HashMap::new(),
+        }
+    }
+
     fn register_read<T: AddressValidator, H: AddressReader>(self, addr_val: T, handler: Rc<H>) {
         let iter = AddressIterator::new(addr_val);
         let mut reads = self.registered_reads;
