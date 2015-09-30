@@ -14,7 +14,7 @@ impl AddressBus {
         }
     }
 
-    fn register_read<T: AddressValidator, H: AddressReader>(self, addr_val: T, handler: Rc<H>) {
+    pub fn register_read<T: AddressValidator, H: AddressReader>(&self, addr_val: T, handler: Rc<H>) {
         let iter = AddressIterator::new(addr_val);
         let mut reads = self.registered_reads;
         for addr in iter {
@@ -24,7 +24,7 @@ impl AddressBus {
         }
     }
 
-    fn register_write<T: AddressValidator, H: AddressWriter>(self, addr_val: T, handler: Rc<H>) {
+    pub fn register_write<T: AddressValidator, H: AddressWriter>(&self, addr_val: T, handler: Rc<H>) {
         let iter = AddressIterator::new(addr_val);
         let mut writes = self.registered_writes;
         for addr in iter {
@@ -50,8 +50,16 @@ impl AddressWriter for AddressBus {
     }
 }
 
-struct SimpleAddress {
+pub struct SimpleAddress {
     address: u16
+}
+
+impl SimpleAddress {
+    pub fn new(address: u16) -> SimpleAddress {
+        SimpleAddress {
+            address: address
+        }
+    }
 }
 
 impl AddressValidator for SimpleAddress {
@@ -60,7 +68,7 @@ impl AddressValidator for SimpleAddress {
     }
 }
 
-trait AddressReader {
+pub trait AddressReader {
     fn read(&self, u16) -> u8;
 
     fn read_word(&self, addr: u16) -> u16 {
@@ -68,7 +76,7 @@ trait AddressReader {
     }
 }
 
-trait AddressWriter {
+pub trait AddressWriter {
     fn write(&self, u16, u8);
 }
 
