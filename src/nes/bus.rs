@@ -43,9 +43,8 @@ impl AddressReader for AddressBus {
 
 impl AddressWriter for AddressBus {
     fn write(&self, addr: u16, value: u8) {
-        let handler = self.registered_writes.get(&addr);
-        if handler.is_some() {
-            handler.unwrap()(addr, value);
+        if let Some(handler) = self.registered_writes.get(&addr) {
+            handler(addr, value);
         }
     }
 }
