@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::rc::Rc;
+use nes::system::SystemState;
 
 pub struct AddressBus {
-    registered_reads: HashMap<u16, Box<Fn(u16) -> u8>>,
-    registered_writes: HashMap<u16, Box<Fn(u16, u8)>>
+    registered_reads: HashMap<u16, Box<Fn(&mut SystemState, u16) -> u8>>,
+    registered_writes: HashMap<u16, Box<Fn(&mut SystemState, u16, u8)>>
 }
 
 impl AddressBus {
@@ -14,37 +15,33 @@ impl AddressBus {
         }
     }
 
-    pub fn register_read<T: AddressValidator, H: AddressReader>(&self, addr_val: T, handler: Rc<H>) {
+    pub fn register_read<T: AddressValidator, H: AddressReader>(&mut self, addr_val: T) {
         let iter = AddressIterator::new(addr_val);
-        let mut reads = self.registered_reads;
         for addr in iter {
-            let addr_handler = handler.clone();
-            let addr_closure = Box::new(move |a: u16| addr_handler.read(a));
-            reads.insert(addr, addr_closure);
+            let addr_closure = Box::new(|state: &mut SystemState, a: u16| H::read(state, a));
+            self.registered_reads.insert(addr, addr_closure);
         }
     }
 
-    pub fn register_write<T: AddressValidator, H: AddressWriter>(&self, addr_val: T, handler: Rc<H>) {
+    pub fn register_write<T: AddressValidator, H: AddressWriter>(&mut self, addr_val: T) {
         let iter = AddressIterator::new(addr_val);
-        let mut writes = self.registered_writes;
         for addr in iter {
-            let addr_handler = handler.clone();
-            let addr_closure = Box::new(move |a: u16, v: u8| addr_handler.write(a, v));
-            writes.insert(addr, addr_closure);
+            let addr_closure = Box::new(|state: &mut SystemState, a: u16, v: u8| H::write(state, a, v));
+            self.registered_writes.insert(addr, addr_closure);
         }
     }
-}
-
-impl AddressReader for AddressBus {
-    fn read(&self, addr: u16) -> u8 {
-        self.registered_reads.get(&addr).map_or(0, |handler| handler(addr))
+    
+    pub fn read(&self, state: &mut SystemState, addr: u16) -> u8 {
+        self.registered_reads.get(&addr).map_or(0, |handler| handler(state, addr))
     }
-}
+   
+    pub fn read_word(&self, state: &mut SystemState, addr: u16) -> u16 {
+        (self.read(state, addr) as u16) << 8 | self.read(state, addr + 1) as u16
+    }
 
-impl AddressWriter for AddressBus {
-    fn write(&self, addr: u16, value: u8) {
+    pub fn write(&self, state: &mut SystemState, addr: u16, value: u8) {
         if let Some(handler) = self.registered_writes.get(&addr) {
-            handler(addr, value);
+            handler(state, addr, value);
         }
     }
 }
@@ -68,15 +65,11 @@ impl AddressValidator for SimpleAddress {
 }
 
 pub trait AddressReader {
-    fn read(&self, u16) -> u8;
-
-    fn read_word(&self, addr: u16) -> u16 {
-        (self.read(addr) as u16) << 8 | self.read(addr + 1) as u16
-    }
+    fn read(&mut SystemState, u16) -> u8;
 }
 
 pub trait AddressWriter {
-    fn write(&self, u16, u8);
+    fn write(&mut SystemState, u16, u8);
 }
 
 trait AddressValidator {
@@ -104,6 +97,7 @@ impl<T: AddressValidator> Iterator for AddressIterator<T> {
         let start = self.state + 1;
         for x in start..0x10000 {
             if self.addr_val.is_valid(x as u16) {
+                self.state = x;
                 return Some(x as u16);
             }
         }

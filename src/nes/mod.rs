@@ -1,3 +1,4 @@
+pub mod system;
 mod bus;
-mod system;
+mod cpu;
 mod ppu;
