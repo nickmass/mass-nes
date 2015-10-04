@@ -3,6 +3,8 @@ use nes::bus::AddressBus;
 use nes::cpu::{Cpu, CpuState};
 use nes::ppu::{Ppu, PpuState};
 
+use std::io::Read;
+
 pub enum Region {
     Ntsc,
     Pal,
@@ -20,11 +22,15 @@ pub struct System {
     ppu_bus: Rc<AddressBus>,
     ppu: Rc<Ppu>,
     cpu: Rc<Cpu>,
-    state: SystemState,
+    state: Box<SystemState>,
 }
 
 
 impl System {
+    pub fn load_rom<T: Read>(file: &mut T) {
+        ::nes::cartridge::Cartridge::load(file);
+    }
+
     pub fn new(region: Region) -> System {
         let mut cpu_bus = AddressBus::new();
         let mut ppu_bus = AddressBus::new();
@@ -44,13 +50,13 @@ impl System {
             ppu_bus: rc_ppu_bus,
             ppu: Rc::new(ppu),
             cpu: Rc::new(cpu),
-            state: SystemState::default()
+            state: Box::new(SystemState::default())
         };
 
         system
     }
 
     pub fn tick(&mut self) {
-        self.cpu.tick(&self.cpu_bus, &mut self.state);
+        self.cpu.tick(&mut self.state);
     }
 }

@@ -20,7 +20,7 @@ impl Cpu {
         self.cpu_bus = Some(cpu_bus);
     }
 
-    pub fn tick(&self, cpu_bus: &AddressBus,  state: &mut SystemState) {
-        cpu_bus.read(state, 0x2000);
+    pub fn tick(&self,  state: &mut SystemState) {
+        self.cpu_bus.as_ref().unwrap().read(state, 0x2000);
     }
 }
