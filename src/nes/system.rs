@@ -28,7 +28,7 @@ pub struct System {
 
 impl System {
     pub fn load_rom<T: Read>(file: &mut T) {
-        ::nes::cartridge::Cartridge::load(file);
+        let _ = ::nes::cartridge::Cartridge::load(file).unwrap();
     }
 
     pub fn new(region: Region) -> System {
