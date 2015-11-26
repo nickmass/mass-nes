@@ -32,12 +32,13 @@ impl Ppu {
         self.ppu_bus = Some(ppu_bus);
     }
 
-
+    pub fn tick(&self, state: &mut SystemState) {
+        state.ppu.current_tick = state.ppu.current_tick + 1;
+    }
 }
 
 impl AddressReader for Ppu {
     fn read(state: &mut SystemState, addr: u16) -> u8 {
-        state.ppu.current_tick = state.ppu.current_tick + 1;
         println!("PPU {}", addr);
         0
     }

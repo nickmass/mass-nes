@@ -21,6 +21,7 @@ impl Cpu {
     }
 
     pub fn tick(&self,  state: &mut SystemState) {
+        state.cpu.current_tick = state.cpu.current_tick + 1;
         self.cpu_bus.as_ref().unwrap().read(state, 0x2000);
     }
 }
