@@ -135,6 +135,169 @@ impl Cpu {
                 let a = (state.cpu.op_addr as u32 + state.cpu.reg_y) as u16;
                 state.cpu.op_addr = a;
             },
+            (Addressing::Absolute, Stage::Address(0)) => {
+                let a = self.read_pc(system, state);
+                state.cpu.op_addr = a as u16;
+
+            },
+            (Addressing::Absolute, Stage::Address(1)) => {
+                let a = self.read_pc(system, state);
+                let a = ((a as u16) << 8) | state.cpu.op_addr;
+                state.cpu.op_addr = a;
+            },
+            (Addressing::AbsoluteX, Stage::Address(0)) => {
+                let a = self.read_pc(system, state);
+                state.cpu.op_addr = a as u16;
+
+            },
+            (Addressing::AbsoluteX, Stage::Address(1)) => {
+                let a = self.read_pc(system, state);
+                let a = ((a as u16) << 8) | state.cpu.op_addr;
+                state.cpu.op_addr = a;
+            },
+            (Addressing::AbsoluteX, Stage::Address(2)) => {
+                let a = state.cpu.op_addr;
+                if (a & 0xFF00) !=
+                   ((a + state.cpu.reg_x as u16) & 0xFF) {
+                    let dummy_a = (a & 0xFF00) | ((a + state.cpu.reg_x as u16) & 0xFF);
+                    let _ = self.bus.read(system, state, dummy_a);
+                    state.cpu.op_addr += state.cpu.reg_x as u16;
+                } else {
+                    state.cpu.op_addr += state.cpu.reg_x as u16;
+                    state.cpu.stage = Stage::Execute(0);
+                    self.operation(system, state);
+                    return;
+                }
+            },
+            (Addressing::AbsoluteY, Stage::Address(0)) => {
+                let a = self.read_pc(system, state);
+                state.cpu.op_addr = a as u16;
+
+            },
+            (Addressing::AbsoluteY, Stage::Address(1)) => {
+                let a = self.read_pc(system, state);
+                let a = ((a as u16) << 8) | state.cpu.op_addr;
+                state.cpu.op_addr = a;
+            },
+            (Addressing::AbsoluteY, Stage::Address(2)) => {
+                let a = state.cpu.op_addr;
+                if (a & 0xFF00) !=
+                   ((a + state.cpu.reg_y as u16) & 0xFF) {
+                    let dummy_a = (a & 0xFF00) | ((a + state.cpu.reg_y as u16) & 0xFF);
+                    let _ = self.bus.read(system, state, dummy_a);
+                    state.cpu.op_addr += state.cpu.reg_y as u16;
+                } else {
+                    state.cpu.op_addr += state.cpu.reg_y as u16;
+                    state.cpu.stage = Stage::Execute(0);
+                    self.operation(system, state);
+                    return;
+                }
+            },
+            (Addressing::AbsoluteXDummyAlways, Stage::Address(0)) => {
+                let a = self.read_pc(system, state);
+                state.cpu.op_addr = a as u16;
+
+            },
+            (Addressing::AbsoluteXDummyAlways, Stage::Address(1)) => {
+                let a = self.read_pc(system, state);
+                let a = ((a as u16) << 8) | state.cpu.op_addr;
+                state.cpu.op_addr = a;
+            },
+            (Addressing::AbsoluteXDummyAlways, Stage::Address(2)) => {
+                let a = state.cpu.op_addr;
+                let dummy_a = (a & 0xFF00) | ((a + state.cpu.reg_x as u16) & 0xFF);
+                let _ = self.bus.read(system, state, dummy_a);
+                state.cpu.op_addr += state.cpu.reg_x as u16;
+            },
+            (Addressing::AbsoluteYDummyAlways, Stage::Address(0)) => {
+                let a = self.read_pc(system, state);
+                state.cpu.op_addr = a as u16;
+
+            },
+            (Addressing::AbsoluteYDummyAlways, Stage::Address(1)) => {
+                let a = self.read_pc(system, state);
+                let a = ((a as u16) << 8) | state.cpu.op_addr;
+                state.cpu.op_addr = a;
+            },
+            (Addressing::AbsoluteYDummyAlways, Stage::Address(2)) => {
+                let a = state.cpu.op_addr;
+                let dummy_a = (a & 0xFF00) | ((a + state.cpu.reg_y as u16) & 0xFF);
+                let _ = self.bus.read(system, state, dummy_a);
+                state.cpu.op_addr += state.cpu.reg_y as u16;
+            },
+            (Addressing::IndirectAbsolute, Stage::Address(0)) => { 
+                let a = self.read_pc(system, state);
+                state.cpu.op_addr = a as u16;
+            },
+            (Addressing::IndirectAbsolute, Stage::Address(1)) => {
+                let a = self.read_pc(system, state);
+                let a = ((a as u16) << 8) | state.cpu.op_addr;
+                state.cpu.op_addr = a;
+            },
+            (Addressing::IndirectAbsolute, Stage::Address(2)) => {
+                let a = state.cpu.op_addr;
+                let a = self.bus.read(system, state, a);
+                state.cpu.decode_stack.push_back(a);
+            },
+            (Addressing::IndirectAbsolute, Stage::Address(3)) => {
+                let a = (state.cpu.op_addr & 0xff00) | ((state.cpu.op_addr + 1) & 0xff);
+                let a = (self.bus.read(system, state, a) as u16) << 8;
+                state.cpu.op_addr = a | state.cpu.decode_stack.pop_back().unwrap() as u16;
+            },
+            (Addressing::Relative, Stage::Address(0)) => {
+                let a = self.read_pc(system, state);
+                state.cpu.op_addr = a as u16;
+            },
+            (Addressing::IndirectX, Stage::Address(0)) => {
+                let a = self.read_pc(system, state);
+                state.cpu.op_addr = a as u16;
+            },
+            (Addressing::IndirectX, Stage::Address(1)) => {
+                let a = state.cpu.op_addr;
+                let _ = self.bus.read(system, state, a);
+                let a = a + state.cpu.reg_x as u16;
+                let a = a & 0xff;
+                state.cpu.op_addr = a;
+            },
+            (Addressing::IndirectX, Stage::Address(2)) => {
+                let a = state.cpu.op_addr;
+                let a = self.bus.read(system, state, a);
+                state.cpu.decode_stack.push_back(a);
+            },
+            (Addressing::IndirectX, Stage::Address(3)) => {
+                let a = (state.cpu.op_addr & 0xff00) | ((state.cpu.op_addr + 1) & 0xff);
+                let a = (self.bus.read(system, state, a) as u16) << 8;
+                state.cpu.op_addr = a | state.cpu.decode_stack.pop_back().unwrap() as u16;
+            },
+            (Addressing::IndirectY, Stage::Address(0)) => {
+                let a = self.read_pc(system, state);
+                state.cpu.op_addr = a as u16;
+            },
+            (Addressing::IndirectY, Stage::Address(1)) => {
+                let a = state.cpu.op_addr;
+                let a = self.bus.read(system, state, a);
+                state.cpu.decode_stack.push_back(a);
+            },
+            (Addressing::IndirectY, Stage::Address(2)) => {
+                let a = (state.cpu.op_addr & 0xff00) | ((state.cpu.op_addr + 1) & 0xff);
+                let a = (self.bus.read(system, state, a) as u16) << 8;
+                state.cpu.op_addr = a | state.cpu.decode_stack.pop_back().unwrap() as u16;
+            },
+            (Addressing::AbsoluteY, Stage::Address(3)) => {
+                let a = state.cpu.op_addr;
+                if (a & 0xff00) !=
+                   ((a + state.cpu.reg_y as u16) & 0xff) {
+                    let dummy_a = (a & 0xff00) | ((a + state.cpu.reg_y as u16) & 0xff);
+                    let _ = self.bus.read(system, state, dummy_a);
+                    state.cpu.op_addr += state.cpu.reg_y as u16;
+                } else {
+                    state.cpu.op_addr += state.cpu.reg_y as u16;
+                    state.cpu.stage = Stage::Execute(0);
+                    self.operation(system, state);
+                    return;
+                }
+            },
+            
             _ => {
                 state.cpu.stage = Stage::Execute(0);
                 self.operation(system, state);

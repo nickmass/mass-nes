@@ -81,8 +81,6 @@ pub enum Instruction {
     IllSre,
     IllTas,
     IllXaa,
-
-    IllKill,
 }
 
 #[derive(Clone, Copy)]
@@ -416,18 +414,18 @@ impl Op {
             o(0xdc, I::IllNop, A::AbsoluteX);
             o(0xfc, I::IllNop, A::AbsoluteX);
 
-            o(0x02, I::IllKill, A::None);
-            o(0x12, I::IllKill, A::None);
-            o(0x22, I::IllKill, A::None);
-            o(0x32, I::IllKill, A::None);
-            o(0x42, I::IllKill, A::None);
-            o(0x52, I::IllKill, A::None);
-            o(0x62, I::IllKill, A::None);
-            o(0x72, I::IllKill, A::None);
-            o(0x92, I::IllKill, A::None);
-            o(0xb2, I::IllKill, A::None);
-            o(0xd2, I::IllKill, A::None);
-            o(0xf2, I::IllKill, A::None);
+            o(0x02, I::IllKil, A::None);
+            o(0x12, I::IllKil, A::None);
+            o(0x22, I::IllKil, A::None);
+            o(0x32, I::IllKil, A::None);
+            o(0x42, I::IllKil, A::None);
+            o(0x52, I::IllKil, A::None);
+            o(0x62, I::IllKil, A::None);
+            o(0x72, I::IllKil, A::None);
+            o(0x92, I::IllKil, A::None);
+            o(0xb2, I::IllKil, A::None);
+            o(0xd2, I::IllKil, A::None);
+            o(0xf2, I::IllKil, A::None);
         }
 
         for i in 0..255 { 

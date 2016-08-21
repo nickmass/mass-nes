@@ -1,4 +1,4 @@
 [package]
-name = "mass-nes"
+name = "mass_nes"
 version = "0.1.0"
 authors = ["Nick Massey <nickmass@nickmass.com>"]
