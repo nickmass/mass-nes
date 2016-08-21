@@ -1,6 +1,6 @@
 use std::rc::Rc;
-use nes::bus::{AddressBus, AddressReader, AddressWriter, SimpleAddress};
-use nes::system::{Region, SystemState};
+use nes::bus::{AddressValidator, AddressBus, BusKind, DeviceKind, Address};
+use nes::system::{Region, SystemState, System};
 
 #[derive(Default)]
 pub struct PpuState {
@@ -9,43 +9,37 @@ pub struct PpuState {
 
 pub struct Ppu {
     region: Region,
-    cpu_bus: Option<Rc<AddressBus>>,
-    ppu_bus: Option<Rc<AddressBus>>,
+    bus: AddressBus,
 }
 
 impl Ppu {
-    pub fn new(region: Region, cpu_bus: &mut AddressBus, ppu_bus: &mut AddressBus) -> Ppu {
+    pub fn new(region: Region) -> Ppu {
         let ppu = Ppu {
             region: region,
-            cpu_bus: None,
-            ppu_bus: None,
+            bus: AddressBus::new(BusKind::Ppu),
         };
-        
-        cpu_bus.register_read::<_, Ppu>(SimpleAddress::new(0x2000));
-        cpu_bus.register_write::<_, Ppu>(SimpleAddress::new(0x2001));
 
         ppu
     }
 
-    pub fn init(&mut self, cpu_bus: Rc<AddressBus>, ppu_bus: Rc<AddressBus>) {
-        self.cpu_bus = Some(cpu_bus);
-        self.ppu_bus = Some(ppu_bus);
+    pub fn register_read<T>(&mut self, device: DeviceKind, addr: T) where T: AddressValidator {
+        self.bus.register_read(device, addr);
     }
 
-    pub fn tick(&self, state: &mut SystemState) {
-        state.ppu.current_tick = state.ppu.current_tick + 1;
+    pub fn register_write<T>(&mut self, device: DeviceKind, addr: T) where T: AddressValidator {
+        self.bus.register_write(device, addr);
     }
-}
 
-impl AddressReader for Ppu {
-    fn read(state: &mut SystemState, addr: u16) -> u8 {
-        println!("PPU {}", addr);
+    pub fn read(&self, bus: BusKind, state: &mut SystemState, address: u16) -> u8 {
+        println!("IN PPU");
         0
     }
-}
 
-impl AddressWriter for Ppu {
-    fn write(state: &mut SystemState, addr: u16, value: u8) {
-        println!("PPU {}: {}", addr, value);
+    pub fn write(&self, bus: BusKind,  state: &mut SystemState, address: u16, value: u8) {
+
+    }
+
+    pub fn tick(&self, system: &System, state: &mut SystemState) {
+        state.ppu.current_tick += 1;
     }
 }
