@@ -83,7 +83,7 @@ pub enum Instruction {
     IllXaa,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Addressing {
     None,
     ZeroPage,

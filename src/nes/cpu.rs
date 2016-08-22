@@ -17,6 +17,35 @@ pub struct CpuState {
     reg_y: u32,
     reg_pc: u32,
     reg_sp: u32,
+    flag_c: u32,
+    flag_z: u32,
+    flag_i: u32,
+    flag_d: u32,
+    flag_v: u32,
+    flag_s: u32,
+}
+
+impl CpuState {
+    fn reg_p(&self) -> u8 {
+        let mut val = 0;
+        if self.flag_c != 0 { val |= 0x01; }
+        if self.flag_z == 0 { val |= 0x02; }
+        if self.flag_i != 0 { val |= 0x04; }
+        if self.flag_d != 0 { val |= 0x08; }
+        if self.flag_v != 0 { val |= 0x40; }
+        if self.flag_s & 0x80 != 0 { val |= 0x80; }
+
+        val
+    }
+
+    fn set_reg_p(&mut self, val: u32) {
+        self.flag_c = val & 0x01;
+        self.flag_z = (val & 0x02) ^ 0x02;
+        self.flag_i = val & 0x04;
+        self.flag_d = val & 0x08;
+        self.flag_v = val & 0x40;
+        self.flag_s = val & 0x80;
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -86,6 +115,20 @@ impl Cpu {
         let pc = (state.cpu.reg_pc + 1) as u16;
         state.cpu.reg_pc = pc as u32;
         self.bus.read(system, state, pc)
+    }
+
+    fn push_stack(&self, system: &System, state: &mut SystemState, value :u8) {
+        let addr = state.cpu.reg_sp as u16 | 0x100;
+        self.bus.write(system, state, addr, value);
+        state.cpu.reg_sp = state.cpu.reg_sp.wrapping_sub(1);
+        state.cpu.reg_sp &= 0xff;
+    }
+
+    fn pop_stack(&self, system: &System, state: &mut SystemState) -> u8 {
+        state.cpu.reg_sp = state.cpu.reg_sp.wrapping_add(1);
+        state.cpu.reg_sp &= 0xff;
+        let addr = state.cpu.reg_sp as u16 | 0x100;
+        self.bus.read(system, state, addr)
     }
 
     fn decode(&self, system: &System, state: &mut SystemState) {
@@ -308,6 +351,425 @@ impl Cpu {
     }
 
     fn operation(&self, system: &System, state: &mut SystemState) {
+        let current = (state.cpu.op.instruction, state.cpu.stage);
+        let addr = state.cpu.op_addr;
+        match current {
+            (Instruction::Adc, Stage::Execute(0)) => {
+                let value = self.bus.read(system, state, addr) as u32;
+                let temp = state.cpu.reg_a + value + state.cpu.flag_c;
+                state.cpu.flag_v = ((!(state.cpu.reg_a ^ value) &
+                                 (state.cpu.reg_a ^ temp)) >> 7) & 1;
+                state.cpu.flag_c  = if temp > 0xff { 1 } else { 0 };
+                state.cpu.reg_a = temp & 0xff;
+                state.cpu.flag_s = temp & 0xff;
+                state.cpu.flag_z = temp & 0xff;
+            },
+            (Instruction::And, Stage::Execute(0)) => {
+                let value = self.bus.read(system, state, addr) as u32;
+                state.cpu.flag_s = value;
+                state.cpu.flag_z = value;
+            },
+            (Instruction::Asl, Stage::Execute(0)) => {
+                if state.cpu.op.addressing == Addressing::Accumulator {
+                    state.cpu.flag_c = (state.cpu.reg_a >> 7) & 1;
+                    state.cpu.reg_a = (state.cpu.reg_a) & 0xff;
+                    state.cpu.flag_s = state.cpu.reg_a;
+                    state.cpu.flag_z = state.cpu.reg_a;
+                    state.cpu.stage = Stage::Fetch;
+                    self.decode(system, state);
+                    return;
+                } else {
+                    let value = self.bus.read(system, state, addr);
+                    state.cpu.decode_stack.push_back(value);
+                }
+            },
+            (Instruction::Asl, Stage::Execute(1)) => {
+                let value = state.cpu.decode_stack.pop_back().unwrap();
+                self.bus.write(system, state, addr, value);
+                state.cpu.decode_stack.push_back(value);
+            },
+            (Instruction::Asl, Stage::Execute(2)) => {
+                let mut value = state.cpu.decode_stack.pop_back().unwrap() as u32;
+                state.cpu.flag_c = (value >> 7) & 1;
+                value = (value << 1) & 0xff;
+                state.cpu.flag_z = value;
+                state.cpu.flag_s = value;
+                self.bus.write(system, state, addr, value as u8);
+            },
+            (Instruction::Bcc, Stage::Execute(0)) => {
+                if state.cpu.flag_c == 0 {
+                    let _ = self.bus.read(system, state, addr);
+                } else {
+                    state.cpu.stage = Stage::Fetch;
+                    self.decode(system, state);
+                    return;
+                }
+            },
+            (Instruction::Bcc, Stage::Execute(1)) => {
+                if addr < 0x080 {
+                    if state.cpu.reg_pc & 0xff00 != 
+                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff00) {
+                        let temp = (state.cpu.reg_pc & 0xff00) |
+                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff);
+                        let _ = self.bus.read(system, state, temp as u16);
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
+                    } else {
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
+                        state.cpu.stage = Stage::Fetch;
+                        self.decode(system, state);
+                        return;
+                    }
+                } else {
+                    if state.cpu.reg_pc & 0xff00 != 
+                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
+                             & 0xff00) {
+                        let temp = (state.cpu.reg_pc & 0xff00) |
+                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
+                             & 0xff);
+                        let _ = self.bus.read(system, state, temp as u16);
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
+                            .wrapping_sub(256);
+                    } else {
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
+                            .wrapping_sub(256);
+                        state.cpu.stage = Stage::Fetch;
+                        self.decode(system, state);
+                        return;
+                    }
+                }
+            },
+            (Instruction::Bcs, Stage::Execute(0)) => {
+                if state.cpu.flag_c != 0 {
+                    let _ = self.bus.read(system, state, addr);
+                } else {
+                    state.cpu.stage = Stage::Fetch;
+                    self.decode(system, state);
+                    return;
+                }
+            },
+            (Instruction::Bcs, Stage::Execute(1)) => {
+                if addr < 0x080 {
+                    if state.cpu.reg_pc & 0xff00 != 
+                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff00) {
+                        let temp = (state.cpu.reg_pc & 0xff00) |
+                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff);
+                        let _ = self.bus.read(system, state, temp as u16);
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
+                    } else {
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
+                        state.cpu.stage = Stage::Fetch;
+                        self.decode(system, state);
+                        return;
+                    }
+                } else {
+                    if state.cpu.reg_pc & 0xff00 != 
+                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
+                             & 0xff00) {
+                        let temp = (state.cpu.reg_pc & 0xff00) |
+                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
+                             & 0xff);
+                        let _ = self.bus.read(system, state, temp as u16);
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
+                            .wrapping_sub(256);
+                    } else {
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
+                            .wrapping_sub(256);
+                        state.cpu.stage = Stage::Fetch;
+                        self.decode(system, state);
+                        return;
+                    }
+                }
+            },
+            (Instruction::Beq, Stage::Execute(0)) => {
+                if state.cpu.flag_z == 0 {
+                    let _ = self.bus.read(system, state, addr);
+                } else {
+                    state.cpu.stage = Stage::Fetch;
+                    self.decode(system, state);
+                    return;
+                }
+            },
+            (Instruction::Beq, Stage::Execute(1)) => {
+                if addr < 0x080 {
+                    if state.cpu.reg_pc & 0xff00 != 
+                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff00) {
+                        let temp = (state.cpu.reg_pc & 0xff00) |
+                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff);
+                        let _ = self.bus.read(system, state, temp as u16);
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
+                    } else {
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
+                        state.cpu.stage = Stage::Fetch;
+                        self.decode(system, state);
+                        return;
+                    }
+                } else {
+                    if state.cpu.reg_pc & 0xff00 != 
+                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
+                             & 0xff00) {
+                        let temp = (state.cpu.reg_pc & 0xff00) |
+                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
+                             & 0xff);
+                        let _ = self.bus.read(system, state, temp as u16);
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
+                            .wrapping_sub(256);
+                    } else {
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
+                            .wrapping_sub(256);
+                        state.cpu.stage = Stage::Fetch;
+                        self.decode(system, state);
+                        return;
+                    }
+                }
+            },
+            (Instruction::Bit, Stage::Execute(0)) => {
+                let value = self.bus.read(system, state, addr) as u32;
+                state.cpu.flag_s = value & 0x80;
+                state.cpu.flag_v = (value >> 6) & 1;
+                state.cpu.flag_z = value & state.cpu.reg_a;
+            },
+            (Instruction::Bmi, Stage::Execute(0)) => {
+                if state.cpu.flag_s & 0x80 != 0 {
+                    let _ = self.bus.read(system, state, addr);
+                } else {
+                    state.cpu.stage = Stage::Fetch;
+                    self.decode(system, state);
+                    return;
+                }
+            },
+            (Instruction::Bmi, Stage::Execute(1)) => {
+                if addr < 0x080 {
+                    if state.cpu.reg_pc & 0xff00 != 
+                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff00) {
+                        let temp = (state.cpu.reg_pc & 0xff00) |
+                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff);
+                        let _ = self.bus.read(system, state, temp as u16);
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
+                    } else {
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
+                        state.cpu.stage = Stage::Fetch;
+                        self.decode(system, state);
+                        return;
+                    }
+                } else {
+                    if state.cpu.reg_pc & 0xff00 != 
+                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
+                             & 0xff00) {
+                        let temp = (state.cpu.reg_pc & 0xff00) |
+                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
+                             & 0xff);
+                        let _ = self.bus.read(system, state, temp as u16);
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
+                            .wrapping_sub(256);
+                    } else {
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
+                            .wrapping_sub(256);
+                        state.cpu.stage = Stage::Fetch;
+                        self.decode(system, state);
+                        return;
+                    }
+                }
+            },
+            (Instruction::Bne, Stage::Execute(0)) => {
+                if state.cpu.flag_z != 0 {
+                    let _ = self.bus.read(system, state, addr);
+                } else {
+                    state.cpu.stage = Stage::Fetch;
+                    self.decode(system, state);
+                    return;
+                }
+            },
+            (Instruction::Bne, Stage::Execute(1)) => {
+                if addr < 0x080 {
+                    if state.cpu.reg_pc & 0xff00 != 
+                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff00) {
+                        let temp = (state.cpu.reg_pc & 0xff00) |
+                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff);
+                        let _ = self.bus.read(system, state, temp as u16);
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
+                    } else {
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
+                        state.cpu.stage = Stage::Fetch;
+                        self.decode(system, state);
+                        return;
+                    }
+                } else {
+                    if state.cpu.reg_pc & 0xff00 != 
+                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
+                             & 0xff00) {
+                        let temp = (state.cpu.reg_pc & 0xff00) |
+                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
+                             & 0xff);
+                        let _ = self.bus.read(system, state, temp as u16);
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
+                            .wrapping_sub(256);
+                    } else {
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
+                            .wrapping_sub(256);
+                        state.cpu.stage = Stage::Fetch;
+                        self.decode(system, state);
+                        return;
+                    }
+                }
+            },
+            (Instruction::Bpl, Stage::Execute(0)) => {
+                if state.cpu.flag_s & 0x80 == 0 {
+                    let _ = self.bus.read(system, state, addr);
+                } else {
+                    state.cpu.stage = Stage::Fetch;
+                    self.decode(system, state);
+                    return;
+                }
+            },
+            (Instruction::Bpl, Stage::Execute(1)) => {
+                if addr < 0x080 {
+                    if state.cpu.reg_pc & 0xff00 != 
+                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff00) {
+                        let temp = (state.cpu.reg_pc & 0xff00) |
+                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff);
+                        let _ = self.bus.read(system, state, temp as u16);
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
+                    } else {
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
+                        state.cpu.stage = Stage::Fetch;
+                        self.decode(system, state);
+                        return;
+                    }
+                } else {
+                    if state.cpu.reg_pc & 0xff00 != 
+                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
+                             & 0xff00) {
+                        let temp = (state.cpu.reg_pc & 0xff00) |
+                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
+                             & 0xff);
+                        let _ = self.bus.read(system, state, temp as u16);
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
+                            .wrapping_sub(256);
+                    } else {
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
+                            .wrapping_sub(256);
+                        state.cpu.stage = Stage::Fetch;
+                        self.decode(system, state);
+                        return;
+                    }
+                }
+            },
+            (Instruction::Brk, Stage::Execute(0)) => {
+                let _ = self.bus.read(system, state, addr);
+            },
+            (Instruction::Brk, Stage::Execute(1)) => {
+                let value = state.cpu.reg_pc & 0xff;
+                self.push_stack(system, state, value as u8);
+            },
+            (Instruction::Brk, Stage::Execute(2)) => {
+                let value = state.cpu.reg_pc >> 8 & 0xff;
+                self.push_stack(system, state, value as u8);
+            },
+            (Instruction::Brk, Stage::Execute(3)) => {
+                let value = state.cpu.reg_p() | 0x30;
+                self.push_stack(system, state, value);
+                state.cpu.flag_i = 1;
+            },
+            (Instruction::Brk, Stage::Execute(4)) => {
+                let value = self.bus.read(system, state, 0xfffe);
+                state.cpu.decode_stack.push_back(value);
+            },
+            (Instruction::Brk, Stage::Execute(5)) => {
+                let high_value = self.bus.read(system, state, 0xffff);
+                let value = state.cpu.decode_stack.pop_back().unwrap();
+                state.cpu.reg_pc = value as u32 | ((high_value as u32) <<  0x8);
+            },
+            (Instruction::Bvc, Stage::Execute(0)) => {
+                if state.cpu.flag_v == 0 {
+                    let _ = self.bus.read(system, state, addr);
+                } else {
+                    state.cpu.stage = Stage::Fetch;
+                    self.decode(system, state);
+                    return;
+                }
+            },
+            (Instruction::Bvc, Stage::Execute(1)) => {
+                if addr < 0x080 {
+                    if state.cpu.reg_pc & 0xff00 != 
+                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff00) {
+                        let temp = (state.cpu.reg_pc & 0xff00) |
+                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff);
+                        let _ = self.bus.read(system, state, temp as u16);
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
+                    } else {
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
+                        state.cpu.stage = Stage::Fetch;
+                        self.decode(system, state);
+                        return;
+                    }
+                } else {
+                    if state.cpu.reg_pc & 0xff00 != 
+                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
+                             & 0xff00) {
+                        let temp = (state.cpu.reg_pc & 0xff00) |
+                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
+                             & 0xff);
+                        let _ = self.bus.read(system, state, temp as u16);
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
+                            .wrapping_sub(256);
+                    } else {
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
+                            .wrapping_sub(256);
+                        state.cpu.stage = Stage::Fetch;
+                        self.decode(system, state);
+                        return;
+                    }
+                }
+            },
+            (Instruction::Bvs, Stage::Execute(0)) => {
+                if state.cpu.flag_s != 0 {
+                    let _ = self.bus.read(system, state, addr);
+                } else {
+                    state.cpu.stage = Stage::Fetch;
+                    self.decode(system, state);
+                    return;
+                }
+            },
+            (Instruction::Bvs, Stage::Execute(1)) => {
+                if addr < 0x080 {
+                    if state.cpu.reg_pc & 0xff00 != 
+                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff00) {
+                        let temp = (state.cpu.reg_pc & 0xff00) |
+                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff);
+                        let _ = self.bus.read(system, state, temp as u16);
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
+                    } else {
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
+                        state.cpu.stage = Stage::Fetch;
+                        self.decode(system, state);
+                        return;
+                    }
+                } else {
+                    if state.cpu.reg_pc & 0xff00 != 
+                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
+                             & 0xff00) {
+                        let temp = (state.cpu.reg_pc & 0xff00) |
+                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
+                             & 0xff);
+                        let _ = self.bus.read(system, state, temp as u16);
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
+                            .wrapping_sub(256);
+                    } else {
+                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
+                            .wrapping_sub(256);
+                        state.cpu.stage = Stage::Fetch;
+                        self.decode(system, state);
+                        return;
+                    }
+                }
+            },
+            _ => {
+                state.cpu.stage = Stage::Fetch;
+                self.decode(system, state);
+                return;
+            }
+        }
+        state.cpu.stage = current.1.increment();
     }
 
 }
