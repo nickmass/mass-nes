@@ -79,6 +79,8 @@ pub struct Cpu {
 
 impl Cpu {
     pub fn new(state: &mut SystemState) -> Cpu {
+        state.cpu.reg_pc = 0xc000;
+        
         Cpu {
             bus: AddressBus::new(BusKind::Cpu),
             mem: MemoryBlock::new(2, &mut state.mem),
@@ -112,9 +114,10 @@ impl Cpu {
     }
     
     fn read_pc(&self, system: &System, state: &mut SystemState) -> u8 {
-        let pc = (state.cpu.reg_pc + 1) as u16;
-        state.cpu.reg_pc = pc as u32;
-        self.bus.read(system, state, pc)
+        let pc = state.cpu.reg_pc as u16;
+        let value = self.bus.read(system, state, pc);
+        state.cpu.reg_pc = pc.wrapping_add(1) as u32;
+        value
     }
 
     fn push_stack(&self, system: &System, state: &mut SystemState, value :u8) {
@@ -132,7 +135,11 @@ impl Cpu {
     }
 
     fn decode(&self, system: &System, state: &mut SystemState) {
-        state.cpu.op = self.ops[&self.read_pc(system, state)];
+        let pc = state.cpu.reg_pc;
+        let value = self.read_pc(system, state);
+        println!("{:x} {:x}", pc, value);
+        state.cpu.op = self.ops[&value];
+        state.cpu.stage = Stage::Address(0)
     }
 
     fn addressing(&self, system: &System, state: &mut SystemState) {

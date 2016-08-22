@@ -28,7 +28,7 @@ pub struct System {
     region: Region,
     pub ppu: Ppu,
     pub cpu: Cpu,
-    cartridge: Cartridge,
+    pub cartridge: Cartridge,
 }
 
 impl Machine {
@@ -46,31 +46,36 @@ impl Machine {
     }
 
     pub fn tick(&mut self) {
+        let mut i = 0;
         loop {
-        self.system.cpu.tick(&self.system, &mut self.state);
-        self.system.ppu.tick(&self.system, &mut self.state);
-        self.system.ppu.tick(&self.system, &mut self.state);
-        self.system.ppu.tick(&self.system, &mut self.state);
+            if i > 500 { return; }
+            i += 1;
+            self.system.cpu.tick(&self.system, &mut self.state);
+            self.system.ppu.tick(&self.system, &mut self.state);
+            self.system.ppu.tick(&self.system, &mut self.state);
+            self.system.ppu.tick(&self.system, &mut self.state);
         }
     }
 }
 
 impl System {
     pub fn new(region: Region, cartridge: Cartridge, state: &mut SystemState) -> System {
-        let mut cpu = Cpu::new(state);
-        let mut ppu = Ppu::new(Region::Ntsc);
+        let cpu = Cpu::new(state);
+        let ppu = Ppu::new(Region::Ntsc);
       
-        cpu.register_read(DeviceKind::Ppu, Address(0x2000));
-        cpu.register_write(DeviceKind::Ppu, Address(0x2001));
-        cpu.register_read(DeviceKind::CpuRam, Address(0x00));
-        cpu.register_write(DeviceKind::CpuRam, Address(0x00));
-
-        let system = System {
+        let mut system = System {
             region: region,
             ppu: ppu,
             cpu: cpu,
             cartridge: cartridge,
         };
+
+        system.cpu.register_read(DeviceKind::Ppu, Address(0x2000));
+        system.cpu.register_write(DeviceKind::Ppu, Address(0x2001));
+        system.cpu.register_read(DeviceKind::CpuRam, Address(0x00));
+        system.cpu.register_write(DeviceKind::CpuRam, Address(0x00));
+        system.cartridge.register(&mut system.cpu, &mut system.ppu);
+
 
         system
     }

@@ -2,6 +2,10 @@ use std::io;
 use std::convert::From;
 use std::error;
 use std::fmt;
+use nes::system::{System, SystemState};
+use nes::bus::{AndAndMask, DeviceKind, BusKind};
+use nes::cpu::Cpu;
+use nes::ppu::Ppu;
 
 #[derive(Debug)]
 pub enum CartridgeError {
@@ -49,8 +53,8 @@ enum RomMirrioring {
 
 pub struct Cartridge {
     prg_ram_bytes: usize,
-    prg_rom: Box<Vec<u8>>,
-    chr_rom: Box<Vec<u8>>,
+    prg_rom: Vec<u8>,
+    chr_rom: Vec<u8>,
     mirroring: RomMirrioring,
 }
 
@@ -105,8 +109,8 @@ impl Cartridge {
 
         let cartridge = Cartridge {
             prg_ram_bytes: prg_ram_bytes,
-            prg_rom: Box::new(rom[data_start..prg_rom_end].to_vec()),
-            chr_rom: Box::new(rom[prg_rom_end..chr_rom_end].to_vec()),
+            prg_rom: rom[data_start..prg_rom_end].to_vec(),
+            chr_rom: rom[prg_rom_end..chr_rom_end].to_vec(),
             mirroring: mirroring,
         };
 
@@ -141,5 +145,17 @@ impl Cartridge {
         }
 
         None
+    }
+
+    pub fn register(&self, cpu: &mut Cpu, ppu: &mut Ppu) {
+        cpu.register_read(DeviceKind::Mapper, AndAndMask(0x8000, 0x3fff));
+    }
+
+    pub fn read(&self, bus: BusKind, state: &SystemState, address: u16) -> u8 {
+        self.prg_rom[address as usize]
+    }
+
+    pub fn write(&self, bus: BusKind, state: &SystemState, address: u16, value: u8) {
+        
     }
 }
