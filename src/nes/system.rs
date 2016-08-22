@@ -46,10 +46,12 @@ impl Machine {
     }
 
     pub fn tick(&mut self) {
+        loop {
         self.system.cpu.tick(&self.system, &mut self.state);
         self.system.ppu.tick(&self.system, &mut self.state);
         self.system.ppu.tick(&self.system, &mut self.state);
         self.system.ppu.tick(&self.system, &mut self.state);
+        }
     }
 }
 
