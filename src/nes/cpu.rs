@@ -23,6 +23,8 @@ pub struct CpuState {
     flag_d: u32,
     flag_v: u32,
     flag_s: u32,
+    pending_oam_dma: Option<u8>,
+    oam_dma_buffer: u8,
 }
 
 impl CpuState {
@@ -46,6 +48,10 @@ impl CpuState {
         self.flag_v = val & 0x40;
         self.flag_s = val & 0x80;
     }
+
+    pub fn oam_dma_req(&mut self, addr: u8){
+        self.pending_oam_dma = Some(addr);
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -53,6 +59,7 @@ enum Stage {
     Fetch,
     Address(u32),
     Execute(u32),
+    OamDma(u32),
 }
 
 impl Stage {
@@ -61,6 +68,7 @@ impl Stage {
             Stage::Fetch => unreachable!(),
             Stage::Address(n) => Stage::Address(n + 1),
             Stage::Execute(n) => Stage::Execute(n + 1),
+            Stage::OamDma(n) => Stage::OamDma(n + 1),
         }
     }
 }
@@ -110,6 +118,9 @@ impl Cpu {
             Stage::Execute(_) => {
                 self.operation(system, state);
             },
+            Stage::OamDma(_) => {
+                self.oam_dma(system, state);
+            },
         }
     }
     
@@ -134,7 +145,33 @@ impl Cpu {
         self.bus.read(system, state, addr)
     }
 
+    fn oam_dma(&self, system: &System, state: &mut SystemState) {
+        let high_addr = state.cpu.pending_oam_dma.unwrap();
+        let high_addr = (high_addr as u16) << 8;
+        match state.cpu.stage {
+            Stage::OamDma(c) if c % 2 == 0 => {
+                state.cpu.oam_dma_buffer = 
+                    self.bus.read(system, state, ((c / 2) as u16) | high_addr);
+                state.cpu.stage = state.cpu.stage.increment();
+            },
+            Stage::OamDma(c) if c % 2 == 1 => {
+                let value = state.cpu.oam_dma_buffer;
+                self.bus.write(system, state, ((c / 2) as u16) | high_addr, value);
+                if c == 511 {
+                    state.cpu.stage = Stage::Fetch;
+                } else {
+                    state.cpu.stage = state.cpu.stage.increment();
+                }
+            },
+            _ => unreachable!(),
+        }
+    }
+
     fn decode(&self, system: &System, state: &mut SystemState) {
+        if state.cpu.pending_oam_dma.is_some() {
+            state.cpu.stage = Stage::OamDma(0);
+            self.oam_dma(system, state);
+        };
         let pc = state.cpu.reg_pc;
         let value = self.read_pc(system, state);
         print!("\n{:04X} {:X}  A:{:X} X:{:X} Y:{:X} P:{:X}", pc, value, state.cpu.reg_a

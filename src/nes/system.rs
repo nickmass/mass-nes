@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use nes::bus::{AndEqualsAndMask, NotAndMask, Address, DeviceKind, AddressBus};
+use nes::bus::{RangeAndMask, AndEqualsAndMask, NotAndMask, Address, DeviceKind, AddressBus};
 use nes::cpu::{Cpu, CpuState};
 use nes::ppu::{Ppu, PpuState};
 use nes::cartridge::{Cartridge, CartridgeError};
@@ -70,12 +70,13 @@ impl System {
             cartridge: cartridge,
         };
 
-        system.cpu.register_read(DeviceKind::Ppu, Address(0x2000));
-        system.cpu.register_write(DeviceKind::Ppu, Address(0x2001));
         system.cpu.register_read(DeviceKind::CpuRam,
                                  NotAndMask(0x7ff));
         system.cpu.register_write(DeviceKind::CpuRam,
                                  NotAndMask(0x7ff));
+        system.cpu.register_read(DeviceKind::Ppu, RangeAndMask(0x2000, 0x4000, 0x7));
+        system.cpu.register_write(DeviceKind::Ppu, RangeAndMask(0x2000, 0x4000, 0x7));
+        system.cpu.register_write(DeviceKind::Ppu, Address(0x4014));
         system.ppu.register_read(DeviceKind::PpuRam, 
                                  AndEqualsAndMask(0x2800, 0x2000, 0x7ff));
         system.ppu.register_write(DeviceKind::PpuRam,

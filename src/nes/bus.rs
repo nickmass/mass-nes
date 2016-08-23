@@ -54,7 +54,7 @@ impl AddressBus {
             Some(h) => {
                 match h.1 {
                     DeviceKind::CpuRam => system.cpu.mem.read(self.kind, state, h.0),
-                    DeviceKind::Ppu => system.ppu.read(self.kind, state, h.0),
+                    DeviceKind::Ppu => system.ppu.read(self.kind, system, state, h.0),
                     DeviceKind::PpuRam => system.ppu.mem.read(self.kind, state, h.0),
                     DeviceKind::Mapper => system.cartridge.read(self.kind, state, h.0),
                     _ => unimplemented!(),
@@ -75,8 +75,8 @@ impl AddressBus {
         match self.registered_writes.get(&addr) {
             Some(h) => {
                 match h.1  {
-                    DeviceKind::CpuRam => system.cpu.mem.write(self.kind, state, h.0, value),
-                    DeviceKind::Ppu => system.ppu.write(self.kind, state, h.0, value),
+                    DeviceKind::CpuRam => system.cpu.mem.write(self.kind,  state, h.0, value),
+                    DeviceKind::Ppu => system.ppu.write(self.kind, system, state, h.0, value),
                     DeviceKind::PpuRam => system.ppu.mem.write(self.kind, state, h.0, value),
                     DeviceKind::Mapper => system.cartridge.write(self.kind, state, h.0, value),
                     _ => unimplemented!(),
@@ -128,6 +128,18 @@ pub struct AndEqualsAndMask(pub u16, pub u16, pub u16);
 impl AddressValidator for AndEqualsAndMask {
     fn is_valid(&self, addr: u16) -> Option<u16> {
         if addr & self.0 == self.1 {
+            Some(addr & self.2)
+        } else {
+            None
+        }
+    }
+}
+
+pub struct RangeAndMask(pub u16, pub u16, pub u16);
+
+impl AddressValidator for RangeAndMask {
+    fn is_valid(&self, addr: u16) -> Option<u16> {
+        if addr >= self.0 && addr < self.1 {
             Some(addr & self.2)
         } else {
             None
