@@ -156,7 +156,7 @@ impl Cpu {
             },
             Stage::OamDma(c) if c % 2 == 1 => {
                 let value = state.cpu.oam_dma_buffer;
-                self.bus.write(system, state, ((c / 2) as u16) | high_addr, value);
+                self.bus.write(system, state, 0x4014, value);
                 if c == 511 {
                     state.cpu.stage = Stage::Fetch;
                 } else {
