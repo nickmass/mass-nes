@@ -73,7 +73,7 @@ impl Cartridge {
     }
 
     fn load_ines(rom: &Vec<u8>) -> Result<Cartridge, CartridgeError> {
-        println!("INES");
+        //println!("INES");
         if rom.len() < 16 {
             return Err(CartridgeError::CorruptedFile);
         }
@@ -114,7 +114,7 @@ impl Cartridge {
             mirroring: mirroring,
         };
 
-        println!("PRGROM: {}, CHRROM: {}, Mapper: {}", prg_rom_bytes, chr_rom_bytes, mapper_number);
+        //println!("PRGROM: {}, CHRROM: {}, Mapper: {}", prg_rom_bytes, chr_rom_bytes, mapper_number);
         Ok(cartridge)
     }
 

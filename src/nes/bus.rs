@@ -9,7 +9,7 @@ pub enum BusKind {
     Ppu,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum DeviceKind {
     CpuRam,
     PpuRam,
@@ -60,7 +60,9 @@ impl AddressBus {
                     _ => unimplemented!(),
                 }
             },
-            None => 0xff
+            None => {
+                0xFF
+            }
         }
 
     }
@@ -109,6 +111,18 @@ impl AddressValidator for AndAndMask {
     }
 }
 
+pub struct NotAndMask(pub u16);
+
+impl AddressValidator for NotAndMask {
+    fn is_valid(&self, addr: u16) -> Option<u16> {
+        if addr & (!self.0) == 0 {
+            Some(addr & self.0)
+        } else {
+            None
+        }
+    }
+}
+
 pub trait AddressValidator {
     fn is_valid(&self, u16) -> Option<u16>;
 
@@ -119,14 +133,14 @@ pub trait AddressValidator {
 
 pub struct AddressIterator<'a, T: 'a + AddressValidator> {
     addr_val: &'a T,
-    state: u32
+    state: i32
 }
 
 impl<'a, T: AddressValidator> AddressIterator<'a, T> {
     fn new(val: &'a T) -> AddressIterator<'a, T>  {
         AddressIterator { 
             addr_val: val,
-            state: 0,
+            state: -1,
         }
     }
 }

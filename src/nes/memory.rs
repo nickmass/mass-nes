@@ -23,7 +23,7 @@ impl Pages {
 
     pub fn alloc_kb(&mut self, kb: usize) -> Page {
         let start = self.data.len();
-        let end = start + (kb * 0x200);
+        let end = start + (kb * 0x400);
         self.data.resize(end, 0);
         Page { start: start, end: end }
     }
@@ -46,7 +46,7 @@ impl MemoryBlock {
     pub fn new(kb: usize, pages: &mut Pages) -> MemoryBlock {
         MemoryBlock {
             kb: kb,
-            page: pages.alloc_kb(2),
+            page: pages.alloc_kb(kb),
         }
     }
 

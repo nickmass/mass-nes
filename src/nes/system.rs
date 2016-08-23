@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use nes::bus::{Address, DeviceKind, AddressBus};
+use nes::bus::{NotAndMask, Address, DeviceKind, AddressBus};
 use nes::cpu::{Cpu, CpuState};
 use nes::ppu::{Ppu, PpuState};
 use nes::cartridge::{Cartridge, CartridgeError};
@@ -48,7 +48,7 @@ impl Machine {
     pub fn tick(&mut self) {
         let mut i = 0;
         loop {
-            if i > 500 { return; }
+            if i > 30000 { return; }
             i += 1;
             self.system.cpu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
@@ -72,8 +72,10 @@ impl System {
 
         system.cpu.register_read(DeviceKind::Ppu, Address(0x2000));
         system.cpu.register_write(DeviceKind::Ppu, Address(0x2001));
-        system.cpu.register_read(DeviceKind::CpuRam, Address(0x00));
-        system.cpu.register_write(DeviceKind::CpuRam, Address(0x00));
+        system.cpu.register_read(DeviceKind::CpuRam,
+                                 NotAndMask(0x7ff));
+        system.cpu.register_write(DeviceKind::CpuRam,
+                                 NotAndMask(0x7ff));
         system.cartridge.register(&mut system.cpu, &mut system.ppu);
 
 
