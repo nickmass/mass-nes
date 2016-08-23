@@ -1,6 +1,7 @@
 use std::rc::Rc;
 use nes::bus::{AddressValidator, AddressBus, BusKind, DeviceKind, Address};
 use nes::system::{Region, SystemState, System};
+use nes::memory::MemoryBlock;
 
 #[derive(Default)]
 pub struct PpuState {
@@ -9,14 +10,16 @@ pub struct PpuState {
 
 pub struct Ppu {
     region: Region,
+    pub mem: MemoryBlock,
     bus: AddressBus,
 }
 
 impl Ppu {
-    pub fn new(region: Region) -> Ppu {
+    pub fn new(region: Region, state: &mut SystemState) -> Ppu {
         let ppu = Ppu {
             region: region,
             bus: AddressBus::new(BusKind::Ppu),
+            mem: MemoryBlock::new(2, &mut state.mem),
         };
 
         ppu
@@ -31,7 +34,6 @@ impl Ppu {
     }
 
     pub fn read(&self, bus: BusKind, state: &mut SystemState, address: u16) -> u8 {
-        println!("IN PPU");
         0
     }
 

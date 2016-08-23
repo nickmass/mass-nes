@@ -3,7 +3,7 @@ use std::convert::From;
 use std::error;
 use std::fmt;
 use nes::system::{System, SystemState};
-use nes::bus::{AndAndMask, DeviceKind, BusKind};
+use nes::bus::{NotAndMask, AndAndMask, DeviceKind, BusKind};
 use nes::cpu::Cpu;
 use nes::ppu::Ppu;
 
@@ -73,7 +73,7 @@ impl Cartridge {
     }
 
     fn load_ines(rom: &Vec<u8>) -> Result<Cartridge, CartridgeError> {
-        //println!("INES");
+        println!("INES");
         if rom.len() < 16 {
             return Err(CartridgeError::CorruptedFile);
         }
@@ -114,7 +114,7 @@ impl Cartridge {
             mirroring: mirroring,
         };
 
-        //println!("PRGROM: {}, CHRROM: {}, Mapper: {}", prg_rom_bytes, chr_rom_bytes, mapper_number);
+        println!("PRGROM: {}, CHRROM: {}, Mapper: {}", prg_rom_bytes, chr_rom_bytes, mapper_number);
         Ok(cartridge)
     }
 
@@ -149,10 +149,14 @@ impl Cartridge {
 
     pub fn register(&self, cpu: &mut Cpu, ppu: &mut Ppu) {
         cpu.register_read(DeviceKind::Mapper, AndAndMask(0x8000, 0x3fff));
+        ppu.register_read(DeviceKind::Mapper, NotAndMask(0x1fff));
     }
 
     pub fn read(&self, bus: BusKind, state: &SystemState, address: u16) -> u8 {
-        self.prg_rom[address as usize]
+        match bus {
+            BusKind::Cpu => self.prg_rom[address as usize],
+            BusKind::Ppu => self.chr_rom[address as usize],
+        }
     }
 
     pub fn write(&self, bus: BusKind, state: &SystemState, address: u16, value: u8) {

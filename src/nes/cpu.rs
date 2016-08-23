@@ -159,7 +159,6 @@ impl Cpu {
                 state.cpu.op_addr = state.cpu.reg_pc as u16;
                 let add = state.cpu.op_addr;
                 let value = self.bus.read(system, state, add);
-                print!(" Im{:X} Val{:X}", state.cpu.op_addr, value);
                 state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(1);
                 state.cpu.stage = Stage::Execute(0);
                 self.operation(system, state);
@@ -248,7 +247,6 @@ impl Cpu {
                         .wrapping_add(state.cpu.reg_y as u16);
                     let a = state.cpu.op_addr;
                     let v = self.bus.read(system, state, a);
-                    print!("ABS Y {:X} = {:X}", a, v);
                     state.cpu.stage = Stage::Execute(0);
                     self.operation(system, state);
                     return;
@@ -328,21 +326,16 @@ impl Cpu {
             },
             (Addressing::IndirectX, Stage::Address(2)) => {
                 let a = state.cpu.op_addr;
-                print!(" IndirectX{:X} ", a);
                 let v = self.bus.read(system, state, 0);
-                print!(" 0x00:{:X} ", v);
                 let a = self.bus.read(system, state, a);
                 state.cpu.decode_stack.push_back(a);
-                print!(" IndirectX{:X} ", a);
             },
             (Addressing::IndirectX, Stage::Address(3)) => {
                 let a = (state.cpu.op_addr & 0xff00) |
                     (state.cpu.op_addr.wrapping_add(1) & 0xff);
-                print!(" IndirectX{:X} ", a);
                 let a = (self.bus.read(system, state, a) as u16) << 8;
                 state.cpu.op_addr = a
                     | state.cpu.decode_stack.pop_back().unwrap() as u16;
-                print!(" IndirectX{:X} ", state.cpu.op_addr);
             },
             (Addressing::IndirectY, Stage::Address(0)) => {
                 let a = self.read_pc(system, state);
@@ -350,17 +343,13 @@ impl Cpu {
             },
             (Addressing::IndirectY, Stage::Address(1)) => {
                 let a = state.cpu.op_addr;
-                print!(" IndirectY{:X} ", a);
                 let a = self.bus.read(system, state, a);
-                print!(" IndirectY{:X} ", a);
                 state.cpu.decode_stack.push_back(a);
             },
             (Addressing::IndirectY, Stage::Address(2)) => {
                 let a = (state.cpu.op_addr & 0xff00) |
                     (state.cpu.op_addr.wrapping_add(1) & 0xff);
-                print!(" IndirectY{:X} ", a);
                 let a = self.bus.read(system, state, a);
-                print!(" IndirectY{:X} ", a);
                 let a_low = state.cpu.decode_stack.pop_back().unwrap();
                 state.cpu.decode_stack.push_back(a);
                 state.cpu.decode_stack.push_back(a_low);
@@ -387,17 +376,13 @@ impl Cpu {
             },
             (Addressing::IndirectYDummyAlways, Stage::Address(1)) => {
                 let a = state.cpu.op_addr;
-                print!(" IndirectY{:X} ", a);
                 let a = self.bus.read(system, state, a);
-                print!(" IndirectY{:X} ", a);
                 state.cpu.decode_stack.push_back(a);
             },
             (Addressing::IndirectYDummyAlways, Stage::Address(2)) => {
                 let a = (state.cpu.op_addr & 0xff00) |
                     (state.cpu.op_addr.wrapping_add(1) & 0xff);
-                print!(" IndirectY{:X} ", a);
                 let a = self.bus.read(system, state, a);
-                print!(" IndirectY{:X} ", a);
                 let a_low = state.cpu.decode_stack.pop_back().unwrap();
                 state.cpu.decode_stack.push_back(a);
                 state.cpu.decode_stack.push_back(a_low);
@@ -1143,7 +1128,6 @@ impl Cpu {
                 let temp_a = state.cpu.reg_a as i32;
                 let temp = temp_a.wrapping_sub(
                             value.wrapping_sub(state.cpu.flag_c as i32 - 1));
-                print!("SBC_TEMP{:X}", temp);
                 state.cpu.flag_v = (((temp_a ^ value) &
                                  (temp_a ^ temp)) >> 7) as u32 & 1;
                 state.cpu.flag_c  = if temp < 0 { 0 } else { 1 };
