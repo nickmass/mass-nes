@@ -52,7 +52,7 @@ impl Default for PpuState {
 
             current_frame: Default::default(),
             current_line: Default::default(),
-            stage: Stage::Dot(0),
+            stage: Stage::Dot(0,0),
 
             palette_data: Default::default(),
         }
@@ -107,14 +107,58 @@ impl PpuState {
 }
 
 enum Stage {
-    Vblank(u32),
-    Hblank(u32),
-    Dot(u32),
+    Vblank(i32, u32),
+    Hblank(i32, u32),
+    Dot(i32, u32),
+    Prerender(i32, u32),
+}
+
+impl Stage {
+    fn increment(&self) -> Stage {
+        match *self {
+            Stage::Prerender(s, d) => {
+                if d == 341 {
+                    Stage::Dot(0, 0)
+                } else {
+                    Stage::Prerender(s, d + 1)
+                }
+            },
+            Stage::Vblank(s, d) => {
+                if d == 341 {
+                    if s == 260 {
+                        Stage::Prerender(261, 0)
+                    } else {
+                        Stage::Vblank(s + 1, 0)
+                    }
+                } else {
+                    Stage::Vblank(s, d + 1)
+                }
+            },
+            Stage::Hblank(s, d) => {
+                if d == 341 {
+                    if s == 239 {
+                        Stage::Vblank(s + 1, 0)
+                    } else {
+                        Stage::Hblank(s + 1, 0)
+                    }
+                } else {
+                    Stage::Hblank(s, d + 1)
+                }
+            },
+            Stage::Dot(s, d) => {
+                if d == 255 {
+                    Stage::Hblank(s, d + 1)
+                } else {
+                    Stage::Dot(s, d + 1)
+                }
+            },
+        }
+    }
 }
 
 impl Default for Stage {
     fn default() -> Stage {
-        Stage::Dot(0)
+        Stage::Dot(0,0)
     }
 }
 
@@ -219,5 +263,18 @@ impl Ppu {
 
     pub fn tick(&self, system: &System, state: &mut SystemState) {
         state.ppu.current_tick += 1;
+        match state.ppu.stage {
+            Stage::Vblank(241,1) => {
+                state.ppu.vblank = true;
+                if state.ppu.is_nmi_enabled() {
+                    state.cpu.nmi_req();
+                }
+            },
+            Stage::Prerender(261, 1) => {
+                state.ppu.vblank = false;
+            },
+            _ => {}
+        }
+        state.ppu.stage = state.ppu.stage.increment();
     }
 }

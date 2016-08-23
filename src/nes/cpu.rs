@@ -25,6 +25,8 @@ pub struct CpuState {
     flag_s: u32,
     pending_oam_dma: Option<u8>,
     oam_dma_buffer: u8,
+
+    pending_nmi: bool,
 }
 
 impl CpuState {
@@ -52,6 +54,10 @@ impl CpuState {
     pub fn oam_dma_req(&mut self, addr: u8){
         self.pending_oam_dma = Some(addr);
     }
+
+    pub fn nmi_req(&mut self) {
+        self.pending_nmi = true;
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -60,6 +66,7 @@ enum Stage {
     Address(u32),
     Execute(u32),
     OamDma(u32),
+    Nmi(u32),
 }
 
 impl Stage {
@@ -69,6 +76,13 @@ impl Stage {
             Stage::Address(n) => Stage::Address(n + 1),
             Stage::Execute(n) => Stage::Execute(n + 1),
             Stage::OamDma(n) => Stage::OamDma(n + 1),
+            Stage::Nmi(n) => {
+                if n == 6 {
+                    Stage::Fetch
+                } else {
+                    Stage::Nmi(n + 1)
+                }
+            }
         }
     }
 }
@@ -108,6 +122,11 @@ impl Cpu {
 
     pub fn tick(&self, system: &System, state: &mut SystemState) {
         state.cpu.current_tick += 1;
+        if state.cpu.pending_nmi {
+            state.cpu.decode_stack.clear();
+            state.cpu.stage = Stage::Nmi(0);
+            state.cpu.pending_nmi = false;
+        }
         match state.cpu.stage {
             Stage::Fetch => {
                 self.decode(system, state);
@@ -120,6 +139,9 @@ impl Cpu {
             },
             Stage::OamDma(_) => {
                 self.oam_dma(system, state);
+            },
+            Stage::Nmi(_) => {
+                self.nmi(system, state);
             },
         }
     }
@@ -165,6 +187,44 @@ impl Cpu {
             },
             _ => unreachable!(),
         }
+    }
+
+    fn nmi(&self, system: &System, state: &mut SystemState) {
+        match state.cpu.stage {
+            Stage::Nmi(0) => {
+                let addr = state.cpu.reg_pc as u16;
+                self.bus.read(system, state, addr);
+            },
+            Stage::Nmi(1) => {
+                let addr = state.cpu.reg_pc as u16;
+                self.bus.read(system, state, addr);
+            },
+            Stage::Nmi(2) => {
+                let val = (state.cpu.reg_pc >> 8) & 0xff;
+                self.push_stack(system, state, val as u8);
+            },
+            Stage::Nmi(3) => {
+                let val = state.cpu.reg_pc & 0xff;
+                self.push_stack(system, state, val as u8);
+            },
+            Stage::Nmi(4) => {
+                let val = state.cpu.reg_p() | 0x20;
+                self.push_stack(system, state, val);
+            },
+            Stage::Nmi(5) => {
+                let val = self.bus.read(system, state, 0xfffa);
+                state.cpu.reg_pc &= 0xff00;
+                state.cpu.reg_pc |= val as u32;
+                state.cpu.flag_i = 1;
+            },
+            Stage::Nmi(6) => {
+                let val = self.bus.read(system, state, 0xfffb) as u16;
+                state.cpu.reg_pc &= 0x00ff;
+                state.cpu.reg_pc |= (val << 8) as u32;
+            }
+            _ => unreachable!(),
+        }
+        state.cpu.stage = state.cpu.stage.increment();
     }
 
     fn decode(&self, system: &System, state: &mut SystemState) {
