@@ -12,11 +12,11 @@ pub struct CpuState {
     decode_stack: VecDeque<u8>,
     op_addr: u16,
     op: Op,
-    reg_a: u32,
-    reg_x: u32,
-    reg_y: u32,
-    reg_pc: u32,
-    reg_sp: u32,
+    pub reg_a: u32,
+    pub reg_x: u32,
+    pub reg_y: u32,
+    pub reg_pc: u32,
+    pub reg_sp: u32,
     flag_c: u32,
     flag_z: u32,
     flag_i: u32,
@@ -30,7 +30,7 @@ pub struct CpuState {
 }
 
 impl CpuState {
-    fn reg_p(&self) -> u8 {
+    pub fn reg_p(&self) -> u8 {
         let mut val = 0;
         if self.flag_c != 0 { val |= 0x01; }
         if self.flag_z == 0 { val |= 0x02; }
@@ -94,7 +94,7 @@ impl Default for Stage {
 }
 
 pub struct Cpu {
-    bus: AddressBus,
+    pub bus: AddressBus,
     pub mem: MemoryBlock,
     ops: HashMap<u8, Op>,
 }
@@ -234,8 +234,7 @@ impl Cpu {
         };
         let pc = state.cpu.reg_pc;
         let value = self.read_pc(system, state);
-        print!("\n{:04X} {:X}  A:{:X} X:{:X} Y:{:X} P:{:X}", pc, value, state.cpu.reg_a
-               , state.cpu.reg_x, state.cpu.reg_y, state.cpu.reg_p());
+        println!("{}", system.debug.trace_instruction(system, state, pc as u16));
         state.cpu.op = self.ops[&value];
         state.cpu.stage = Stage::Address(0)
     }

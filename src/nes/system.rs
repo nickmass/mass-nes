@@ -4,6 +4,7 @@ use nes::cpu::{Cpu, CpuState};
 use nes::ppu::{Ppu, PpuState};
 use nes::cartridge::{Cartridge, CartridgeError};
 use nes::{Pages, MemoryBlock};
+use nes::debug::Debug;
 
 use std::io::Read;
 
@@ -30,6 +31,7 @@ pub struct System {
     pub ppu: Ppu,
     pub cpu: Cpu,
     pub cartridge: Cartridge,
+    pub debug: Debug,
 }
 
 impl Machine {
@@ -49,7 +51,7 @@ impl Machine {
     pub fn tick(&mut self) {
         let mut i = 0;
         loop {
-            if i > 100{ return; }
+            if i > 1000{ return; }
             i += 1;
             self.system.cpu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
@@ -69,6 +71,7 @@ impl System {
             ppu: ppu,
             cpu: cpu,
             cartridge: cartridge,
+            debug: Debug::new(),
         };
 
         system.cpu.register_read(state, DeviceKind::CpuRam,

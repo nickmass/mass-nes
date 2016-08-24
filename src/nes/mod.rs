@@ -5,5 +5,6 @@ mod ppu;
 mod cartridge;
 mod memory;
 mod ops;
+mod debug;
 
 pub use self::memory::{Pages, MemoryBlock};
