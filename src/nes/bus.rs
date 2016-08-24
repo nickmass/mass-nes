@@ -142,7 +142,7 @@ impl AddressBus {
                 }
             },
             None => {
-                0xFF
+                0xff
             }
         }
     }
@@ -161,7 +161,7 @@ impl AddressBus {
                 }
             },
             None => {
-                0xFF
+                0xff
             }
         }
     }
@@ -184,11 +184,11 @@ impl AddressBus {
     }
 
     pub fn peek_word(&self, system: &System, state: &SystemState, addr: u16) -> u16 {
-        (self.peek(system, state, addr) as u16) << 8 | self.peek(system, state, addr + 1) as u16
+        (self.peek(system, state, addr) as u16) | (self.peek(system, state, addr + 1) as u16) << 8
     }
 
     pub fn read_word(&self, system: &System, state: &mut SystemState, addr: u16) -> u16 {
-        (self.read(system, state, addr) as u16) << 8 | self.read(system, state, addr + 1) as u16
+        (self.read(system, state, addr) as u16) | (self.read(system, state, addr + 1) as u16) << 8
     }
 }
 

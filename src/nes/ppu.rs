@@ -6,7 +6,7 @@ use nes::memory::MemoryBlock;
 pub struct PpuState {
     current_tick: u64,
     regs: [u8;8],
-    vblank: bool,
+    pub vblank: bool,
     sprite_zero_hit: bool,
     sprite_overflow: bool,
     last_write: u8,
@@ -42,7 +42,7 @@ pub struct PpuState {
     low_attr_shift: u8,
     high_attr_shift: u8,
 
-    screen: [u8;256*240],
+    pub screen: [u8;256*240],
 }
 
 impl Default for PpuState {
@@ -138,10 +138,10 @@ impl PpuState {
 }
 
 enum Stage {
-    Vblank(i32, u32),
-    Hblank(i32, u32),
-    Dot(i32, u32),
-    Prerender(i32, u32),
+    Vblank(u32, u32),
+    Hblank(u32, u32),
+    Dot(u32, u32),
+    Prerender(u32, u32),
 }
 
 impl Stage {
@@ -170,7 +170,7 @@ impl Stage {
                     if s == 239 {
                         Stage::Vblank(s + 1, 0)
                     } else {
-                        Stage::Hblank(s + 1, 0)
+                        Stage::Dot(s + 1, 0)
                     }
                 } else {
                     Stage::Hblank(s, d + 1)
@@ -328,84 +328,84 @@ impl Ppu {
     pub fn tick(&self, system: &System, state: &mut SystemState) {
         state.ppu.current_tick += 1;
         match state.ppu.stage {
-            Stage::Prerender(261, 1) => {
+            Stage::Prerender(1, 261) => {
                 state.ppu.vblank = false;
                 self.fetch_nametable(system, state);
             },
-            Stage::Prerender(c, s) if c % 8 == 1 && c < 256 => {
+            Stage::Prerender(s, c) if c % 8 == 1 && c < 256 => {
                 self.fetch_nametable(system, state);
             },
-            Stage::Prerender(c, s) if c % 8 == 3 && c < 256 => {
+            Stage::Prerender(s, c) if c % 8 == 3 && c < 256 => {
                 self.fetch_attribute(system, state);
             },
-            Stage::Prerender(c, s) if c % 8 == 5 && c < 256 => {
+            Stage::Prerender(s, c) if c % 8 == 5 && c < 256 => {
                 self.fetch_low_bg_pattern(system, state);
             },
-            Stage::Prerender(c, s) if c % 8 == 7 && c < 256 => {
+            Stage::Prerender(s, c) if c % 8 == 7 && c < 256 => {
                 self.fetch_high_bg_pattern(system, state);
             },
-            Stage::Prerender(c, s) if c % 8 == 0 && c != 0 && c < 256 => {
+            Stage::Prerender(s, c) if c % 8 == 0 && c != 0 && c < 256 => {
                 self.horz_increment(state);
                 self.load_bg_shifters(state);
             },
-            Stage::Prerender(c, s) if c >= 280 && c <= 304 => {
+            Stage::Prerender(s, c) if c >= 280 && c <= 304 => {
                 self.vert_reset(state);
             },
-            Stage::Prerender(c, s) if c  == 321 || c == 329 || c == 337 || c == 339 => {
+            Stage::Prerender(s, c) if c  == 321 || c == 329 || c == 337 || c == 339 => {
                 self.fetch_nametable(system, state);
             },
-            Stage::Prerender(c, s) if c == 323 || c == 331  => {
+            Stage::Prerender(s, c) if c == 323 || c == 331  => {
                 self.fetch_attribute(system, state);
             },
-            Stage::Prerender(c, s) if c == 325 || c == 333 => {
+            Stage::Prerender(s, c) if c == 325 || c == 333 => {
                 self.fetch_low_bg_pattern(system, state);
             },
-            Stage::Prerender(c, s) if c == 327 || c == 335 => {
+            Stage::Prerender(s, c) if c == 327 || c == 335 => {
                 self.fetch_high_bg_pattern(system, state);
             },
-            Stage::Prerender(c, s) if c == 328 || c == 336 => {
+            Stage::Prerender(s, c) if c == 328 || c == 336 => {
                 self.horz_increment(state);
                 self.load_bg_shifters(state);
             },
-            Stage::Dot(c, s) if c % 8 == 1 => {
+            Stage::Dot(s, c) if c % 8 == 1 => {
                 self.fetch_nametable(system, state);
             },
-            Stage::Dot(c, s) if c % 8 == 3 => {
+            Stage::Dot(s, c) if c % 8 == 3 => {
                 self.fetch_attribute(system, state);
             },
-            Stage::Dot(c, s) if c % 8 == 5 => {
+            Stage::Dot(s, c) if c % 8 == 5 => {
                 self.fetch_low_bg_pattern(system, state);
             },
-            Stage::Dot(c, s) if c % 8 == 7 => {
+            Stage::Dot(s, c) if c % 8 == 7 => {
                 self.fetch_high_bg_pattern(system, state);
             },
-            Stage::Dot(c, s) if c % 8 == 0 && c != 0 => {
+            Stage::Dot(s, c) if c % 8 == 0 && c != 0 => {
                 self.horz_increment(state);
                 self.load_bg_shifters(state);
             },
-            Stage::Hblank(c, s) if c  == 321 || c == 329 || c == 337 || c == 339 => {
+            Stage::Hblank(s, c) if c  == 321 || c == 329 || c == 337 || c == 339 => {
                 self.fetch_nametable(system, state);
             },
-            Stage::Hblank(c, s) if c == 323 || c == 331  => {
+            Stage::Hblank(s, c) if c == 323 || c == 331  => {
                 self.fetch_attribute(system, state);
             },
-            Stage::Hblank(c, s) if c == 325 || c == 333 => {
+            Stage::Hblank(s, c) if c == 325 || c == 333 => {
                 self.fetch_low_bg_pattern(system, state);
             },
-            Stage::Hblank(c, s) if c == 327 || c == 335 => {
+            Stage::Hblank(s, c) if c == 327 || c == 335 => {
                 self.fetch_high_bg_pattern(system, state);
             },
-            Stage::Hblank(c, s) if c == 328 || c == 336 => {
+            Stage::Hblank(s, c) if c == 328 || c == 336 => {
                 self.horz_increment(state);
                 self.load_bg_shifters(state);
             },
-            Stage::Hblank(256, s) => {
+            Stage::Hblank(s, 256) => {
                 self.vert_increment(state);
             },
-            Stage::Hblank(257, s) => {
+            Stage::Hblank(s, 257) => {
                 self.horz_reset(state);
             },
-            Stage::Vblank(241,1) => {
+            Stage::Vblank(241, 1) => {
                 state.ppu.vblank = true;
                 if state.ppu.is_nmi_enabled() {
                     state.cpu.nmi_req();
@@ -415,7 +415,7 @@ impl Ppu {
         }
 
         match state.ppu.stage {
-            Stage::Dot(c, s) => {
+            Stage::Dot(s, c) => {
                 self.render(system, state, c, s);
             },
             _ => {}
@@ -424,7 +424,7 @@ impl Ppu {
         state.ppu.stage = state.ppu.stage.increment();
     }
 
-    fn render(&self, system: &System, state: &mut SystemState, dot: i32, scanline: u32) {
+    fn render(&self, system: &System, state: &mut SystemState, dot: u32, scanline: u32) {
         let color = (((state.ppu.low_bg_shift >> 15) & 0x1) |
             ((state.ppu.high_bg_shift >> 14) & 0x2)) as u16;
         let attr = ((((state.ppu.low_attr_shift >> 7) & 0x1) |
@@ -432,8 +432,9 @@ impl Ppu {
 
         let palette = color | attr | 0x3f00;
 
-        let bg_result = self.bus.read(system, state, palette);
-        state.ppu.screen[((scanline / 256) + dot as u32) as usize] = bg_result;
+        let bg_result = state.ppu.palette_data[(palette & 0x1f) as usize];
+        
+        state.ppu.screen[((scanline * 256) + dot) as usize] = bg_result;
 
         state.ppu.low_attr_shift <<= 1;
         state.ppu.high_attr_shift <<= 1;

@@ -1,4 +1,4 @@
-pub mod system;
+mod system;
 mod bus;
 mod cpu;
 mod ppu;
@@ -7,4 +7,5 @@ mod memory;
 mod ops;
 mod debug;
 
-pub use self::memory::{Pages, MemoryBlock};
+pub use self::cartridge::Cartridge;
+pub use self::system::*;

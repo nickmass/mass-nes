@@ -101,13 +101,16 @@ pub struct Cpu {
 
 impl Cpu {
     pub fn new(state: &mut SystemState) -> Cpu {
-        state.cpu.reg_pc = 0xc000;
         state.cpu.reg_sp = 0xfd; 
         Cpu {
             bus: AddressBus::new(BusKind::Cpu, state, 0),
             mem: MemoryBlock::new(2, &mut state.mem),
             ops: Op::load(),
         }
+    }
+    
+    pub fn power(&self, system: &System, state: &mut SystemState) {
+        state.cpu.reg_pc = self.bus.read_word(system, state, 0xfffc) as u32;
     }
 
     pub fn register_read<T>(&mut self, state: &mut SystemState, device: DeviceKind, addr: T)
@@ -234,7 +237,7 @@ impl Cpu {
         };
         let pc = state.cpu.reg_pc;
         let value = self.read_pc(system, state);
-        println!("{}", system.debug.trace_instruction(system, state, pc as u16));
+        //println!("{}", system.debug.trace_instruction(system, state, pc as u16));
         state.cpu.op = self.ops[&value];
         state.cpu.stage = Stage::Address(0)
     }
