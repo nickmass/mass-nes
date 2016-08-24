@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use nes::bus::{RangeAndMask, AndEqualsAndMask, NotAndMask, Address, DeviceKind, AddressBus};
+use nes::bus::{DeviceMappings, RangeAndMask, AndEqualsAndMask, NotAndMask, Address, DeviceKind, AddressBus};
 use nes::cpu::{Cpu, CpuState};
 use nes::ppu::{Ppu, PpuState};
 use nes::cartridge::{Cartridge, CartridgeError};
@@ -21,7 +21,8 @@ pub struct Machine {
 pub struct SystemState {
     pub cpu: CpuState,
     pub ppu: PpuState,
-    pub mem: Pages
+    pub mem: Pages,
+    pub mappings: DeviceMappings,
 }
 
 pub struct System {
@@ -48,7 +49,7 @@ impl Machine {
     pub fn tick(&mut self) {
         let mut i = 0;
         loop {
-            if i > 30{ return; }
+            if i > 100{ return; }
             i += 1;
             self.system.cpu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
@@ -70,18 +71,18 @@ impl System {
             cartridge: cartridge,
         };
 
-        system.cpu.register_read(DeviceKind::CpuRam,
+        system.cpu.register_read(state, DeviceKind::CpuRam,
                                  NotAndMask(0x7ff));
-        system.cpu.register_write(DeviceKind::CpuRam,
+        system.cpu.register_write(state, DeviceKind::CpuRam,
                                  NotAndMask(0x7ff));
-        system.cpu.register_read(DeviceKind::Ppu, RangeAndMask(0x2000, 0x4000, 0x7));
-        system.cpu.register_write(DeviceKind::Ppu, RangeAndMask(0x2000, 0x4000, 0x7));
-        system.cpu.register_write(DeviceKind::Ppu, Address(0x4014));
-        system.ppu.register_read(DeviceKind::PpuRam, 
+        system.cpu.register_read(state, DeviceKind::Ppu, RangeAndMask(0x2000, 0x4000, 0x7));
+        system.cpu.register_write(state, DeviceKind::Ppu, RangeAndMask(0x2000, 0x4000, 0x7));
+        system.cpu.register_write(state, DeviceKind::Ppu, Address(0x4014));
+        system.ppu.register_read(state, DeviceKind::PpuRam, 
                                  AndEqualsAndMask(0x2800, 0x2000, 0x7ff));
-        system.ppu.register_write(DeviceKind::PpuRam,
+        system.ppu.register_write(state, DeviceKind::PpuRam,
                                  AndEqualsAndMask(0x2800, 0x2000, 0x7ff));
-        system.cartridge.register(&mut system.cpu, &mut system.ppu);
+        system.cartridge.register(state, &mut system.cpu, &mut system.ppu);
 
         system
     }

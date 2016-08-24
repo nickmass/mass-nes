@@ -20,37 +20,118 @@ pub enum DeviceKind {
     Debug,
 }
 
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Bus (u32);
+
+
+type Mapping = HashMap<Bus, HashMap<u16, (u16, DeviceKind)>>;
+
+pub struct DeviceMappings {
+    read_mappings: Mapping,
+    write_mappings: Mapping,
+    next_bus: u32,
+}
+
+impl Default for DeviceMappings {
+    fn default() -> DeviceMappings {
+        DeviceMappings {
+            read_mappings: HashMap::new(),
+            write_mappings: HashMap::new(),
+            next_bus: 0,
+        }
+    }
+}
+
+impl DeviceMappings {
+    pub fn new() -> DeviceMappings {
+        DeviceMappings {
+            read_mappings: HashMap::new(),
+            write_mappings: HashMap::new(),
+            next_bus: 0,
+        }
+    }
+
+    fn add_bus(&mut self) -> Bus {
+        let bus = Bus(self.next_bus);
+        self.next_bus += 1;
+
+        self.read_mappings.insert(bus, HashMap::new());
+        self.write_mappings.insert(bus, HashMap::new());
+
+        bus
+    }
+
+    fn insert_read_mapping(&mut self,
+                           bus: &Bus, addr: u16, base_addr: u16, device: DeviceKind) {
+        self.read_mappings.get_mut(bus).unwrap().insert(addr, (base_addr, device));
+    }
+    
+    fn insert_write_mapping(&mut self,
+                           bus: &Bus, addr: u16, base_addr: u16, device: DeviceKind) {
+        self.write_mappings.get_mut(bus).unwrap().insert(addr, (base_addr, device));
+    }
+    
+    fn get_read_mapping(&self, bus: &Bus, addr: &u16) -> Option<(u16, DeviceKind)> {
+        self.read_mappings[bus].get(addr).map(|x| (x.0, x.1))
+    }
+
+    fn get_write_mapping(&self, bus: &Bus, addr: &u16) -> Option<(u16, DeviceKind)> {
+        self.write_mappings[bus].get(addr).map(|x| (x.0, x.1))
+    }
+    
+}
+
+
 pub struct AddressBus {
     kind: BusKind,
-    registered_reads: HashMap<u16, (u16, DeviceKind)>,
-    registered_writes: HashMap<u16, (u16, DeviceKind)>,
+    bus: Bus,
+    block_size: u16
 }
 
 impl AddressBus {
-    pub fn new(bus: BusKind) -> AddressBus {
+    pub fn new(bus: BusKind, state: &mut SystemState, block_size: u32) -> AddressBus {
         AddressBus {
             kind: bus,
-            registered_reads: HashMap::new(),
-            registered_writes: HashMap::new(),
+            bus: state.mappings.add_bus(),
+            block_size: 2u16.pow(block_size)
         }
     }
 
-    pub fn register_read<T>(&mut self, device: DeviceKind, addr_val: T)
+    pub fn register_read<T>(&self, state: &mut SystemState, device: DeviceKind, addr_val: T)
             where T: AddressValidator {
-        for (addr, base_addr) in addr_val.iter() {
-            self.registered_reads.insert(addr, (base_addr, device));
+        let mut addr: u32 = 0;
+        while addr < 0x10000 {
+            match addr_val.is_valid(addr as u16) {
+                Some(base_addr) => {
+                    state.mappings
+                        .insert_read_mapping(&self.bus, addr as u16, base_addr, device);
+                },
+                None => {}
+            }
+            addr += self.block_size as u32;
         }
     }
 
-    pub fn register_write<T>(&mut self, device: DeviceKind, addr_val: T)
+    pub fn register_write<T>(&self, state: &mut SystemState, device: DeviceKind, addr_val: T)
             where T: AddressValidator {
-        for (addr, base_addr) in addr_val.iter() {
-            self.registered_writes.insert(addr, (base_addr, device));
+        let mut addr: u32 = 0;
+        while addr < 0x10000 {
+            match addr_val.is_valid(addr as u16) {
+                Some(base_addr) => {
+                    state.mappings
+                        .insert_write_mapping(&self.bus, addr as u16, base_addr, device);
+                },
+                None => {}
+            }
+            addr += self.block_size as u32;
         }
     }
     
     pub fn read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
-        match self.registered_reads.get(&addr) {
+        let addr = addr & !(self.block_size - 1);
+        let mapping = state.mappings.get_read_mapping(&self.bus, &addr);
+        match mapping {
             Some(h) => {
                 match h.1 {
                     DeviceKind::CpuRam => system.cpu.mem.read(self.kind, state, h.0),
@@ -66,13 +147,11 @@ impl AddressBus {
         }
 
     }
-   
-    pub fn read_word(&self, system: &System, state: &mut SystemState, addr: u16) -> u16 {
-        (self.read(system, state, addr) as u16) << 8 | self.read(system, state, addr + 1) as u16
-    }
 
     pub fn write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
-        match self.registered_writes.get(&addr) {
+        let addr = addr & !(self.block_size - 1); 
+        let mapping = state.mappings.get_write_mapping(&self.bus, &addr);
+        match mapping {
             Some(h) => {
                 match h.1  {
                     DeviceKind::CpuRam => system.cpu.mem.write(self.kind,  state, h.0, value),
@@ -84,6 +163,10 @@ impl AddressBus {
             },
             None => {}
         }
+    }
+
+    pub fn read_word(&self, system: &System, state: &mut SystemState, addr: u16) -> u16 {
+        (self.read(system, state, addr) as u16) << 8 | self.read(system, state, addr + 1) as u16
     }
 }
 

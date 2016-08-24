@@ -104,20 +104,20 @@ impl Cpu {
         state.cpu.reg_pc = 0xc000;
         state.cpu.reg_sp = 0xfd; 
         Cpu {
-            bus: AddressBus::new(BusKind::Cpu),
+            bus: AddressBus::new(BusKind::Cpu, state, 0),
             mem: MemoryBlock::new(2, &mut state.mem),
             ops: Op::load(),
         }
     }
 
-    pub fn register_read<T>(&mut self, device: DeviceKind, addr: T)
+    pub fn register_read<T>(&mut self, state: &mut SystemState, device: DeviceKind, addr: T)
         where T: AddressValidator {
-        self.bus.register_read(device, addr);
+        self.bus.register_read(state, device, addr);
     }
 
-    pub fn register_write<T>(&mut self, device: DeviceKind, addr: T)
+    pub fn register_write<T>(&mut self, state: &mut SystemState, device: DeviceKind, addr: T)
         where T: AddressValidator {
-        self.bus.register_write(device, addr);
+        self.bus.register_write(state, device, addr);
     }
 
     pub fn tick(&self, system: &System, state: &mut SystemState) {

@@ -147,9 +147,9 @@ impl Cartridge {
         None
     }
 
-    pub fn register(&self, cpu: &mut Cpu, ppu: &mut Ppu) {
-        cpu.register_read(DeviceKind::Mapper, AndAndMask(0x8000, 0x3fff));
-        ppu.register_read(DeviceKind::Mapper, NotAndMask(0x1fff));
+    pub fn register(&self, state: &mut SystemState, cpu: &mut Cpu, ppu: &mut Ppu) {
+        cpu.register_read(state, DeviceKind::Mapper, AndAndMask(0x8000, 0x3fff));
+        ppu.register_read(state, DeviceKind::Mapper, NotAndMask(0x1fff));
     }
 
     pub fn read(&self, bus: BusKind, state: &SystemState, address: u16) -> u8 {

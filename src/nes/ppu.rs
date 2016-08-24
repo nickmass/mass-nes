@@ -173,19 +173,19 @@ impl Ppu {
     pub fn new(region: Region, state: &mut SystemState) -> Ppu {
         let ppu = Ppu {
             region: region,
-            bus: AddressBus::new(BusKind::Ppu),
+            bus: AddressBus::new(BusKind::Ppu, state, 0),
             mem: MemoryBlock::new(2, &mut state.mem),
         };
 
         ppu
     }
 
-    pub fn register_read<T>(&mut self, device: DeviceKind, addr: T) where T: AddressValidator {
-        self.bus.register_read(device, addr);
+    pub fn register_read<T>(&mut self, state: &mut SystemState, device: DeviceKind, addr: T) where T: AddressValidator {
+        self.bus.register_read(state, device, addr);
     }
 
-    pub fn register_write<T>(&mut self, device: DeviceKind, addr: T) where T: AddressValidator {
-        self.bus.register_write(device, addr);
+    pub fn register_write<T>(&mut self, state: &mut SystemState, device: DeviceKind, addr: T) where T: AddressValidator {
+        self.bus.register_write(state, device, addr);
     }
 
     pub fn read(&self, bus: BusKind, system: &System, state: &mut SystemState, address: u16) -> u8 {
