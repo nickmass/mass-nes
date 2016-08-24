@@ -27,6 +27,22 @@ pub struct PpuState {
     stage: Stage,
 
     palette_data: [u8; 32],
+
+    nametable_tile: u8,
+
+    attribute_low: u8,
+    attribute_high: u8,
+
+    pattern_low: u8,
+    pattern_high: u8,
+
+    low_bg_shift: u16,
+    high_bg_shift: u16,
+
+    low_attr_shift: u8,
+    high_attr_shift: u8,
+
+    screen: [u8;256*240],
 }
 
 impl Default for PpuState {
@@ -54,6 +70,22 @@ impl Default for PpuState {
             stage: Stage::Dot(0,0),
 
             palette_data: Default::default(),
+
+            nametable_tile: 0,
+           
+            attribute_low: 0,
+            attribute_high: 0,
+
+            pattern_low: 0,
+            pattern_high: 0,
+
+            low_bg_shift: 0,
+            high_bg_shift: 0,
+
+            low_attr_shift: 0,
+            high_attr_shift: 0,
+
+            screen: [0;256*240],
         }
     }
 }
@@ -296,31 +328,132 @@ impl Ppu {
     pub fn tick(&self, system: &System, state: &mut SystemState) {
         state.ppu.current_tick += 1;
         match state.ppu.stage {
+            Stage::Prerender(261, 1) => {
+                state.ppu.vblank = false;
+                self.fetch_nametable(system, state);
+            },
+            Stage::Prerender(c, s) if c % 8 == 1 && c < 256 => {
+                self.fetch_nametable(system, state);
+            },
+            Stage::Prerender(c, s) if c % 8 == 3 && c < 256 => {
+                self.fetch_attribute(system, state);
+            },
+            Stage::Prerender(c, s) if c % 8 == 5 && c < 256 => {
+                self.fetch_low_bg_pattern(system, state);
+            },
+            Stage::Prerender(c, s) if c % 8 == 7 && c < 256 => {
+                self.fetch_high_bg_pattern(system, state);
+            },
+            Stage::Prerender(c, s) if c % 8 == 0 && c != 0 && c < 256 => {
+                self.horz_increment(state);
+                self.load_bg_shifters(state);
+            },
+            Stage::Prerender(c, s) if c >= 280 && c <= 304 => {
+                self.vert_reset(state);
+            },
+            Stage::Prerender(c, s) if c  == 321 || c == 329 || c == 337 || c == 339 => {
+                self.fetch_nametable(system, state);
+            },
+            Stage::Prerender(c, s) if c == 323 || c == 331  => {
+                self.fetch_attribute(system, state);
+            },
+            Stage::Prerender(c, s) if c == 325 || c == 333 => {
+                self.fetch_low_bg_pattern(system, state);
+            },
+            Stage::Prerender(c, s) if c == 327 || c == 335 => {
+                self.fetch_high_bg_pattern(system, state);
+            },
+            Stage::Prerender(c, s) if c == 328 || c == 336 => {
+                self.horz_increment(state);
+                self.load_bg_shifters(state);
+            },
+            Stage::Dot(c, s) if c % 8 == 1 => {
+                self.fetch_nametable(system, state);
+            },
+            Stage::Dot(c, s) if c % 8 == 3 => {
+                self.fetch_attribute(system, state);
+            },
+            Stage::Dot(c, s) if c % 8 == 5 => {
+                self.fetch_low_bg_pattern(system, state);
+            },
+            Stage::Dot(c, s) if c % 8 == 7 => {
+                self.fetch_high_bg_pattern(system, state);
+            },
+            Stage::Dot(c, s) if c % 8 == 0 && c != 0 => {
+                self.horz_increment(state);
+                self.load_bg_shifters(state);
+            },
+            Stage::Hblank(c, s) if c  == 321 || c == 329 || c == 337 || c == 339 => {
+                self.fetch_nametable(system, state);
+            },
+            Stage::Hblank(c, s) if c == 323 || c == 331  => {
+                self.fetch_attribute(system, state);
+            },
+            Stage::Hblank(c, s) if c == 325 || c == 333 => {
+                self.fetch_low_bg_pattern(system, state);
+            },
+            Stage::Hblank(c, s) if c == 327 || c == 335 => {
+                self.fetch_high_bg_pattern(system, state);
+            },
+            Stage::Hblank(c, s) if c == 328 || c == 336 => {
+                self.horz_increment(state);
+                self.load_bg_shifters(state);
+            },
+            Stage::Hblank(256, s) => {
+                self.vert_increment(state);
+            },
+            Stage::Hblank(257, s) => {
+                self.horz_reset(state);
+            },
             Stage::Vblank(241,1) => {
                 state.ppu.vblank = true;
                 if state.ppu.is_nmi_enabled() {
                     state.cpu.nmi_req();
                 }
             },
-            Stage::Prerender(261, 1) => {
-                state.ppu.vblank = false;
+            _ => {}
+        }
+
+        match state.ppu.stage {
+            Stage::Dot(c, s) => {
+                self.render(system, state, c, s);
             },
             _ => {}
         }
+
         state.ppu.stage = state.ppu.stage.increment();
     }
 
-    fn x_increment(&self, mut addr: u16) -> u16  {
+    fn render(&self, system: &System, state: &mut SystemState, dot: i32, scanline: u32) {
+        let color = (((state.ppu.low_bg_shift >> 15) & 0x1) |
+            ((state.ppu.high_bg_shift >> 14) & 0x2)) as u16;
+        let attr = ((((state.ppu.low_attr_shift >> 7) & 0x1) |
+            ((state.ppu.high_attr_shift >> 6) & 0x2)) << 2) as u16;
+
+        let palette = color | attr | 0x3f00;
+
+        let bg_result = self.bus.read(system, state, palette);
+        state.ppu.screen[((scanline / 256) + dot as u32) as usize] = bg_result;
+
+        state.ppu.low_attr_shift <<= 1;
+        state.ppu.high_attr_shift <<= 1;
+        state.ppu.low_bg_shift <<= 1;
+        state.ppu.high_bg_shift <<= 1;
+    }
+
+    fn horz_increment(&self, state: &mut SystemState) {
+        let mut addr = state.ppu.vram_addr;
         if addr & 0x001f == 31 {
             addr &= !0x001f;
             addr ^= 0x0400;
         } else {
             addr += 1;
         }
-        addr
+        state.ppu.vram_addr = addr;
     }
 
-    fn y_increment(&self, mut addr: u16 ) -> u16 {
+    fn vert_increment(&self, state: &mut SystemState) {
+        let mut addr = state.ppu.vram_addr;
         if (addr & 0x7000) != 0x7000 {
             addr += 0x1000;
         } else {
@@ -337,6 +470,85 @@ impl Ppu {
 
             addr = (addr & !0x03e0) | (y << 5);
         }
-        addr
+        state.ppu.vram_addr = addr;
+    }
+
+    fn horz_reset(&self, state: &mut SystemState) {
+        let mut addr = state.ppu.vram_addr;
+        let addr_t = state.ppu.vram_addr_temp;
+
+        addr &= 0xfbe0;
+        addr |= addr_t & 0x041f;
+        state.ppu.vram_addr = addr;
+    }
+
+    fn vert_reset(&self, state: &mut SystemState) {
+        let mut addr = state.ppu.vram_addr;
+        let addr_t = state.ppu.vram_addr_temp;
+
+        addr &= 0x841f;
+        addr |= addr_t & 0x7be0;
+        state.ppu.vram_addr = addr;
+    }
+
+    fn load_bg_shifters(&self, state: &mut SystemState) {
+        state.ppu.low_bg_shift &= 0xff00;
+        state.ppu.low_bg_shift |= state.ppu.pattern_low as u16;
+        state.ppu.high_bg_shift &= 0xff00;
+        state.ppu.high_bg_shift |= state.ppu.pattern_high as u16;
+
+        state.ppu.low_attr_shift = (state.ppu.attribute_low & 1) * 0xff;
+        state.ppu.high_attr_shift = (state.ppu.attribute_high & 1) * 0xff;
+
+    }
+
+    fn fetch_nametable(&self, system: &System, state: &mut SystemState) {
+        let nt_addr = 0x2000 | (state.ppu.vram_addr & 0xfff);
+        state.ppu.nametable_tile = self.bus.read(system, state, nt_addr);
+    }
+
+    fn fetch_attribute(&self, system: &System, state: &mut SystemState) {
+        let v = state.ppu.vram_addr;
+        let at_addr = 0x23c0 | (v & 0x0c00) | ((v >> 4) & 0x38) | ((v >> 2) & 0x07);
+        let attr = self.bus.read(system, state, at_addr);
+
+        let tile_num = state.ppu.vram_addr & 0xfff;
+        let tile_x = tile_num % 16;
+        let tile_y = tile_num / 16;
+
+        let attr_quad = (tile_y % 2, tile_x % 2);
+        match attr_quad {
+            (0,0) => {
+                state.ppu.attribute_low = (attr >> 0) & 1;
+                state.ppu.attribute_high = (attr >> 1) & 1;
+            },
+            (0,1) => {
+                state.ppu.attribute_low = (attr >> 2) & 1;
+                state.ppu.attribute_high = (attr >> 3) & 1;
+            },
+            (1,0) => {
+                state.ppu.attribute_low = (attr >> 4) & 1;
+                state.ppu.attribute_high = (attr >> 5) & 1;
+            },
+            (1,1) => { 
+                state.ppu.attribute_low = (attr >> 6) & 1;
+                state.ppu.attribute_high = (attr >> 7) & 1;
+            },
+            _ => unreachable!()
+        }
+    }
+
+    fn fetch_low_bg_pattern(&self, system: &System, state: &mut SystemState) {
+        let v = state.ppu.vram_addr;
+        let tile_addr = ((v >> 12) & 0x07) | ((state.ppu.nametable_tile as u16) << 4) |
+            state.ppu.background_pattern_table();
+        state.ppu.pattern_low = self.bus.read(system, state, tile_addr);
+    }
+    
+    fn fetch_high_bg_pattern(&self, system: &System, state: &mut SystemState) {
+        let v = state.ppu.vram_addr;
+        let tile_addr = ((v >> 12) & 0x07) | ((state.ppu.nametable_tile as u16) << 4) |
+            state.ppu.background_pattern_table() | 0x08;
+        state.ppu.pattern_high = self.bus.read(system, state, tile_addr);
     }
 }
