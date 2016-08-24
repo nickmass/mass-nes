@@ -11,13 +11,13 @@ pub struct PpuState {
     sprite_overflow: bool,
     last_write: u8,
 
-    scroll_latch: bool,
-    scroll_x: i32,
-    scroll_y: i32,
-
-    addr_latch: bool,
-    data_addr: u16,
+    write_latch: bool,
+    
     data_read_buffer: u8,
+
+    vram_addr: u16,
+    vram_addr_temp: u16,
+    vram_fine_x: u16,
 
     oam_addr: u8,
     oam_data: [u8; 256],
@@ -39,13 +39,12 @@ impl Default for PpuState {
             sprite_overflow: Default::default(),
             last_write: Default::default(),
 
-            scroll_latch: Default::default(),
-            scroll_x: Default::default(),
-            scroll_y: Default::default(),
-
-            addr_latch: Default::default(),
-            data_addr: Default::default(),
+            write_latch: Default::default(),
             data_read_buffer: Default::default(),
+
+            vram_addr: Default::default(),
+            vram_addr_temp: Default::default(),
+            vram_fine_x: Default::default(),
 
             oam_addr: Default::default(),
             oam_data: [0; 256],
@@ -78,10 +77,10 @@ impl PpuState {
 
     fn base_nametable(&self) -> u16 {
         match self.regs[0] & 3 {
-            0 => 0x2000,
-            1 => 0x2400,
-            2 => 0x2800,
-            3 => 0x2c00,
+            0 => 0x000,
+            1 => 0x400,
+            2 => 0x800,
+            3 => 0xc00,
             _ => unreachable!()
         }
     }
@@ -198,7 +197,7 @@ impl Ppu {
             5 => state.ppu.last_write,
             6 => state.ppu.last_write,
             7 => { //PPUDATA
-                let addr = state.ppu.data_addr;
+                let addr = state.ppu.vram_addr;
                 let result = if addr & 0x3f00 == 0x3f00 {
                     state.ppu.palette_data[(addr & 0x1f) as usize]
                 } else {
@@ -215,8 +214,7 @@ impl Ppu {
             0 => state.ppu.last_write,
             1 => state.ppu.last_write,
             2 => {  
-                state.ppu.addr_latch = false;
-                state.ppu.scroll_latch = false;
+                state.ppu.write_latch = false;
                 let status = state.ppu.ppu_status();
                 state.ppu.vblank = false;
                 status
@@ -226,13 +224,14 @@ impl Ppu {
             5 => state.ppu.last_write,
             6 => state.ppu.last_write,
             7 => { //PPUDATA
-                let addr = state.ppu.data_addr;
+                let addr = state.ppu.vram_addr;
                 let result = if addr & 0x3f00 == 0x3f00 {
                     state.ppu.palette_data[(addr & 0x1f) as usize]
                 } else {
                     state.ppu.data_read_buffer
                 };
                 state.ppu.data_read_buffer = self.bus.read(system, state, addr);
+                state.ppu.vram_addr += state.ppu.vram_inc();
                 result
             }
             4014 => 0,
@@ -242,37 +241,48 @@ impl Ppu {
 
     pub fn write(&self, bus: BusKind, system: &System, state: &mut SystemState, address: u16, value: u8) {
         match address {
-            0 => state.ppu.regs[0] = value, //PPUCTRL
+            0 => {
+                state.ppu.regs[0] = value;
+                state.ppu.vram_addr_temp &= 0xc00;
+                state.ppu.vram_addr_temp |= state.ppu.base_nametable();
+            }, //PPUCTRL
             1 => state.ppu.regs[1] = value, //PPUMASK
             2 => state.ppu.regs[2] = value,
             3 => state.ppu.oam_addr = value, //OAMADDR
             4 => state.ppu.oam_data[state.ppu.oam_addr as usize] = value, //OAMDATA
             5 => { //PPUSCROLL
-                if state.ppu.scroll_latch {
-                    state.ppu.scroll_y = value as i32; 
+                if state.ppu.write_latch {
+                    let value = value as u16;
+                    state.ppu.vram_addr_temp &= 0xfc1f;
+                    state.ppu.vram_addr_temp |= (value & 0xff07) << 2;
+                    state.ppu.vram_addr_temp &= 0x0fff;
+                    state.ppu.vram_addr_temp |= (value & 0x07) << 12;
                 } else {
-                    state.ppu.scroll_x = value as i32;
+                    state.ppu.vram_addr_temp &= 0xffe0;
+                    state.ppu.vram_addr_temp |= (value >> 3) as u16;
+                    state.ppu.vram_fine_x = (value & 0x07) as u16;
                 }
-                state.ppu.scroll_latch = !state.ppu.scroll_latch;
+                state.ppu.write_latch = !state.ppu.write_latch;
 
             },
             6 => { //PPUADDR
-                if state.ppu.addr_latch {
-                    state.ppu.data_addr &= 0xff00;
-                    state.ppu.data_addr |= value as u16
+                if state.ppu.write_latch {
+                    state.ppu.vram_addr_temp &= 0xff00;
+                    state.ppu.vram_addr_temp |= value as u16;
+                    state.ppu.vram_addr = state.ppu.vram_addr_temp;
                 } else {
-                    state.ppu.data_addr &= 0x00ff;
-                    state.ppu.data_addr |= (value as u16) << 8;
+                    state.ppu.vram_addr_temp &= 0x00ff;
+                    state.ppu.vram_addr_temp |= ((value & 0x7f) as u16) << 8;
                 }
-                state.ppu.addr_latch = !state.ppu.addr_latch;
+                state.ppu.write_latch = !state.ppu.write_latch;
             },
             7 => { //PPUDATA
-                let addr = state.ppu.data_addr;
+                let addr = state.ppu.vram_addr;
                 self.bus.write(system, state, addr, value);
                 if addr & 0x3f00 == 0x3f00 {
                     state.ppu.palette_data[(addr & 0x1f) as usize] = value;
                 }
-                state.ppu.data_addr += state.ppu.vram_inc();
+                state.ppu.vram_addr += state.ppu.vram_inc();
             },
             4014 => { //OAMDMA
                 state.cpu.oam_dma_req(value);
@@ -298,5 +308,35 @@ impl Ppu {
             _ => {}
         }
         state.ppu.stage = state.ppu.stage.increment();
+    }
+
+    fn x_increment(&self, mut addr: u16) -> u16  {
+        if addr & 0x001f == 31 {
+            addr &= !0x001f;
+            addr ^= 0x0400;
+        } else {
+            addr += 1;
+        }
+        addr
+    }
+
+    fn y_increment(&self, mut addr: u16 ) -> u16 {
+        if (addr & 0x7000) != 0x7000 {
+            addr += 0x1000;
+        } else {
+            addr &= !0x7000;
+            let mut y = (addr & 0x03e0) >> 5;
+            if y == 29 {
+                y = 0;
+                addr ^= 0x0800;
+            } else if y == 31{
+                y = 0;
+            } else {
+                y += 1;
+            }
+
+            addr = (addr & !0x03e0) | (y << 5);
+        }
+        addr
     }
 }
