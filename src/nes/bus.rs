@@ -128,6 +128,25 @@ impl AddressBus {
         }
     }
     
+    pub fn peek(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
+        let addr = addr & !(self.block_size - 1);
+        let mapping = state.mappings.get_read_mapping(&self.bus, &addr);
+        match mapping {
+            Some(h) => {
+                match h.1 {
+                    DeviceKind::CpuRam => system.cpu.mem.peek(self.kind, state, h.0),
+                    DeviceKind::Ppu => system.ppu.peek(self.kind, system, state, h.0),
+                    DeviceKind::PpuRam => system.ppu.mem.peek(self.kind, state, h.0),
+                    DeviceKind::Mapper => system.cartridge.peek(self.kind, state, h.0),
+                    _ => unimplemented!(),
+                }
+            },
+            None => {
+                0xFF
+            }
+        }
+    }
+    
     pub fn read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
         let addr = addr & !(self.block_size - 1);
         let mapping = state.mappings.get_read_mapping(&self.bus, &addr);
@@ -145,7 +164,6 @@ impl AddressBus {
                 0xFF
             }
         }
-
     }
 
     pub fn write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
@@ -163,6 +181,10 @@ impl AddressBus {
             },
             None => {}
         }
+    }
+
+    pub fn peek_word(&self, system: &System, state: &SystemState, addr: u16) -> u16 {
+        (self.peek(system, state, addr) as u16) << 8 | self.peek(system, state, addr + 1) as u16
     }
 
     pub fn read_word(&self, system: &System, state: &mut SystemState, addr: u16) -> u16 {

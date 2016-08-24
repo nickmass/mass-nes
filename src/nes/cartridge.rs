@@ -152,6 +152,13 @@ impl Cartridge {
         ppu.register_read(state, DeviceKind::Mapper, NotAndMask(0x1fff));
     }
 
+    pub fn peek(&self, bus: BusKind, state: &SystemState, address: u16) -> u8 {
+        match bus {
+            BusKind::Cpu => self.prg_rom[address as usize],
+            BusKind::Ppu => self.chr_rom[address as usize],
+        }
+    }
+
     pub fn read(&self, bus: BusKind, state: &SystemState, address: u16) -> u8 {
         match bus {
             BusKind::Cpu => self.prg_rom[address as usize],

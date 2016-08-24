@@ -50,6 +50,10 @@ impl MemoryBlock {
         }
     }
 
+    pub fn peek(&self, bus: BusKind, state: &SystemState, addr: u16) -> u8 {
+        state.mem.read(self.page, addr)
+    }
+
     pub fn read(&self, bus: BusKind, state: &mut SystemState, addr: u16) -> u8 {
         state.mem.read(self.page, addr)
     }

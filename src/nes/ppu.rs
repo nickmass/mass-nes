@@ -188,6 +188,28 @@ impl Ppu {
         self.bus.register_write(state, device, addr);
     }
 
+    pub fn peek(&self, bus: BusKind, system: &System, state: &SystemState, address: u16) -> u8 {
+        match address {
+            0 => state.ppu.last_write,
+            1 => state.ppu.last_write,
+            2 => state.ppu.ppu_status(),
+            3 => state.ppu.oam_addr, //OAMADDR
+            4 => state.ppu.oam_data[state.ppu.oam_addr as usize], //OANDATA
+            5 => state.ppu.last_write,
+            6 => state.ppu.last_write,
+            7 => { //PPUDATA
+                let addr = state.ppu.data_addr;
+                let result = if addr & 0x3f00 == 0x3f00 {
+                    state.ppu.palette_data[(addr & 0x1f) as usize]
+                } else {
+                    state.ppu.data_read_buffer
+                };
+                result
+            }
+            4014 => 0,
+            _ => unreachable!(),
+        }
+    }
     pub fn read(&self, bus: BusKind, system: &System, state: &mut SystemState, address: u16) -> u8 {
         match address {
             0 => state.ppu.last_write,
