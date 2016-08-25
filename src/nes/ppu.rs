@@ -331,7 +331,7 @@ impl Ppu {
     pub fn tick(&self, system: &System, state: &mut SystemState) {
         state.ppu.current_tick += 1;
         match state.ppu.stage {
-            Stage::Prerender(1, 261) => {
+            Stage::Prerender(261, 1) => {
                 state.ppu.vblank = false;
                 self.fetch_nametable(system, state);
             },
