@@ -148,7 +148,7 @@ impl Cartridge {
     }
 
     pub fn register(&self, state: &mut SystemState, cpu: &mut Cpu, ppu: &mut Ppu) {
-        cpu.register_read(state, DeviceKind::Mapper, AndAndMask(0x8000, 0x3fff));
+        cpu.register_read(state, DeviceKind::Mapper, AndAndMask(0x8000, (self.prg_rom.len() - 1) as u16));
         ppu.register_read(state, DeviceKind::Mapper, NotAndMask(0x1fff));
     }
 

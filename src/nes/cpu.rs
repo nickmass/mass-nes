@@ -75,7 +75,13 @@ impl Stage {
             Stage::Fetch => unreachable!(),
             Stage::Address(n) => Stage::Address(n + 1),
             Stage::Execute(n) => Stage::Execute(n + 1),
-            Stage::OamDma(n) => Stage::OamDma(n + 1),
+            Stage::OamDma(n) => {
+                if n == 511 {
+                    Stage::Fetch
+                }  else {
+                    Stage::OamDma(n + 1)
+                }
+            },
             Stage::Nmi(n) => {
                 if n == 6 {
                     Stage::Fetch
@@ -182,11 +188,7 @@ impl Cpu {
             Stage::OamDma(c) if c % 2 == 1 => {
                 let value = state.cpu.oam_dma_buffer;
                 self.bus.write(system, state, 0x4014, value);
-                if c == 511 {
-                    state.cpu.stage = Stage::Fetch;
-                } else {
-                    state.cpu.stage = state.cpu.stage.increment();
-                }
+                state.cpu.stage = state.cpu.stage.increment();
             },
             _ => unreachable!(),
         }

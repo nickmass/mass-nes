@@ -316,10 +316,13 @@ impl Ppu {
                 }
                 state.ppu.vram_addr += state.ppu.vram_inc();
             },
-            4014 => { //OAMDMA
+            0x4014 => { //OAMDMA
                 state.cpu.oam_dma_req(value);
             },
-            _ => unreachable!(),
+            _ => {
+                println!("{:4X} Address", address);
+                unreachable!()
+            },
         }
 
         if address < 8 { state.ppu.last_write = value; }
@@ -433,7 +436,8 @@ impl Ppu {
         let palette = color | attr | 0x3f00;
 
         let bg_result = state.ppu.palette_data[(palette & 0x1f) as usize];
-        
+       
+
         state.ppu.screen[((scanline * 256) + dot) as usize] = bg_result;
 
         state.ppu.low_attr_shift <<= 1;

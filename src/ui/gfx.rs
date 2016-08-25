@@ -1,5 +1,6 @@
 use glium;
 use glium::{DisplayBuild, Surface};
+use glium::texture::{RawImage2d, RawImage1d, ClientFormat, texture2d, texture1d};
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -10,15 +11,16 @@ struct Vertex {
 implement_vertex!(Vertex, position, tex_coords);
 
 pub struct GliumRenderer {
-    display: Box<glium::Display>,
-    indicies: Box<glium::index::NoIndices>,
-    program: Box<glium::Program>,
-    vertex_buffer: Box<glium::VertexBuffer<Vertex>>,
+    display: glium::Display,
+    indicies: glium::index::NoIndices,
+    program: glium::Program,
+    vertex_buffer: glium::VertexBuffer<Vertex>,
     closed: bool,
+    palette: texture1d::Texture1d,
 }
 
 impl GliumRenderer {
-    pub fn new() -> GliumRenderer {
+    pub fn new(pal: &[u8; 192]) -> GliumRenderer {
         let display = glium::glutin::WindowBuilder::new()
             .with_dimensions(512, 480)
             .with_title(format!("Mass NES"))
@@ -56,20 +58,31 @@ impl GliumRenderer {
             out vec4 color;
 
             uniform sampler2D tex;
+            uniform sampler1D palette;
 
             void main() {
-                color = texture(tex, v_tex_coords);
+                vec4 index = texture(tex, v_tex_coords);
+                color = texture(palette, index.x * 4);
             }
         "#;
 
         let program = glium::Program::from_source(&display, vertex_shader_src, fragment_shader_src, None).unwrap();
 
+        let palette = RawImage1d {
+            data: ::std::borrow::Cow::Borrowed(&pal[..]),
+            width: 64,
+            format: ClientFormat::U8U8U8,
+        };
+
+        let pal_tex = texture1d::Texture1d::new(&display, palette).unwrap();
+
         GliumRenderer {
-            display: Box::new(display),
-            indicies: Box::new(indicies),
-            program: Box::new(program),
-            vertex_buffer: Box::new(vertex_buffer),
+            display: display,
+            indicies: indicies,
+            program: program,
+            vertex_buffer: vertex_buffer,
             closed: false,
+            palette: pal_tex,
         }
     }
 
@@ -88,31 +101,26 @@ impl GliumRenderer {
     }
     
     pub fn render(&mut self, screen: &[u8; 256*240]) {
-        use glium::texture::{RawImage2d, ClientFormat, texture2d};
-        let mut screen_buf = [0xFF000000u32; 256*240];
+        {
+            let img = RawImage2d {
+                data: ::std::borrow::Cow::Borrowed(screen),
+                width: 256,
+                height: 240,
+                format: ClientFormat::U8,
+            };
 
-        for x in 0..(256*240) {
-            if screen[x] != 0 { screen_buf[x] = 0xFFFFFFFFu32; }
+            let tex = texture2d::Texture2d::new(&self.display, img).unwrap();
+
+            let uniforms = uniform! {
+                tex: tex.sampled().magnify_filter(glium::uniforms::MagnifySamplerFilter::Nearest).minify_filter(glium::uniforms::MinifySamplerFilter::Nearest),
+                palette: self.palette.sampled().magnify_filter(glium::uniforms::MagnifySamplerFilter::Nearest).minify_filter(glium::uniforms::MinifySamplerFilter::Nearest),
+            };
+
+            let mut target = self.display.draw(); 
+            target.clear_color(0.0, 0.0, 0.0, 1.0);
+            target.draw(&self.vertex_buffer, &self.indicies, &self.program, &uniforms, &Default::default()).unwrap();
+            target.finish().unwrap();
         }
-
-        let img = RawImage2d {
-            data: ::std::borrow::Cow::Owned(screen_buf.to_vec()),
-            width: 256,
-            height: 240,
-            format: ClientFormat::U8U8U8U8,
-        };
-
-        let tex = texture2d::Texture2d::new(&*self.display, img).unwrap();
-
-        let uniforms = uniform! {
-            tex: glium::uniforms::Sampler::new(&tex)
-                .magnify_filter(glium::uniforms::MagnifySamplerFilter::Nearest),
-        };
-
-        let mut target = self.display.draw(); 
-        target.clear_color(0.0, 0.0, 0.0, 1.0);
-        target.draw(&*self.vertex_buffer, &*self.indicies, &*self.program, &uniforms, &Default::default()).unwrap();
-        target.finish().unwrap();
         self.process_events();
     }
 
