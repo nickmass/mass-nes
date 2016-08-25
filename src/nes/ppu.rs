@@ -403,6 +403,7 @@ impl Ppu {
                 self.load_bg_shifters(state);
             },
             Stage::Hblank(s, 256) => {
+                self.horz_increment(state);
                 self.vert_increment(state);
             },
             Stage::Hblank(s, 257) => {
@@ -447,6 +448,7 @@ impl Ppu {
     }
 
     fn horz_increment(&self, state: &mut SystemState) {
+        if !state.ppu.is_background_enabled() { return; }
         let mut addr = state.ppu.vram_addr;
         if addr & 0x001f == 31 {
             addr &= !0x001f;
@@ -458,6 +460,7 @@ impl Ppu {
     }
 
     fn vert_increment(&self, state: &mut SystemState) {
+        if !state.ppu.is_background_enabled() { return; }
         let mut addr = state.ppu.vram_addr;
         if (addr & 0x7000) != 0x7000 {
             addr += 0x1000;
@@ -479,6 +482,7 @@ impl Ppu {
     }
 
     fn horz_reset(&self, state: &mut SystemState) {
+        if !state.ppu.is_background_enabled() { return; }
         let mut addr = state.ppu.vram_addr;
         let addr_t = state.ppu.vram_addr_temp;
 
@@ -488,6 +492,7 @@ impl Ppu {
     }
 
     fn vert_reset(&self, state: &mut SystemState) {
+        if !state.ppu.is_background_enabled() { return; }
         let mut addr = state.ppu.vram_addr;
         let addr_t = state.ppu.vram_addr_temp;
 
@@ -497,6 +502,7 @@ impl Ppu {
     }
 
     fn load_bg_shifters(&self, state: &mut SystemState) {
+        if !state.ppu.is_background_enabled() { return; }
         state.ppu.low_bg_shift &= 0xff00;
         state.ppu.low_bg_shift |= state.ppu.pattern_low as u16;
         state.ppu.high_bg_shift &= 0xff00;
@@ -508,11 +514,13 @@ impl Ppu {
     }
 
     fn fetch_nametable(&self, system: &System, state: &mut SystemState) {
+        if !state.ppu.is_background_enabled() { return; }
         let nt_addr = 0x2000 | (state.ppu.vram_addr & 0xfff);
         state.ppu.nametable_tile = self.bus.read(system, state, nt_addr);
     }
 
     fn fetch_attribute(&self, system: &System, state: &mut SystemState) {
+        if !state.ppu.is_background_enabled() { return; }
         let v = state.ppu.vram_addr;
         let at_addr = 0x23c0 | (v & 0x0c00) | ((v >> 4) & 0x38) | ((v >> 2) & 0x07);
         let attr = self.bus.read(system, state, at_addr);
@@ -544,6 +552,7 @@ impl Ppu {
     }
 
     fn fetch_low_bg_pattern(&self, system: &System, state: &mut SystemState) {
+        if !state.ppu.is_background_enabled() { return; }
         let v = state.ppu.vram_addr;
         let tile_addr = ((v >> 12) & 0x07) | ((state.ppu.nametable_tile as u16) << 4) |
             state.ppu.background_pattern_table();
@@ -551,6 +560,7 @@ impl Ppu {
     }
     
     fn fetch_high_bg_pattern(&self, system: &System, state: &mut SystemState) {
+        if !state.ppu.is_background_enabled() { return; }
         let v = state.ppu.vram_addr;
         let tile_addr = ((v >> 12) & 0x07) | ((state.ppu.nametable_tile as u16) << 4) |
             state.ppu.background_pattern_table() | 0x08;
