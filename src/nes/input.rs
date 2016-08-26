@@ -105,7 +105,6 @@ impl Input {
             0x4016 => {
                 if value & 0x01 == 1 {
                     state.input.input_buffer = state.input.input;
-                    system.debug.log_for(state, 100);
                 } else {
                     state.input.read_shifter = state.input.input_buffer;
                     state.input.read_counter = 8;
