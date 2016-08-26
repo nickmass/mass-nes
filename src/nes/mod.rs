@@ -6,6 +6,7 @@ mod cartridge;
 mod memory;
 mod ops;
 mod debug;
+mod input;
 
 pub use self::cartridge::Cartridge;
 pub use self::system::*;

@@ -2,7 +2,7 @@
 extern crate glium;
 
 mod nes;
-use nes::{Machine, Cartridge, Region};
+use nes::{Controller, Machine, Cartridge, Region};
 
 mod ui;
 use ui::gfx::GliumRenderer;
@@ -11,7 +11,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 fn main() {
-    let mut file = ::std::fs::File::open("/home/nickmass/smb.nes").unwrap();
+    let mut file = ::std::fs::File::open(std::env::args().nth(1).unwrap_or("/home/nickmass/smb.nes".to_string())).unwrap();
     let region = Region::Ntsc;
     let pal = region.default_palette();
     let cart = Cartridge::load(&mut file).unwrap();
@@ -22,6 +22,18 @@ fn main() {
         println!("Rendered");
     }, || {
         renderer.borrow().is_closed()
+    }, || {
+        let input = renderer.borrow().get_input();
+        Controller {
+            a: input[0],
+            b: input[1],
+            select: input[2],
+            start: input[3],
+            up: input[4],
+            down: input[5],
+            left: input[6],
+            right: input[7],
+        }
     });
 
     machine.run();

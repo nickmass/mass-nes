@@ -242,7 +242,7 @@ impl Cpu {
         };
         let pc = state.cpu.reg_pc;
         let value = self.read_pc(system, state);
-        //println!("{}", system.debug.trace_instruction(system, state, pc as u16));
+        system.debug.trace(system, state, pc as u16);
         state.cpu.op = self.ops[&value];
         state.cpu.stage = Stage::Address(0)
     }
@@ -312,7 +312,7 @@ impl Cpu {
             },
             (Addressing::AbsoluteX, Stage::Address(2)) => {
                 let a = state.cpu.op_addr;
-                if a & 0xff00 != a.wrapping_add(state.cpu.reg_x as u16) & 0xff {
+                if a & 0xff00 != a.wrapping_add(state.cpu.reg_x as u16) & 0xff00 {
                     let dummy_a = (a & 0xff00) |
                         (a.wrapping_add(state.cpu.reg_x as u16) & 0xff);
                     let _ = self.bus.read(system, state, dummy_a);
@@ -338,7 +338,7 @@ impl Cpu {
             },
             (Addressing::AbsoluteY, Stage::Address(2)) => {
                 let a = state.cpu.op_addr;
-                if a & 0xff00 != a.wrapping_add(state.cpu.reg_y as u16) & 0xff {
+                if a & 0xff00 != a.wrapping_add(state.cpu.reg_y as u16) & 0xff00 {
                     let dummy_a = (a & 0xff00) |
                         (a.wrapping_add(state.cpu.reg_y as u16) & 0xff);
                     let _ = self.bus.read(system, state, dummy_a); 

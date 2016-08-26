@@ -15,7 +15,7 @@ pub enum DeviceKind {
     PpuRam,
     Ppu,
     Mapper,
-    Input(i32),
+    Input,
     Expansion,
     Debug,
 }
@@ -138,6 +138,7 @@ impl AddressBus {
                     DeviceKind::Ppu => system.ppu.peek(self.kind, system, state, h.0),
                     DeviceKind::PpuRam => system.ppu.mem.peek(self.kind, state, h.0),
                     DeviceKind::Mapper => system.cartridge.peek(self.kind, state, h.0),
+                    DeviceKind::Input => system.input.peek(self.kind, system, state, h.0),
                     _ => unimplemented!(),
                 }
             },
@@ -157,6 +158,7 @@ impl AddressBus {
                     DeviceKind::Ppu => system.ppu.read(self.kind, system, state, h.0),
                     DeviceKind::PpuRam => system.ppu.mem.read(self.kind, state, h.0),
                     DeviceKind::Mapper => system.cartridge.read(self.kind, state, h.0),
+                    DeviceKind::Input => system.input.read(self.kind, system, state, h.0),
                     _ => unimplemented!(),
                 }
             },
@@ -176,6 +178,7 @@ impl AddressBus {
                     DeviceKind::Ppu => system.ppu.write(self.kind, system, state, h.0, value),
                     DeviceKind::PpuRam => system.ppu.mem.write(self.kind, state, h.0, value),
                     DeviceKind::Mapper => system.cartridge.write(self.kind, state, h.0, value),
+                    DeviceKind::Input => system.input.write(self.kind, system, state, h.0, value),
                     _ => unimplemented!(),
                 }
             },

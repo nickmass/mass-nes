@@ -17,6 +17,7 @@ pub struct GliumRenderer {
     vertex_buffer: glium::VertexBuffer<Vertex>,
     closed: bool,
     palette: texture1d::Texture1d,
+    input: [bool; 8],
 }
 
 impl GliumRenderer {
@@ -83,6 +84,7 @@ impl GliumRenderer {
             vertex_buffer: vertex_buffer,
             closed: false,
             palette: pal_tex,
+            input: [false; 8],
         }
     }
 
@@ -93,13 +95,29 @@ impl GliumRenderer {
                     self.closed = true;
                 },
                 glium::glutin::Event::KeyboardInput(state, _, key_opt) => {
+                    let mut input = self.input;
                     let pressed = state == glium::glutin::ElementState::Pressed;
+                    if let Some(key) = key_opt {
+                        use glium::glutin::VirtualKeyCode as K;
+                        match key {
+                            K::Z => input[0] = pressed,
+                            K::X => input[1] = pressed,
+                            K::RShift => input[2] = pressed,
+                            K::Return => input[3] = pressed,
+                            K::Up => input[4] = pressed,
+                            K::Down => input[5] = pressed,
+                            K::Left => input[6] = pressed,
+                            K::Right => input[7] = pressed,
+                             _ => {}
+                        }
+                    }
+                    self.input = input;
                 }, 
                 _ => {}
             }
         }
     }
-    
+
     pub fn render(&mut self, screen: &[u8; 256*240]) {
         {
             let img = RawImage2d {
@@ -122,6 +140,10 @@ impl GliumRenderer {
             target.finish().unwrap();
         }
         self.process_events();
+    }
+   
+    pub fn get_input(&self) -> [bool; 8] {
+        self.input
     }
 
     pub fn is_closed(&self) -> bool {

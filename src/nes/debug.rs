@@ -2,6 +2,11 @@ use nes::system::{System, SystemState};
 use nes::ops::*;
 use std::collections::HashMap;
 
+#[derive(Default)]
+pub struct DebugState {
+    trace_instrs: u32,
+}
+
 pub struct Debug {
     ops: HashMap<u8, Op>,
     op_names: HashMap<Instruction, &'static str>,
@@ -14,6 +19,18 @@ impl Debug {
             ops: Op::load(),
             op_names: Debug::load_op_names(),
             op_lengths: Debug::load_op_lengths(),
+        }
+    }
+
+    pub fn log_for(&self, state: &mut SystemState, count: u32) {
+        state.debug.trace_instrs = count;
+    }
+
+    pub fn trace(&self, system: &System, state: &mut SystemState, addr: u16) {
+        if state.debug.trace_instrs != 0 {
+            let log = self.trace_instruction(system, state, addr);
+            println!("{}", log);
+            state.debug.trace_instrs -= 1;
         }
     }
 

@@ -4,7 +4,10 @@ use nes::cpu::{Cpu, CpuState};
 use nes::ppu::{Ppu, PpuState};
 use nes::cartridge::{Cartridge, CartridgeError};
 use nes::memory::{Pages, MemoryBlock};
-use nes::debug::Debug;
+use nes::debug::{Debug, DebugState};
+use nes::input::{Input, InputState};
+
+pub use nes::input::{Controller, InputDevice};
 
 use std::io::Read;
 
@@ -22,16 +25,26 @@ impl Region {
 }
 
 
-pub struct Machine<FR, FC> where FR: FnMut(&[u8;256*240]), FC: Fn() -> bool {
+pub struct Machine<FR, FC, FI, I> where 
+    FR: FnMut(&[u8;256*240]), 
+    FC: Fn() -> bool, 
+    FI: Fn() -> I, 
+    I: InputDevice {
+    
     pub state: Box<SystemState>,
     pub system: System,
     on_render: FR,
     on_closed: FC,
+    on_input: FI,
 }
 
-impl<FR, FC> Machine<FR, FC> where FR: FnMut(&[u8;256*240]), FC: Fn() -> bool {
+impl<FR, FC, FI, I> Machine<FR, FC, FI, I> where 
+    FR: FnMut(&[u8;256*240]),
+    FC: Fn() -> bool,
+    FI: Fn() -> I,
+    I: InputDevice {
 
-    pub fn new(region: Region, cartridge: Cartridge, render: FR, closed: FC) -> Machine<FR, FC> {
+    pub fn new(region: Region, cartridge: Cartridge, render: FR, closed: FC, input: FI) -> Machine<FR, FC, FI, I> {
         let mut state = Box::new(SystemState::default());
         let system = System::new(region, cartridge, &mut state);
         Machine {
@@ -39,6 +52,7 @@ impl<FR, FC> Machine<FR, FC> where FR: FnMut(&[u8;256*240]), FC: Fn() -> bool {
             system: system,
             on_render: render,
             on_closed: closed,
+            on_input: input,
         }
     }
 
@@ -60,6 +74,8 @@ impl<FR, FC> Machine<FR, FC> where FR: FnMut(&[u8;256*240]), FC: Fn() -> bool {
             if (self.on_closed)() {
                 break;
             }
+            let input = (self.on_input)().to_byte();
+            self.state.input.input = input;
         }
     }
 }
@@ -70,6 +86,8 @@ pub struct SystemState {
     pub ppu: PpuState,
     pub mem: Pages,
     pub mappings: DeviceMappings,
+    pub input: InputState,
+    pub debug: DebugState,
 }
 
 pub struct System {
@@ -78,19 +96,21 @@ pub struct System {
     pub cpu: Cpu,
     pub cartridge: Cartridge,
     pub debug: Debug,
+    pub input: Input,
 }
 
 impl System {
     pub fn new(region: Region, cartridge: Cartridge, state: &mut SystemState) -> System {
         let cpu = Cpu::new(state);
         let ppu = Ppu::new(Region::Ntsc, state);
-      
+        
         let mut system = System {
             region: region,
             ppu: ppu,
             cpu: cpu,
             cartridge: cartridge,
             debug: Debug::new(),
+            input: Input::new(),
         };
 
         system.cpu.register_read(state, DeviceKind::CpuRam,
@@ -105,6 +125,9 @@ impl System {
         system.ppu.register_write(state, DeviceKind::PpuRam,
                                  AndEqualsAndMask(0x2800, 0x2000, 0x7ff));
         system.cartridge.register(state, &mut system.cpu, &mut system.ppu);
+        system.cpu.register_read(state, DeviceKind::Input, Address(0x4016));
+        system.cpu.register_read(state, DeviceKind::Input, Address(0x4017));
+        system.cpu.register_write(state, DeviceKind::Input, Address(0x4016));
 
         system
     }
