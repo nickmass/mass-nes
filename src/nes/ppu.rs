@@ -5,6 +5,7 @@ use nes::memory::MemoryBlock;
 
 pub struct PpuState {
     current_tick: u64,
+    frame: u32,
     regs: [u8;8],
     pub vblank: bool,
     sprite_zero_hit: bool,
@@ -21,6 +22,7 @@ pub struct PpuState {
 
     oam_addr: u8,
     oam_data: [u8; 256],
+    line_oam_data: [u8; 32],
 
     current_frame: i32,
     current_line: i32,
@@ -43,36 +45,56 @@ pub struct PpuState {
     high_attr_shift: u8,
 
     pub screen: [u8;256*240],
+
+    in_sprite_render: bool,
+    next_sprite_byte: u8,
+    sprite_n: u32,
+    sprite_m: u32,
+    sprite_read_loop: bool,
+    block_oam_writes: bool,
+    found_sprites: u32,
+    sprite_reads: u32,
+    line_oam_index: usize,
+    
+    sprite_active: [u8; 8],
+    sprite_x: [u8; 8],
+    sprite_attr: [u8; 8],
+    sprite_pattern_high: [u8; 8],
+    sprite_pattern_low: [u8; 8],
+    sprite_render_index: usize,
 }
 
 impl Default for PpuState {
     fn default() -> PpuState {
         PpuState {
-            current_tick: Default::default(),
-            regs: Default::default(),
-            vblank: Default::default(),
-            sprite_zero_hit: Default::default(),
-            sprite_overflow: Default::default(),
-            last_write: Default::default(),
+            current_tick: 0,
+            frame: 0,
+            regs: [0;8],
+            vblank: false,
+            sprite_zero_hit: false,
+            sprite_overflow: false,
+            last_write: 0,
 
-            write_latch: Default::default(),
-            data_read_buffer: Default::default(),
+            write_latch: false,
 
-            vram_addr: Default::default(),
-            vram_addr_temp: Default::default(),
-            vram_fine_x: Default::default(),
+            data_read_buffer: 0,
 
-            oam_addr: Default::default(),
+            vram_addr: 0,
+            vram_addr_temp: 0,
+            vram_fine_x: 0,
+
+            oam_addr: 0,
             oam_data: [0; 256],
+            line_oam_data: [0; 32],
 
-            current_frame: Default::default(),
-            current_line: Default::default(),
+            current_frame: 0,
+            current_line: 0,
             stage: Stage::Dot(0,0),
 
-            palette_data: Default::default(),
+            palette_data: [0; 32],
 
             nametable_tile: 0,
-           
+
             attribute_low: 0,
             attribute_high: 0,
 
@@ -86,6 +108,23 @@ impl Default for PpuState {
             high_attr_shift: 0,
 
             screen: [0;256*240],
+
+            in_sprite_render: false,
+            next_sprite_byte: 0,
+            sprite_n: 0,
+            sprite_m: 0,
+            sprite_read_loop: false,
+            block_oam_writes: false,
+            found_sprites: 0,
+            sprite_reads: 0,
+            line_oam_index: 0,
+
+            sprite_active: [0; 8],
+            sprite_x: [0; 8],
+            sprite_attr: [0; 8],
+            sprite_pattern_high: [0; 8],
+            sprite_pattern_low: [0; 8],
+            sprite_render_index: 0,
         }
     }
 }
@@ -123,7 +162,7 @@ impl PpuState {
     fn is_sprites_enabled(&self) -> bool { self.regs[1] & 0x10 != 0 }
     fn is_background_enabled(&self) -> bool { self.regs[1] & 0x08 != 0 }
     fn is_left_sprites(&self) -> bool { self.regs[1] & 0x04 != 0 }
-    fn is_left_baclground(&self) -> bool { self.regs[1] & 0x02 != 0 }
+    fn is_left_background(&self) -> bool { self.regs[1] & 0x02 != 0 }
     fn is_grayscale(&self) -> bool { self.regs[1] & 0x01 != 0 }
     
     fn ppu_status(&self) -> u8 {
@@ -252,13 +291,23 @@ impl Ppu {
                 status
             }, //PPUSTATUS
             3 => state.ppu.oam_addr, //OAMADDR
-            4 => state.ppu.oam_data[state.ppu.oam_addr as usize], //OANDATA
+            4 => {
+                if state.ppu.in_sprite_render {
+                    0xff
+                } else {
+                    state.ppu.oam_data[state.ppu.oam_addr as usize]
+                }
+            }, //OANDATA
             5 => state.ppu.last_write,
             6 => state.ppu.last_write,
             7 => { //PPUDATA
                 let addr = state.ppu.vram_addr;
                 let result = if addr & 0x3f00 == 0x3f00 {
-                    state.ppu.palette_data[(addr & 0x1f) as usize]
+                    if state.ppu.is_grayscale() {
+                        state.ppu.palette_data[(addr & 0x1f) as usize] & 0x30
+                    } else {
+                        state.ppu.palette_data[(addr & 0x1f) as usize]
+                    }
                 } else {
                     state.ppu.data_read_buffer
                 };
@@ -281,7 +330,10 @@ impl Ppu {
             1 => state.ppu.regs[1] = value, //PPUMASK
             2 => state.ppu.regs[2] = value,
             3 => state.ppu.oam_addr = value, //OAMADDR
-            4 => state.ppu.oam_data[state.ppu.oam_addr as usize] = value, //OAMDATA
+            4 => {
+                state.ppu.oam_data[state.ppu.oam_addr as usize] = value;
+                state.ppu.oam_addr = state.ppu.oam_addr.wrapping_add(1);
+            }, //OAMDATA
             5 => { //PPUSCROLL
                 if state.ppu.write_latch {
                     let value = value as u16;
@@ -312,7 +364,8 @@ impl Ppu {
                 let addr = state.ppu.vram_addr;
                 self.bus.write(system, state, addr, value);
                 if addr & 0x3f00 == 0x3f00 {
-                    state.ppu.palette_data[(addr & 0x1f) as usize] = value;
+                    let addr  = if addr & 0x03 != 0 { addr & 0x1f } else { addr & 0x0f };
+                    state.ppu.palette_data[addr as usize] = value;
                 }
                 state.ppu.vram_addr += state.ppu.vram_inc();
             },
@@ -333,6 +386,9 @@ impl Ppu {
         match state.ppu.stage {
             Stage::Prerender(261, 1) => {
                 state.ppu.vblank = false;
+                state.ppu.sprite_zero_hit = false;
+                state.ppu.sprite_overflow = false;
+                state.ppu.frame += 1;
                 self.fetch_nametable(system, state);
             },
             Stage::Prerender(s, c) if c % 8 == 1 && c < 256 => {
@@ -369,6 +425,13 @@ impl Ppu {
             Stage::Prerender(s, c) if c == 328 || c == 336 => {
                 self.horz_increment(state);
                 self.load_bg_shifters(state);
+            },
+            Stage::Dot(0, 0) => {
+                //Skip tick on odd frames
+                if state.ppu.frame % 2 == 1 && state.ppu.is_background_enabled() {
+                    state.ppu.stage = state.ppu.stage.increment();
+                    self.fetch_nametable(system, state);    
+                }
             },
             Stage::Dot(s, c) if c % 8 == 1 => {
                 self.fetch_nametable(system, state);
@@ -419,6 +482,51 @@ impl Ppu {
         }
 
         match state.ppu.stage {
+            Stage::Dot(s, 1) => {
+                state.ppu.sprite_render_index = 0;
+                state.ppu.sprite_n = 0;
+                state.ppu.sprite_m = 0;
+                state.ppu.found_sprites = 0;
+                state.ppu.sprite_reads = 0;
+                state.ppu.line_oam_index = 0;
+                state.ppu.in_sprite_render = false;
+                state.ppu.sprite_read_loop = false;
+                state.ppu.block_oam_writes = false;
+                self.init_line_oam(system, state, 0);
+            },
+            Stage::Dot(s, d) if d >= 1 && d < 65 && d % 2 == 1 => {
+                state.ppu.in_sprite_render = false;
+                self.init_line_oam(system, state, d / 2);
+            },
+            Stage::Hblank(s, 256) => {
+                state.ppu.sprite_n = 0;
+                self.sprite_eval(system, state, s);
+            },
+            Stage::Dot(s, d) if d >= 65 && d % 2 == 0 => {
+                self.sprite_eval(system, state, s);
+            },
+            Stage::Dot(s, d) if d >= 65 && d % 2 == 1 => {
+                state.ppu.in_sprite_render = false;
+                self.sprite_read(system, state);
+            },
+            Stage::Hblank(s, d) if d >=257 && d < 320 && d % 8 == 1 => {
+                //Garbage Nametable
+                self.fetch_nametable(system, state);
+            },
+            Stage::Hblank(s, d) if d >=257 && d < 320 && d % 8 == 3 => {
+               //Garbage Nametable 
+                self.fetch_nametable(system, state);
+            },
+            Stage::Hblank(s, d) if d >=257 && d < 320 && d % 8 == 5 => {
+                self.sprite_fetch(system, state, s, false);
+            },
+            Stage::Hblank(s, d) if d >=257 && d < 320 && d % 8 == 7 => {
+                self.sprite_fetch(system, state, s, true);
+            },
+            _ => {}
+        }
+
+        match state.ppu.stage {
             Stage::Dot(s, c) => {
                 self.render(system, state, c, s);
             },
@@ -434,17 +542,220 @@ impl Ppu {
         let attr = ((((state.ppu.low_attr_shift >> 7) & 0x1) |
             ((state.ppu.high_attr_shift >> 6) & 0x2)) << 2) as u16;
 
-        let palette = color | attr | 0x3f00;
+        let attr = if color == 0 { 0 } else { attr };
 
-        let bg_result = state.ppu.palette_data[(palette & 0x1f) as usize];
-       
+        let palette = color | attr;
 
-        state.ppu.screen[((scanline * 256) + dot) as usize] = bg_result;
+        let mut sprite_pixel = 0;
+        let mut behind_bg = false;
+        let mut x = 8;
+        loop {
+            x -= 1;
+            if state.ppu.sprite_active[x] > 0 {
+                if state.ppu.sprite_active[x] <= 8 {
+                    let attr = state.ppu.sprite_attr[x];
+                    let high = state.ppu.sprite_pattern_high[x];
+                    let low = state.ppu.sprite_pattern_low[x];
+                    let flip_horz  = attr & 0x40 != 0;
+                    let pal = (attr & 0x3) << 2;
+
+                    let pal_bit = if flip_horz { 0x1 } else {0x80};
+                    let color = if high & pal_bit != 0 { 2 } else { 0 } |
+                                if low & pal_bit != 0 { 1 } else { 0 };
+                    
+                    if color != 0 {
+                        sprite_pixel = color | attr;
+                        behind_bg  = attr & 0x20 != 0;
+                    }
+                    
+                    state.ppu.sprite_active[x] += 1;
+
+                    if flip_horz {
+                        state.ppu.sprite_pattern_high[x] >>= 1;
+                        state.ppu.sprite_pattern_low[x] >>= 1;
+                    } else {
+                        state.ppu.sprite_pattern_high[x] <<= 1;
+                        state.ppu.sprite_pattern_low[x] <<= 1;
+                    }
+                }
+            } else {
+                if state.ppu.sprite_x[x] != 0 && state.ppu.sprite_x[x] != 0xff {
+                    state.ppu.sprite_x[x] -= 1;
+                }
+                if state.ppu.sprite_x[x] == 0 {
+                    if dot != 254 {
+                    }
+                    state.ppu.sprite_active[x] = 1;
+                }
+            }
+            if x == 0 { break; }
+        }
+
+        let bg_colored = color != 0;
+        let sprite_colored = sprite_pixel != 0;
+        
+        let pixel = match (bg_colored, sprite_colored, behind_bg) {
+        //let pixel = match (false, true, behind_bg) {
+            (false, false, _) => 0x3f00,
+            (false, true, _) => 0x3f10 | sprite_pixel as u16,
+            (true, false, _) => 0x3f00 | palette as u16,
+            (true, true, false) => {
+                state.ppu.sprite_zero_hit = true;
+                0x3f10 | sprite_pixel as u16 },
+            (true, true, true) => { 
+                state.ppu.sprite_zero_hit = true;
+                0x3f00 | palette as u16 },
+        };
+
+        let mut pixel_result = state.ppu.palette_data[(pixel & 0x1f) as usize];
+        
+        if state.ppu.is_grayscale() {
+            pixel_result &= 0x30;
+        }
+        
+        //TODO - Do emphasis bits
+        state.ppu.screen[((scanline * 256) + dot) as usize] = pixel_result;
 
         state.ppu.low_attr_shift <<= 1;
         state.ppu.high_attr_shift <<= 1;
         state.ppu.low_bg_shift <<= 1;
         state.ppu.high_bg_shift <<= 1;
+    }
+    fn sprite_fetch(&self, system: &System, state: &mut SystemState, scanline: u32, high: bool) {
+        if !state.ppu.is_sprites_enabled() { return; }
+        let is_tall = state.ppu.is_tall_sprites();
+        let is_on_line = |sprite_y, scanline| {
+            if is_tall {
+                (sprite_y as u32)+ 16 > scanline && (sprite_y as u32) <= scanline
+            } else {
+                (sprite_y as u32)+ 8 > scanline && (sprite_y as u32) <= scanline
+            }
+        };
+        let index = state.ppu.sprite_render_index;
+        let sprite_y = state.ppu.line_oam_data[(index * 4)];
+        let sprite_tile = state.ppu.line_oam_data[(index * 4) + 1] as u16;
+        let sprite_attr = state.ppu.line_oam_data[(index * 4) + 2];
+        let sprite_x = state.ppu.line_oam_data[(index * 4) + 3];
+        
+        let flip_vert  = sprite_attr & 0x80 != 0;
+        let line = if scanline >= sprite_y as u32 {
+            (scanline - sprite_y as u32) as u16
+        } else {
+            0
+        };
+        let line = if line > 8 { 0 } else { line };
+        let tile_addr = if state.ppu.is_tall_sprites() {
+            let bottom_half = line >= 8;
+            let line = if bottom_half { line - 8 } else { line };
+            let line = if flip_vert { 8 - line } else { line };
+            let pattern_table = (sprite_tile as u16 & 1) << 12;
+            let sprite_tile = sprite_tile & 0xfe;
+
+            match (flip_vert, bottom_half) {
+                (true , true ) | (false, false) => 
+                    ((sprite_tile << 4) | pattern_table) + line,
+                (false, true) | (true, false) => 
+                    (((sprite_tile + 1) << 4) | pattern_table) + line,
+            }
+        } else {
+            let line = if flip_vert { 8 - line } else { line };
+            ((sprite_tile << 4) | state.ppu.sprite_pattern_table()) + line
+        };
+
+        state.ppu.sprite_x[index] = sprite_x;
+        state.ppu.sprite_attr[index] = sprite_attr;
+        state.ppu.sprite_active[index] = 0;
+        if high {
+            state.ppu.sprite_pattern_high[index]
+                = self.bus.read(system, state, tile_addr | 0x08);
+            if !is_on_line(sprite_y, scanline){state.ppu.sprite_pattern_high[index] = 0};
+            state.ppu.sprite_render_index += 1;
+        } else {
+            state.ppu.sprite_pattern_low[index]
+                = self.bus.read(system, state, tile_addr);
+            if !is_on_line(sprite_y, scanline){state.ppu.sprite_pattern_low[index] = 0};
+        }
+    }
+
+    fn sprite_read(&self, system: &System, state: &mut SystemState) {
+        if !state.ppu.is_sprites_enabled() { return; }
+        state.ppu.next_sprite_byte = state.ppu.oam_data[((state.ppu.sprite_n * 4) + state.ppu.sprite_m) as usize];
+    }
+
+    fn sprite_eval(&self, system: &System, state: &mut SystemState, scanline: u32) {
+        if !state.ppu.is_sprites_enabled() { return; }
+        if state.ppu.sprite_read_loop { return; }
+        let is_tall = state.ppu.is_tall_sprites();
+        let is_on_line = |sprite_y, scanline| {
+            if is_tall {
+                (sprite_y as u32)+ 16 > scanline && (sprite_y as u32) <= scanline
+            } else {
+                (sprite_y as u32)+ 8 > scanline && (sprite_y as u32) <= scanline
+            }
+        };
+
+        if !state.ppu.block_oam_writes {
+            state.ppu.line_oam_data[state.ppu.line_oam_index] =
+                state.ppu.next_sprite_byte;
+        }
+        if state.ppu.found_sprites == 8 {
+            if state.ppu.sprite_reads != 0 {
+                state.ppu.sprite_m += 1;
+                state.ppu.sprite_m &= 3;
+                if state.ppu.sprite_m == 0 {
+                    state.ppu.sprite_n += 1;
+                    if state.ppu.sprite_n == 64 {
+                        state.ppu.sprite_read_loop = true;
+                        state.ppu.sprite_n = 0;
+                        state.ppu.sprite_m = 0;
+                    }
+                }
+                state.ppu.sprite_reads -= 1;
+            } else {
+                if is_on_line(state.ppu.next_sprite_byte, scanline) {
+                        state.ppu.sprite_overflow = true;
+                        state.ppu.sprite_m += 1;
+                        state.ppu.sprite_m &= 3;
+                        state.ppu.sprite_reads = 3;
+                    } else {
+                        state.ppu.sprite_n += 1;
+                        state.ppu.sprite_m += 1;
+                        state.ppu.sprite_m &= 3;
+                        if state.ppu.sprite_n == 64 {
+                            state.ppu.sprite_read_loop = true;
+                            state.ppu.sprite_n = 0;
+                        }
+                    }
+            }
+        } else { //Less then 8 sprites found
+            if state.ppu.sprite_reads != 0 {
+                state.ppu.sprite_m += 1;
+                state.ppu.sprite_m &= 3;
+                state.ppu.line_oam_index += 1;
+                state.ppu.sprite_reads -= 1;    
+            } else if is_on_line(state.ppu.next_sprite_byte, scanline) {
+                state.ppu.sprite_m += 1;
+                state.ppu.sprite_reads = 3;
+                state.ppu.line_oam_index += 1;
+                state.ppu.found_sprites += 1;
+            }
+            if state.ppu.sprite_reads == 0 {
+                state.ppu.sprite_n += 1;
+                state.ppu.sprite_m = 0;
+                if state.ppu.sprite_n == 64 {
+                    state.ppu.sprite_read_loop = true;
+                    state.ppu.sprite_n = 0;
+                } else if state.ppu.found_sprites == 8 {
+                    state.ppu.block_oam_writes = true;
+                }
+            }
+        }
+    }
+
+    fn init_line_oam(&self, system: &System, state: &mut SystemState, addr: u32) {
+        if !state.ppu.is_sprites_enabled() { return; }
+        state.ppu.in_sprite_render = true;
+        state.ppu.line_oam_data[addr as usize] = 0xff;
     }
 
     fn horz_increment(&self, state: &mut SystemState) {

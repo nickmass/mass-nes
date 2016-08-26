@@ -30,7 +30,7 @@ impl Debug {
         };
 
         let mut read_pc = |state| -> u8 {
-            addr_inc += 1;
+            addr_inc = addr_inc.wrapping_add(1);
             system.cpu.bus.peek(system, state, addr_inc)
         };
 
@@ -38,8 +38,8 @@ impl Debug {
 
         let instr_bytes_string = {
             let mut buf = String::new();
-            for x in addr..addr+len {
-                buf.push_str(&*format!(" {:02X}", read(state, x)));
+            for x in 0..len {
+                buf.push_str(&*format!(" {:02X}", read(state, x.wrapping_add(addr))));
             }
 
             buf

@@ -25,6 +25,7 @@ pub struct CpuState {
     flag_s: u32,
     pending_oam_dma: Option<u8>,
     oam_dma_buffer: u8,
+    oam_dma_addr: u16,
 
     pending_nmi: bool,
 }
@@ -177,17 +178,16 @@ impl Cpu {
     }
 
     fn oam_dma(&self, system: &System, state: &mut SystemState) {
-        let high_addr = state.cpu.pending_oam_dma.unwrap();
-        let high_addr = (high_addr as u16) << 8;
         match state.cpu.stage {
             Stage::OamDma(c) if c % 2 == 0 => {
+                let high_addr = state.cpu.oam_dma_addr;
                 state.cpu.oam_dma_buffer = 
                     self.bus.read(system, state, ((c / 2) as u16) | high_addr);
                 state.cpu.stage = state.cpu.stage.increment();
             },
             Stage::OamDma(c) if c % 2 == 1 => {
                 let value = state.cpu.oam_dma_buffer;
-                self.bus.write(system, state, 0x4014, value);
+                self.bus.write(system, state, 0x2004, value);
                 state.cpu.stage = state.cpu.stage.increment();
             },
             _ => unreachable!(),
@@ -234,8 +234,11 @@ impl Cpu {
 
     fn decode(&self, system: &System, state: &mut SystemState) {
         if state.cpu.pending_oam_dma.is_some() {
+            state.cpu.oam_dma_addr = (state.cpu.pending_oam_dma.unwrap() as u16) << 8;
+            state.cpu.pending_oam_dma = None;
             state.cpu.stage = Stage::OamDma(0);
             self.oam_dma(system, state);
+            return;
         };
         let pc = state.cpu.reg_pc;
         let value = self.read_pc(system, state);
@@ -258,8 +261,6 @@ impl Cpu {
             },
             (Addressing::Immediate, Stage::Address(0)) => {
                 state.cpu.op_addr = state.cpu.reg_pc as u16;
-                let add = state.cpu.op_addr;
-                let value = self.bus.read(system, state, add);
                 state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(1);
                 state.cpu.stage = Stage::Execute(0);
                 self.operation(system, state);

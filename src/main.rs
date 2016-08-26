@@ -11,7 +11,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 fn main() {
-    let mut file = ::std::fs::File::open("/home/nickmass/balloon.nes").unwrap();
+    let mut file = ::std::fs::File::open("/home/nickmass/smb.nes").unwrap();
     let region = Region::Ntsc;
     let pal = region.default_palette();
     let cart = Cartridge::load(&mut file).unwrap();
