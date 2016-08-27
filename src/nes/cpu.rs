@@ -27,7 +27,7 @@ pub struct CpuState {
     oam_dma_buffer: u8,
     oam_dma_addr: u16,
 
-    pending_nmi: bool,
+    pending_nmi: Option<u32>,
 }
 
 impl CpuState {
@@ -56,8 +56,12 @@ impl CpuState {
         self.pending_oam_dma = Some(addr);
     }
 
-    pub fn nmi_req(&mut self) {
-        self.pending_nmi = true;
+    pub fn nmi_req(&mut self, delay: u32) {
+        self.pending_nmi = Some(delay);
+    }
+
+    pub fn nmi_cancel(&mut self) {
+        self.pending_nmi = None;
     }
 }
 
@@ -235,11 +239,14 @@ impl Cpu {
     }
 
     fn decode(&self, system: &System, state: &mut SystemState) {
-        if state.cpu.pending_nmi {
+        if state.cpu.pending_nmi == Some(0) {
             state.cpu.stage = Stage::Nmi(0);
-            state.cpu.pending_nmi = false;
+            state.cpu.pending_nmi = None;
             self.nmi(system, state);
             return;
+        } else if state.cpu.pending_nmi.is_some() {
+            let val = state.cpu.pending_nmi.unwrap();
+            state.cpu.pending_nmi = Some(val - 1);
         }
         if state.cpu.pending_oam_dma.is_some() {
             state.cpu.oam_dma_addr = (state.cpu.pending_oam_dma.unwrap() as u16) << 8;

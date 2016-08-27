@@ -1,15 +1,12 @@
-use std::rc::Rc;
-use nes::bus::{DeviceMappings, RangeAndMask, AndEqualsAndMask, NotAndMask, Address, DeviceKind, AddressBus};
+use nes::bus::{DeviceMappings, RangeAndMask, AndEqualsAndMask, NotAndMask, Address, DeviceKind};
 use nes::cpu::{Cpu, CpuState};
 use nes::ppu::{Ppu, PpuState};
-use nes::cartridge::{Cartridge, CartridgeError};
-use nes::memory::{Pages, MemoryBlock};
+use nes::cartridge::Cartridge;
+use nes::memory::Pages;
 use nes::debug::{Debug, DebugState};
 use nes::input::{Input, InputState};
 
 pub use nes::input::{Controller, InputDevice};
-
-use std::io::Read;
 
 pub enum Region {
     Ntsc,

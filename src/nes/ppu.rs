@@ -5,6 +5,8 @@ use nes::memory::MemoryBlock;
 
 pub struct PpuState {
     current_tick: u64,
+    last_status_read: u64,
+    last_nmi_set: u64,
     frame: u32,
     regs: [u8;8],
     pub vblank: bool,
@@ -68,6 +70,8 @@ impl Default for PpuState {
     fn default() -> PpuState {
         PpuState {
             current_tick: 0,
+            last_status_read: 0,
+            last_nmi_set: 0,
             frame: 0,
             regs: [0;8],
             vblank: false,
@@ -270,7 +274,12 @@ impl Ppu {
             7 => { //PPUDATA
                 let addr = state.ppu.vram_addr;
                 let result = if addr & 0x3f00 == 0x3f00 {
-                    state.ppu.palette_data[(addr & 0x1f) as usize]
+                    let addr  = if addr & 0x03 != 0 { addr & 0x1f } else { addr & 0x0f };
+                    if state.ppu.is_grayscale() {
+                        state.ppu.palette_data[addr as usize] & 0x30
+                    } else {
+                        state.ppu.palette_data[addr as usize]
+                    }
                 } else {
                     state.ppu.data_read_buffer
                 };
@@ -288,6 +297,11 @@ impl Ppu {
                 state.ppu.write_latch = false;
                 let status = state.ppu.ppu_status();
                 state.ppu.vblank = false;
+                state.ppu.last_status_read = state.ppu.current_tick;
+                if state.ppu.last_nmi_set == state.ppu.current_tick ||
+                   state.ppu.last_nmi_set == state.ppu.current_tick - 1{
+                    state.cpu.nmi_cancel();
+                }
                 status
             }, //PPUSTATUS
             3 => state.ppu.oam_addr, //OAMADDR
@@ -303,10 +317,11 @@ impl Ppu {
             7 => { //PPUDATA
                 let addr = state.ppu.vram_addr;
                 let result = if addr & 0x3f00 == 0x3f00 {
+                    let addr  = if addr & 0x03 != 0 { addr & 0x1f } else { addr & 0x0f };
                     if state.ppu.is_grayscale() {
-                        state.ppu.palette_data[(addr & 0x1f) as usize] & 0x30
+                        state.ppu.palette_data[addr as usize] & 0x30
                     } else {
-                        state.ppu.palette_data[(addr & 0x1f) as usize]
+                        state.ppu.palette_data[addr as usize]
                     }
                 } else {
                     state.ppu.data_read_buffer
@@ -323,9 +338,20 @@ impl Ppu {
     pub fn write(&self, bus: BusKind, system: &System, state: &mut SystemState, address: u16, value: u8) {
         match address {
             0 => {
+                let was_nmi_enabled = state.ppu.is_nmi_enabled();
                 state.ppu.regs[0] = value;
                 state.ppu.vram_addr_temp &= 0xc00;
                 state.ppu.vram_addr_temp |= state.ppu.base_nametable();
+                match state.ppu.stage {
+                    Stage::Vblank(_, _) => {
+                        if !was_nmi_enabled && state.ppu.is_nmi_enabled() && 
+                            state.ppu.vblank {
+                            state.ppu.last_nmi_set = state.ppu.current_tick;
+                            state.cpu.nmi_req(1);
+                        }
+                    },
+                    _ => {}
+                }
             }, //PPUCTRL
             1 => state.ppu.regs[1] = value, //PPUMASK
             2 => state.ppu.regs[2] = value,
@@ -473,9 +499,12 @@ impl Ppu {
                 self.horz_reset(state);
             },
             Stage::Vblank(241, 1) => {
-                state.ppu.vblank = true;
-                if state.ppu.is_nmi_enabled() {
-                    state.cpu.nmi_req();
+                if state.ppu.current_tick != state.ppu.last_status_read + 1 {
+                    state.ppu.vblank = true;
+                    if state.ppu.is_nmi_enabled() {
+                        state.cpu.nmi_req(1);
+                        state.ppu.last_nmi_set = state.ppu.current_tick;
+                    }
                 }
             },
             _ => {}
@@ -537,8 +566,9 @@ impl Ppu {
     }
 
     fn render(&self, system: &System, state: &mut SystemState, dot: u32, scanline: u32) {
-        let color = (((state.ppu.low_bg_shift >> 15) & 0x1) |
-            ((state.ppu.high_bg_shift >> 14) & 0x2)) as u16;
+        let fine_x = state.ppu.vram_fine_x;
+        let color = ((((state.ppu.low_bg_shift << fine_x) >> 15) & 0x1) |
+            (((state.ppu.high_bg_shift << fine_x) >> 14) & 0x2)) as u16;
         let attr = ((((state.ppu.low_attr_shift >> 7) & 0x1) |
             ((state.ppu.high_attr_shift >> 6) & 0x2)) << 2) as u16;
 
@@ -591,11 +621,11 @@ impl Ppu {
             if x == 0 { break; }
         }
 
-        let bg_colored = color != 0;
-        let sprite_colored = sprite_pixel != 0;
+        let bg_colored = color != 0 && (dot > 7 || state.ppu.is_left_background());
+        let sprite_colored = sprite_pixel != 0 && 
+            (dot > 7 || state.ppu.is_left_sprites());
         
         let pixel = match (bg_colored, sprite_colored, behind_bg) {
-        //let pixel = match (false, true, behind_bg) {
             (false, false, _) => 0x3f00,
             (false, true, _) => 0x3f10 | sprite_pixel as u16,
             (true, false, _) => 0x3f00 | palette as u16,
@@ -607,7 +637,8 @@ impl Ppu {
                 0x3f00 | palette as u16 },
         };
 
-        let mut pixel_result = state.ppu.palette_data[(pixel & 0x1f) as usize];
+        let addr  = if pixel & 0x03 != 0 { pixel & 0x1f } else { pixel & 0x0f };
+        let mut pixel_result = state.ppu.palette_data[addr as usize];
         
         if state.ppu.is_grayscale() {
             pixel_result &= 0x30;
@@ -836,11 +867,11 @@ impl Ppu {
         let at_addr = 0x23c0 | (v & 0x0c00) | ((v >> 4) & 0x38) | ((v >> 2) & 0x07);
         let attr = self.bus.read(system, state, at_addr);
 
-        let tile_num = state.ppu.vram_addr & 0xfff;
-        let tile_x = tile_num % 16;
-        let tile_y = tile_num / 16;
+        let tile_num = state.ppu.vram_addr & 0x3ff;
+        let tile_x = tile_num % 32;
+        let tile_y = tile_num / 32;
 
-        let attr_quad = (tile_y % 2, tile_x % 2);
+        let attr_quad = ((tile_y >> 1) & 1, (tile_x >> 1) & 1);
         match attr_quad {
             (0,0) => {
                 state.ppu.attribute_low = (attr >> 0) & 1;
