@@ -57,12 +57,9 @@ impl<FR, FC, FI, I> Machine<FR, FC, FI, I> where
     }
 
     pub fn run(&mut self) {
-        let mut i = 0;
         self.system.cpu.power(&self.system, &mut self.state);
         let mut last_vblank = false;
         loop {
-            if i < 0{ return; }
-            i += 1;
             self.system.cpu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);

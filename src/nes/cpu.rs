@@ -139,11 +139,6 @@ impl Cpu {
 
     pub fn tick(&self, system: &System, state: &mut SystemState) {
         state.cpu.current_tick += 1;
-        if state.cpu.pending_nmi {
-            state.cpu.decode_stack.clear();
-            state.cpu.stage = Stage::Nmi(0);
-            state.cpu.pending_nmi = false;
-        }
         match state.cpu.stage {
             Stage::Fetch => {
                 self.decode(system, state);
@@ -240,6 +235,12 @@ impl Cpu {
     }
 
     fn decode(&self, system: &System, state: &mut SystemState) {
+        if state.cpu.pending_nmi {
+            state.cpu.stage = Stage::Nmi(0);
+            state.cpu.pending_nmi = false;
+            self.nmi(system, state);
+            return;
+        }
         if state.cpu.pending_oam_dma.is_some() {
             state.cpu.oam_dma_addr = (state.cpu.pending_oam_dma.unwrap() as u16) << 8;
             state.cpu.pending_oam_dma = None;
@@ -518,63 +519,182 @@ impl Cpu {
     }
 
     fn operation(&self, system: &System, state: &mut SystemState) {
-        let current = (state.cpu.op.instruction, state.cpu.stage);
         let addr = state.cpu.op_addr;
-        match current {
-            (Instruction::Adc, Stage::Execute(0)) => {
-                let value = self.bus.read(system, state, addr) as u32;
-                let temp = state.cpu.reg_a.wrapping_add(
-                    value.wrapping_add(state.cpu.flag_c));
-                state.cpu.flag_v = ((!(state.cpu.reg_a ^ value) &
-                                 (state.cpu.reg_a ^ temp)) >> 7) & 1;
-                state.cpu.flag_c  = if temp > 0xff { 1 } else { 0 };
-                state.cpu.reg_a = temp & 0xff;
-                state.cpu.flag_s = temp & 0xff;
-                state.cpu.flag_z = temp & 0xff;
-            },
-            (Instruction::And, Stage::Execute(0)) => {
-                let value = self.bus.read(system, state, addr) as u32 & state.cpu.reg_a;
-                state.cpu.reg_a = value;
-                state.cpu.flag_s = value;
-                state.cpu.flag_z = value;
-            },
-            (Instruction::Asl, Stage::Execute(0)) => {
+        if let Stage::Execute(stage) = state.cpu.stage {
+            let res = match state.cpu.op.instruction {
+                Instruction::Adc => self.inst_adc(system, state, addr),
+                Instruction::And => self.inst_and(system, state, addr),
+                Instruction::Asl => self.inst_asl(system, state, addr, stage),
+                Instruction::Bcc => {
+                    let cond = state.cpu.flag_c == 0;
+                    self.inst_branch(system, state, addr, stage, cond)
+                },
+                Instruction::Bcs => {
+                    let cond = state.cpu.flag_c != 0;
+                    self.inst_branch(system, state, addr, stage, cond)
+                },
+                Instruction::Beq => {
+                    let cond = state.cpu.flag_z == 0;
+                    self.inst_branch(system, state, addr, stage, cond)
+                },
+                Instruction::Bit => self.inst_bit(system, state, addr),
+                Instruction::Bmi => {
+                    let cond = state.cpu.flag_s & 0x80 != 0;
+                    self.inst_branch(system, state, addr, stage, cond)
+                },
+                Instruction::Bne => {
+                    let cond = state.cpu.flag_z != 0;
+                    self.inst_branch(system, state, addr, stage, cond)
+                },
+                Instruction::Bpl => {
+                    let cond = state.cpu.flag_s & 0x80 == 0;
+                    self.inst_branch(system, state, addr, stage, cond)
+                },
+                Instruction::Brk => self.inst_brk(system, state, addr, stage),
+                Instruction::Bvc => {
+                    let cond = state.cpu.flag_v == 0;
+                    self.inst_branch(system, state, addr, stage, cond)
+                },
+                Instruction::Bvs => {
+                    let cond = state.cpu.flag_v != 0;
+                    self.inst_branch(system, state, addr, stage, cond)
+                },
+                Instruction::Clc => self.inst_clc(system, state),
+                Instruction::Cld => self.inst_cld(system, state),
+                Instruction::Cli => self.inst_cli(system, state),
+                Instruction::Clv => self.inst_clv(system, state), 
+                Instruction::Cmp => self.inst_cmp(system, state, addr),
+                Instruction::Cpx => self.inst_cpx(system, state, addr),
+                Instruction::Cpy => self.inst_cpy(system, state, addr), 
+                Instruction::Dec => self.inst_dec(system, state, addr, stage), 
+                Instruction::Dex => self.inst_dex(system, state),
+                Instruction::Dey => self.inst_dey(system, state), 
+                Instruction::Eor => self.inst_eor(system, state, addr),
+                Instruction::Inc => self.inst_inc(system, state, addr, stage), 
+                Instruction::Inx => self.inst_inx(system, state),
+                Instruction::Iny => self.inst_iny(system, state), 
+                Instruction::Jmp => self.inst_jmp(system, state, addr), 
+                Instruction::Jsr => self.inst_jsr(system, state, addr, stage),
+                Instruction::Lda => self.inst_lda(system, state, addr), 
+                Instruction::Ldx => self.inst_ldx(system, state, addr), 
+                Instruction::Ldy => self.inst_ldy(system, state, addr), 
+                Instruction::Lsr => self.inst_lsr(system, state, addr, stage),  
+                Instruction::Nop => self.inst_nop(system, state),
+                Instruction::Ora => self.inst_ora(system, state, addr), 
+                Instruction::Pha => self.inst_pha(system, state), 
+                Instruction::Php => self.inst_php(system, state), 
+                Instruction::Pla => self.inst_pla(system, state, stage), 
+                Instruction::Plp => self.inst_plp(system, state, stage), 
+                Instruction::Rol => self.inst_rol(system, state, addr, stage), 
+                Instruction::Ror => self.inst_ror(system, state, addr, stage), 
+                Instruction::Rti => self.inst_rti(system, state, stage), 
+                Instruction::Rts => self.inst_rts(system, state, stage), 
+                Instruction::Sbc => self.inst_sbc(system, state, addr), 
+                Instruction::Sec => self.inst_sec(system, state),
+                Instruction::Sed => self.inst_sed(system, state),
+                Instruction::Sei => self.inst_sei(system, state), 
+                Instruction::Sta => self.inst_sta(system, state, addr),
+                Instruction::Stx => self.inst_stx(system, state, addr), 
+                Instruction::Sty => self.inst_sty(system, state, addr), 
+                Instruction::Tax => self.inst_tax(system, state),
+                Instruction::Tay => self.inst_tay(system, state),
+                Instruction::Tsx => self.inst_tsx(system, state), 
+                Instruction::Txa => self.inst_txa(system, state), 
+                Instruction::Txs => self.inst_txs(system, state),
+                Instruction::Tya => self.inst_tya(system, state),
+                _ => {
+                    println!("ILLEGAL");
+                    StageResult::Done
+                }
+            };
+
+            match res {
+                StageResult::Continue => {
+                    state.cpu.stage = state.cpu.stage.increment();
+                },
+                StageResult::Done => {
+                    state.cpu.stage = Stage::Fetch;
+                },
+                StageResult::Next => {
+                    state.cpu.stage = Stage::Fetch;
+                    self.decode(system, state);
+                }
+            }
+        } else {
+            unreachable!();
+        }
+    }
+
+    fn inst_adc(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        let value = self.bus.read(system, state, addr) as u32;
+        let temp = state.cpu.reg_a.wrapping_add(
+            value.wrapping_add(state.cpu.flag_c));
+        state.cpu.flag_v = ((!(state.cpu.reg_a ^ value) &
+                             (state.cpu.reg_a ^ temp)) >> 7) & 1;
+        state.cpu.flag_c  = if temp > 0xff { 1 } else { 0 };
+        state.cpu.reg_a = temp & 0xff;
+        state.cpu.flag_s = temp & 0xff;
+        state.cpu.flag_z = temp & 0xff;
+        StageResult::Done
+    }
+
+    fn inst_and(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        let value = self.bus.read(system, state, addr) as u32 & state.cpu.reg_a;
+        state.cpu.reg_a = value;
+        state.cpu.flag_s = value;
+        state.cpu.flag_z = value;
+        StageResult::Done
+    }
+    
+    fn inst_asl(&self, system: &System, state: &mut SystemState, addr: u16, stage: u32)
+    -> StageResult {
+        match stage {
+            0 => {
                 if state.cpu.op.addressing == Addressing::Accumulator {
                     state.cpu.flag_c = (state.cpu.reg_a >> 7) & 1;
                     state.cpu.reg_a = (state.cpu.reg_a << 1) & 0xff;
                     state.cpu.flag_s = state.cpu.reg_a;
                     state.cpu.flag_z = state.cpu.reg_a;
-                    state.cpu.stage = Stage::Fetch;
-                    self.decode(system, state);
-                    return;
+                    StageResult::Next
                 } else {
                     let value = self.bus.read(system, state, addr);
                     state.cpu.decode_stack.push_back(value);
+                    StageResult::Continue
                 }
             },
-            (Instruction::Asl, Stage::Execute(1)) => {
+            1 => {
                 let value = state.cpu.decode_stack.pop_back().unwrap();
                 self.bus.write(system, state, addr, value);
                 state.cpu.decode_stack.push_back(value);
+                StageResult::Continue
             },
-            (Instruction::Asl, Stage::Execute(2)) => {
+            2 => {
                 let mut value = state.cpu.decode_stack.pop_back().unwrap() as u32;
                 state.cpu.flag_c = (value >> 7) & 1;
                 value = (value << 1) & 0xff;
                 state.cpu.flag_z = value;
                 state.cpu.flag_s = value;
                 self.bus.write(system, state, addr, value as u8);
+                StageResult::Done
             },
-            (Instruction::Bcc, Stage::Execute(0)) => {
-                if state.cpu.flag_c == 0 {
+            _ => unreachable!(),
+        }
+    }
+
+    fn inst_branch(&self, system: &System, state: &mut SystemState, addr: u16,
+    stage: u32, condition: bool) -> StageResult {
+        match stage {
+            0 => {
+                if condition {
                     let _ = self.bus.read(system, state, addr);
+                    StageResult::Continue
                 } else {
-                    state.cpu.stage = Stage::Fetch;
-                    self.decode(system, state);
-                    return;
+                    StageResult::Next
                 }
             },
-            (Instruction::Bcc, Stage::Execute(1)) => {
+            1 => {
                 if addr < 0x080 {
                     if state.cpu.reg_pc & 0xff00 != 
                             (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff00) {
@@ -582,11 +702,10 @@ impl Cpu {
                             (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff);
                         let _ = self.bus.read(system, state, temp as u16);
                         state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
+                        StageResult::Done
                     } else {
                         state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
-                        state.cpu.stage = Stage::Fetch;
-                        self.decode(system, state);
-                        return;
+                        StageResult::Next
                     }
                 } else {
                     if state.cpu.reg_pc & 0xff00 != 
@@ -598,502 +717,280 @@ impl Cpu {
                         let _ = self.bus.read(system, state, temp as u16);
                         state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
                             .wrapping_sub(256);
+                        StageResult::Done
                     } else {
                         state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
                             .wrapping_sub(256);
-                        state.cpu.stage = Stage::Fetch;
-                        self.decode(system, state);
-                        return;
+                        StageResult::Next
                     }
                 }
             },
-            (Instruction::Bcs, Stage::Execute(0)) => {
-                if state.cpu.flag_c != 0 {
-                    let _ = self.bus.read(system, state, addr);
-                } else {
-                    state.cpu.stage = Stage::Fetch;
-                    self.decode(system, state);
-                    return;
-                }
-            },
-            (Instruction::Bcs, Stage::Execute(1)) => {
-                if addr < 0x080 {
-                    if state.cpu.reg_pc & 0xff00 != 
-                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff00) {
-                        let temp = (state.cpu.reg_pc & 0xff00) |
-                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff);
-                        let _ = self.bus.read(system, state, temp as u16);
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
-                    } else {
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
-                        state.cpu.stage = Stage::Fetch;
-                        self.decode(system, state);
-                        return;
-                    }
-                } else {
-                    if state.cpu.reg_pc & 0xff00 != 
-                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
-                             & 0xff00) {
-                        let temp = (state.cpu.reg_pc & 0xff00) |
-                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
-                             & 0xff);
-                        let _ = self.bus.read(system, state, temp as u16);
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
-                            .wrapping_sub(256);
-                    } else {
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
-                            .wrapping_sub(256);
-                        state.cpu.stage = Stage::Fetch;
-                        self.decode(system, state);
-                        return;
-                    }
-                }
-            },
-            (Instruction::Beq, Stage::Execute(0)) => {
-                if state.cpu.flag_z == 0 {
-                    let _ = self.bus.read(system, state, addr);
-                } else {
-                    state.cpu.stage = Stage::Fetch;
-                    self.decode(system, state);
-                    return;
-                }
-            },
-            (Instruction::Beq, Stage::Execute(1)) => {
-                if addr < 0x080 {
-                    if state.cpu.reg_pc & 0xff00 != 
-                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff00) {
-                        let temp = (state.cpu.reg_pc & 0xff00) |
-                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff);
-                        let _ = self.bus.read(system, state, temp as u16);
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
-                    } else {
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
-                        state.cpu.stage = Stage::Fetch;
-                        self.decode(system, state);
-                        return;
-                    }
-                } else {
-                    if state.cpu.reg_pc & 0xff00 != 
-                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
-                             & 0xff00) {
-                        let temp = (state.cpu.reg_pc & 0xff00) |
-                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
-                             & 0xff);
-                        let _ = self.bus.read(system, state, temp as u16);
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
-                            .wrapping_sub(256);
-                    } else {
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
-                            .wrapping_sub(256);
-                        state.cpu.stage = Stage::Fetch;
-                        self.decode(system, state);
-                        return;
-                    }
-                }
-            },
-            (Instruction::Bit, Stage::Execute(0)) => {
-                let value = self.bus.read(system, state, addr) as u32;
-                state.cpu.flag_s = value & 0x80;
-                state.cpu.flag_v = (value >> 6) & 1;
-                state.cpu.flag_z = value & state.cpu.reg_a;
-            },
-            (Instruction::Bmi, Stage::Execute(0)) => {
-                if state.cpu.flag_s & 0x80 != 0 {
-                    let _ = self.bus.read(system, state, addr);
-                } else {
-                    state.cpu.stage = Stage::Fetch;
-                    self.decode(system, state);
-                    return;
-                }
-            },
-            (Instruction::Bmi, Stage::Execute(1)) => {
-                if addr < 0x080 {
-                    if state.cpu.reg_pc & 0xff00 != 
-                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff00) {
-                        let temp = (state.cpu.reg_pc & 0xff00) |
-                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff);
-                        let _ = self.bus.read(system, state, temp as u16);
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
-                    } else {
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
-                        state.cpu.stage = Stage::Fetch;
-                        self.decode(system, state);
-                        return;
-                    }
-                } else {
-                    if state.cpu.reg_pc & 0xff00 != 
-                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
-                             & 0xff00) {
-                        let temp = (state.cpu.reg_pc & 0xff00) |
-                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
-                             & 0xff);
-                        let _ = self.bus.read(system, state, temp as u16);
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
-                            .wrapping_sub(256);
-                    } else {
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
-                            .wrapping_sub(256);
-                        state.cpu.stage = Stage::Fetch;
-                        self.decode(system, state);
-                        return;
-                    }
-                }
-            },
-            (Instruction::Bne, Stage::Execute(0)) => {
-                if state.cpu.flag_z != 0 {
-                    let _ = self.bus.read(system, state, addr);
-                } else {
-                    state.cpu.stage = Stage::Fetch;
-                    self.decode(system, state);
-                    return;
-                }
-            },
-            (Instruction::Bne, Stage::Execute(1)) => {
-                if addr < 0x080 {
-                    if state.cpu.reg_pc & 0xff00 != 
-                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff00) {
-                        let temp = (state.cpu.reg_pc & 0xff00) |
-                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff);
-                        let _ = self.bus.read(system, state, temp as u16);
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
-                    } else {
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
-                        state.cpu.stage = Stage::Fetch;
-                        self.decode(system, state);
-                        return;
-                    }
-                } else {
-                    if state.cpu.reg_pc & 0xff00 != 
-                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
-                             & 0xff00) {
-                        let temp = (state.cpu.reg_pc & 0xff00) |
-                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
-                             & 0xff);
-                        let _ = self.bus.read(system, state, temp as u16);
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
-                            .wrapping_sub(256);
-                    } else {
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
-                            .wrapping_sub(256);
-                        state.cpu.stage = Stage::Fetch;
-                        self.decode(system, state);
-                        return;
-                    }
-                }
-            },
-            (Instruction::Bpl, Stage::Execute(0)) => {
-                if state.cpu.flag_s & 0x80 == 0 {
-                    let _ = self.bus.read(system, state, addr);
-                } else {
-                    state.cpu.stage = Stage::Fetch;
-                    self.decode(system, state);
-                    return;
-                }
-            },
-            (Instruction::Bpl, Stage::Execute(1)) => {
-                if addr < 0x080 {
-                    if state.cpu.reg_pc & 0xff00 != 
-                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff00) {
-                        let temp = (state.cpu.reg_pc & 0xff00) |
-                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff);
-                        let _ = self.bus.read(system, state, temp as u16);
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
-                    } else {
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
-                        state.cpu.stage = Stage::Fetch;
-                        self.decode(system, state);
-                        return;
-                    }
-                } else {
-                    if state.cpu.reg_pc & 0xff00 != 
-                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
-                             & 0xff00) {
-                        let temp = (state.cpu.reg_pc & 0xff00) |
-                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
-                             & 0xff);
-                        let _ = self.bus.read(system, state, temp as u16);
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
-                            .wrapping_sub(256);
-                    } else {
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
-                            .wrapping_sub(256);
-                        state.cpu.stage = Stage::Fetch;
-                        self.decode(system, state);
-                        return;
-                    }
-                }
-            },
-            (Instruction::Brk, Stage::Execute(0)) => {
+            _ => unreachable!(),
+        }
+    }
+
+    fn inst_bit(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult { 
+        let value = self.bus.read(system, state, addr) as u32;
+        state.cpu.flag_s = value & 0x80;
+        state.cpu.flag_v = (value >> 6) & 1;
+        state.cpu.flag_z = value & state.cpu.reg_a;
+        StageResult::Done
+    }
+
+    fn inst_brk(&self, system: &System, state: &mut SystemState, addr: u16, stage: u32)
+    -> StageResult {
+        match stage {
+            0 => {
                 let _ = self.bus.read(system, state, addr);
+                StageResult::Continue
             },
-            (Instruction::Brk, Stage::Execute(1)) => {
+            1 => {
                 let value = state.cpu.reg_pc >> 8 & 0xff;
                 self.push_stack(system, state, value as u8);
+                StageResult::Continue
             },
-            (Instruction::Brk, Stage::Execute(2)) => {
+            2 => {
                 let value = state.cpu.reg_pc & 0xff;
                 self.push_stack(system, state, value as u8);
+                StageResult::Continue
             },
-            (Instruction::Brk, Stage::Execute(3)) => {
+            3 => {
                 let value = state.cpu.reg_p() | 0x30;
                 self.push_stack(system, state, value);
                 state.cpu.flag_i = 1;
+                StageResult::Continue
             },
-            (Instruction::Brk, Stage::Execute(4)) => {
+            4 => {
                 let value = self.bus.read(system, state, 0xfffe);
                 state.cpu.decode_stack.push_back(value);
+                StageResult::Continue
             },
-            (Instruction::Brk, Stage::Execute(5)) => {
+            5 => {
                 let high_value = self.bus.read(system, state, 0xffff);
                 let value = state.cpu.decode_stack.pop_back().unwrap();
                 state.cpu.reg_pc = value as u32 | ((high_value as u32) <<  0x8);
+                StageResult::Done
             },
-            (Instruction::Bvc, Stage::Execute(0)) => {
-                if state.cpu.flag_v == 0 {
-                    let _ = self.bus.read(system, state, addr);
-                } else {
-                    state.cpu.stage = Stage::Fetch;
-                    self.decode(system, state);
-                    return;
-                }
-            },
-            (Instruction::Bvc, Stage::Execute(1)) => {
-                if addr < 0x080 {
-                    if state.cpu.reg_pc & 0xff00 != 
-                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff00) {
-                        let temp = (state.cpu.reg_pc & 0xff00) |
-                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff);
-                        let _ = self.bus.read(system, state, temp as u16);
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
-                    } else {
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
-                        state.cpu.stage = Stage::Fetch;
-                        self.decode(system, state);
-                        return;
-                    }
-                } else {
-                    if state.cpu.reg_pc & 0xff00 != 
-                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
-                             & 0xff00) {
-                        let temp = (state.cpu.reg_pc & 0xff00) |
-                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
-                             & 0xff);
-                        let _ = self.bus.read(system, state, temp as u16);
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
-                            .wrapping_sub(256);
-                    } else {
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
-                            .wrapping_sub(256);
-                        state.cpu.stage = Stage::Fetch;
-                        self.decode(system, state);
-                        return;
-                    }
-                }
-            },
-            (Instruction::Bvs, Stage::Execute(0)) => {
-                if state.cpu.flag_v != 0 {
-                    let _ = self.bus.read(system, state, addr);
-                } else {
-                    state.cpu.stage = Stage::Fetch;
-                    self.decode(system, state);
-                    return;
-                }
-            },
-            (Instruction::Bvs, Stage::Execute(1)) => {
-                if addr < 0x080 {
-                    if state.cpu.reg_pc & 0xff00 != 
-                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff00) {
-                        let temp = (state.cpu.reg_pc & 0xff00) |
-                            (state.cpu.reg_pc.wrapping_add(addr as u32) & 0xff);
-                        let _ = self.bus.read(system, state, temp as u16);
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
-                    } else {
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32);
-                        state.cpu.stage = Stage::Fetch;
-                        self.decode(system, state);
-                        return;
-                    }
-                } else {
-                    if state.cpu.reg_pc & 0xff00 != 
-                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
-                             & 0xff00) {
-                        let temp = (state.cpu.reg_pc & 0xff00) |
-                            (state.cpu.reg_pc.wrapping_add(addr as u32).wrapping_sub(256)
-                             & 0xff);
-                        let _ = self.bus.read(system, state, temp as u16);
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
-                            .wrapping_sub(256);
-                    } else {
-                        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(addr as u32)
-                            .wrapping_sub(256);
-                        state.cpu.stage = Stage::Fetch;
-                        self.decode(system, state);
-                        return;
-                    }
-                }
-            },
-            (Instruction::Clc, Stage::Execute(0)) => {
-                state.cpu.flag_c = 0;
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            },
-            (Instruction::Cld, Stage::Execute(0)) => {
-                state.cpu.flag_d = 0;
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            },
-            (Instruction::Cli, Stage::Execute(0)) => {
-                state.cpu.flag_i = 0;
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            },
-            (Instruction::Clv, Stage::Execute(0)) => {
-                state.cpu.flag_v = 0;
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            },
-            (Instruction::Cmp, Stage::Execute(0)) => {
-                let value = self.bus.read(system, state, addr) as u32;
-                state.cpu.flag_c = if state.cpu.reg_a >= value { 1 } else { 0 };
-                state.cpu.flag_z = if state.cpu.reg_a == value { 0 } else { 1 };
-                state.cpu.flag_s = state.cpu.reg_a.wrapping_sub(value) & 0xff;
-            },
-            (Instruction::Cpx, Stage::Execute(0)) => {
-                let value = self.bus.read(system, state, addr) as u32;
-                state.cpu.flag_c = if state.cpu.reg_x >= value { 1 } else { 0 };
-                state.cpu.flag_z = if state.cpu.reg_x == value { 0 } else { 1 };
-                state.cpu.flag_s = state.cpu.reg_x.wrapping_sub(value) & 0xff;
-            },
-            (Instruction::Cpy, Stage::Execute(0)) => {
-                let value = self.bus.read(system, state, addr) as u32;
-                state.cpu.flag_c = if state.cpu.reg_y >= value { 1 } else { 0 };
-                state.cpu.flag_z = if state.cpu.reg_y == value { 0 } else { 1 };
-                state.cpu.flag_s = state.cpu.reg_y.wrapping_sub(value) & 0xff;
-            },
-            (Instruction::Dec, Stage::Execute(0)) => {
+            _ => unreachable!()
+        }
+    }
+
+    fn inst_clc(&self, system: &System, state: &mut SystemState)
+    -> StageResult {
+        state.cpu.flag_c = 0;
+        StageResult::Next
+    }
+
+    fn inst_cld(&self, system: &System, state: &mut SystemState)
+    -> StageResult {
+        state.cpu.flag_d = 0;
+        StageResult::Next
+    }
+
+    fn inst_cli(&self, system: &System, state: &mut SystemState)
+    -> StageResult {
+        state.cpu.flag_i = 0;
+        StageResult::Next
+    }
+
+    fn inst_clv(&self, system: &System, state: &mut SystemState)
+    -> StageResult {
+        state.cpu.flag_v = 0;
+        StageResult::Next
+    }
+
+    fn inst_cmp(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        let value = self.bus.read(system, state, addr) as u32;
+        state.cpu.flag_c = if state.cpu.reg_a >= value { 1 } else { 0 };
+        state.cpu.flag_z = if state.cpu.reg_a == value { 0 } else { 1 };
+        state.cpu.flag_s = state.cpu.reg_a.wrapping_sub(value) & 0xff;
+        StageResult::Done
+    }
+
+    fn inst_cpx(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        let value = self.bus.read(system, state, addr) as u32;
+        state.cpu.flag_c = if state.cpu.reg_x >= value { 1 } else { 0 };
+        state.cpu.flag_z = if state.cpu.reg_x == value { 0 } else { 1 };
+        state.cpu.flag_s = state.cpu.reg_x.wrapping_sub(value) & 0xff;
+        StageResult::Done
+    }
+
+    fn inst_cpy(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        let value = self.bus.read(system, state, addr) as u32;
+        state.cpu.flag_c = if state.cpu.reg_y >= value { 1 } else { 0 };
+        state.cpu.flag_z = if state.cpu.reg_y == value { 0 } else { 1 };
+        state.cpu.flag_s = state.cpu.reg_y.wrapping_sub(value) & 0xff;
+        StageResult::Done
+    }
+
+    fn inst_dec(&self, system: &System, state: &mut SystemState, addr: u16, stage: u32)
+    -> StageResult {
+        match stage {
+            0 => {
                 let value = self.bus.read(system, state, addr);
                 state.cpu.decode_stack.push_back(value);
+                StageResult::Continue
             },
-            (Instruction::Dec, Stage::Execute(1)) => {
+            1 => {
                 let value = state.cpu.decode_stack.pop_back().unwrap();
                 self.bus.write(system, state, addr, value);
                 let value = value.wrapping_sub(1) & 0xff;
                 state.cpu.flag_s = value as u32;
                 state.cpu.flag_z = value as u32;
                 state.cpu.decode_stack.push_back(value);
+                StageResult::Continue
             },
-            (Instruction::Dec, Stage::Execute(2)) => {
+            2 => {
                 let value = state.cpu.decode_stack.pop_back().unwrap();
                 self.bus.write(system, state, addr, value);
+                StageResult::Done
             },
-            (Instruction::Dex, Stage::Execute(0)) => {
-                state.cpu.reg_x = state.cpu.reg_x.wrapping_sub(1) & 0xff;
-                state.cpu.flag_s = state.cpu.reg_x;
-                state.cpu.flag_z = state.cpu.reg_x;
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            },
-            (Instruction::Dey, Stage::Execute(0)) => {
-                state.cpu.reg_y = state.cpu.reg_y.wrapping_sub(1) & 0xff;
-                state.cpu.flag_s = state.cpu.reg_y;
-                state.cpu.flag_z = state.cpu.reg_y;
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            },
-            (Instruction::Eor, Stage::Execute(0)) => {
-                let value = self.bus.read(system, state, addr) as u32;
-                state.cpu.reg_a ^= value;
-                state.cpu.reg_a &= 0xff;
-                state.cpu.flag_s = state.cpu.reg_a;
-                state.cpu.flag_z = state.cpu.reg_a;
-            },
-            (Instruction::Inc, Stage::Execute(0)) => {
+            _ => unreachable!()
+        }
+    }
+
+    fn inst_dex(&self, system: &System, state: &mut SystemState)
+    -> StageResult {
+        state.cpu.reg_x = state.cpu.reg_x.wrapping_sub(1) & 0xff;
+        state.cpu.flag_s = state.cpu.reg_x;
+        state.cpu.flag_z = state.cpu.reg_x;
+        StageResult::Next
+    }
+    
+    fn inst_dey(&self, system: &System, state: &mut SystemState)
+    -> StageResult {
+        state.cpu.reg_y = state.cpu.reg_y.wrapping_sub(1) & 0xff;
+        state.cpu.flag_s = state.cpu.reg_y;
+        state.cpu.flag_z = state.cpu.reg_y;
+        StageResult::Next
+    }
+
+    fn inst_eor(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        let value = self.bus.read(system, state, addr) as u32;
+        state.cpu.reg_a ^= value;
+        state.cpu.reg_a &= 0xff;
+        state.cpu.flag_s = state.cpu.reg_a;
+        state.cpu.flag_z = state.cpu.reg_a;
+        StageResult::Done
+    }
+
+    fn inst_inc(&self, system: &System, state: &mut SystemState, addr: u16, stage: u32)
+    -> StageResult {
+        match stage {
+            0 => {
                 let value = self.bus.read(system, state, addr);
                 state.cpu.decode_stack.push_back(value);
+                StageResult::Continue
             },
-            (Instruction::Inc, Stage::Execute(1)) => {
+            1 => {
                 let value = state.cpu.decode_stack.pop_back().unwrap();
                 self.bus.write(system, state, addr, value);
                 let value = value.wrapping_add(1) & 0xff;
                 state.cpu.flag_s = value as u32;
                 state.cpu.flag_z = value as u32;
                 state.cpu.decode_stack.push_back(value);
-            },
-            (Instruction::Inc, Stage::Execute(2)) => {
+                StageResult::Continue
+            }
+            2 => {
                 let value = state.cpu.decode_stack.pop_back().unwrap();
                 self.bus.write(system, state, addr, value);
+                StageResult::Done
             },
-            (Instruction::Inx, Stage::Execute(0)) => {
-                state.cpu.reg_x = state.cpu.reg_x.wrapping_add(1) & 0xff;
-                state.cpu.flag_s = state.cpu.reg_x;
-                state.cpu.flag_z = state.cpu.reg_x;
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            },
-            (Instruction::Iny, Stage::Execute(0)) => {
-                state.cpu.reg_y = state.cpu.reg_y.wrapping_add(1) & 0xff;
-                state.cpu.flag_s = state.cpu.reg_y;
-                state.cpu.flag_z = state.cpu.reg_y;
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            },
-            (Instruction::Jmp, Stage::Execute(0)) => {
-                state.cpu.reg_pc = addr as u32;
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            },
-            (Instruction::Jsr, Stage::Execute(0)) => {
+            _ => unreachable!()
+        }
+    }
+
+    fn inst_inx(&self, system: &System, state: &mut SystemState)
+    -> StageResult {
+        state.cpu.reg_x = state.cpu.reg_x.wrapping_add(1) & 0xff;
+        state.cpu.flag_s = state.cpu.reg_x;
+        state.cpu.flag_z = state.cpu.reg_x;
+        StageResult::Next
+    }
+
+    fn inst_iny(&self, system: &System, state: &mut SystemState)
+    -> StageResult {
+        state.cpu.reg_y = state.cpu.reg_y.wrapping_add(1) & 0xff;
+        state.cpu.flag_s = state.cpu.reg_y;
+        state.cpu.flag_z = state.cpu.reg_y;
+        StageResult::Next
+    }
+
+    fn inst_jmp(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        state.cpu.reg_pc = addr as u32;
+        StageResult::Next
+    }
+
+    fn inst_jsr(&self, system: &System, state: &mut SystemState, addr: u16, stage: u32)
+    -> StageResult {
+        match stage {
+            0 => {
                 let a = state.cpu.reg_sp | 0x100;
                 self.bus.read(system, state, a as u16);
+                StageResult::Continue
             },
-            (Instruction::Jsr, Stage::Execute(1)) => {
+            1 => {
                 let value = (state.cpu.reg_pc.wrapping_sub(1) >> 8) & 0xff;
                 self.push_stack(system, state, value as u8);
+                StageResult::Continue
             },
-            (Instruction::Jsr, Stage::Execute(2)) => {
+            2 => {
                 let value = state.cpu.reg_pc.wrapping_sub(1) & 0xff;
                 self.push_stack(system, state, value as u8);
                 state.cpu.reg_pc = addr as u32;
+                StageResult::Done
             },
-            (Instruction::Lda, Stage::Execute(0)) => {
-                state.cpu.reg_a = self.bus.read(system, state, addr) as u32;
-                state.cpu.flag_s = state.cpu.reg_a;
-                state.cpu.flag_z = state.cpu.reg_a;
-            },
-            (Instruction::Ldx, Stage::Execute(0)) => {
-                state.cpu.reg_x = self.bus.read(system, state, addr) as u32;
-                state.cpu.flag_s = state.cpu.reg_x;
-                state.cpu.flag_z = state.cpu.reg_x;
-            },
-            (Instruction::Ldy, Stage::Execute(0)) => {
-                state.cpu.reg_y = self.bus.read(system, state, addr) as u32;
-                state.cpu.flag_s = state.cpu.reg_y;
-                state.cpu.flag_z = state.cpu.reg_y;
-            },
-            (Instruction::Lsr, Stage::Execute(0)) => {
+            _ => unreachable!()
+        }
+    }
+
+    fn inst_lda(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        state.cpu.reg_a = self.bus.read(system, state, addr) as u32;
+        state.cpu.flag_s = state.cpu.reg_a;
+        state.cpu.flag_z = state.cpu.reg_a;
+        StageResult::Done
+    }
+
+    fn inst_ldx(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        state.cpu.reg_x = self.bus.read(system, state, addr) as u32;
+        state.cpu.flag_s = state.cpu.reg_x;
+        state.cpu.flag_z = state.cpu.reg_x;
+        StageResult::Done
+    }
+
+    fn inst_ldy(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        state.cpu.reg_y = self.bus.read(system, state, addr) as u32;
+        state.cpu.flag_s = state.cpu.reg_y;
+        state.cpu.flag_z = state.cpu.reg_y;
+        StageResult::Done
+    }
+
+    fn inst_lsr(&self, system: &System, state: &mut SystemState, addr: u16, stage: u32)
+    -> StageResult {
+        match stage {
+            0 => {
                 if state.cpu.op.addressing == Addressing::Accumulator {
                     state.cpu.flag_c = state.cpu.reg_a & 1;
                     state.cpu.reg_a >>= 1;
                     state.cpu.flag_s = state.cpu.reg_a;
                     state.cpu.flag_z = state.cpu.reg_a;
-                    state.cpu.stage = Stage::Fetch;
-                    self.decode(system, state);
-                    return
+                    StageResult::Next
                 } else {
                     let value = self.bus.read(system, state, addr);
                     state.cpu.decode_stack.push_back(value);
+                    StageResult::Continue
                 }
             },
-            (Instruction::Lsr, Stage::Execute(1)) => {
+            1 => {
                 let value = state.cpu.decode_stack.pop_back().unwrap();
                 self.bus.write(system, state, addr, value);
                 state.cpu.flag_c = (value as u32) & 1;
@@ -1101,63 +998,98 @@ impl Cpu {
                 state.cpu.flag_s = value as u32;
                 state.cpu.flag_z = value as u32;
                 state.cpu.decode_stack.push_back(value);
+                StageResult::Continue
             },
-            (Instruction::Lsr, Stage::Execute(2)) => {
+            2 => {
                 let value = state.cpu.decode_stack.pop_back().unwrap();
                 self.bus.write(system, state, addr, value);
+                StageResult::Done
             },
-            (Instruction::Nop, Stage::Execute(0)) => {
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            },
-            (Instruction::Ora, Stage::Execute(0)) => {
-                let value = self.bus.read(system, state, addr);
-                state.cpu.reg_a = (state.cpu.reg_a | value as u32) & 0xff;
-                state.cpu.flag_s = state.cpu.reg_a;
-                state.cpu.flag_z = state.cpu.reg_a;
-            },
-            (Instruction::Pha, Stage::Execute(0)) => {
-                let value = state.cpu.reg_a;
-                self.push_stack(system, state, value as u8);
-            },
-            (Instruction::Php, Stage::Execute(0)) => {
-                let value = state.cpu.reg_p() as u8 | 0x30;
-                self.push_stack(system, state, value);
-            },
-            (Instruction::Pla, Stage::Execute(0)) => {
+            _ => unreachable!()
+        }
+    }
+
+    fn inst_nop(&self, system: &System, state: &mut SystemState)
+    -> StageResult {
+        StageResult::Next
+    }
+
+    fn inst_ora(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        let value = self.bus.read(system, state, addr);
+        state.cpu.reg_a = (state.cpu.reg_a | value as u32) & 0xff;
+        state.cpu.flag_s = state.cpu.reg_a;
+        state.cpu.flag_z = state.cpu.reg_a;
+        StageResult::Done
+    }
+
+    fn inst_pha(&self, system: &System, state: &mut SystemState)
+    -> StageResult {
+        let value = state.cpu.reg_a;
+        self.push_stack(system, state, value as u8);
+        StageResult::Done
+    }
+
+    fn inst_php(&self, system: &System, state: &mut SystemState)
+    -> StageResult {
+        let value = state.cpu.reg_p() as u8 | 0x30;
+        self.push_stack(system, state, value);
+        StageResult::Done
+    }
+
+    fn inst_pla(&self, system: &System, state: &mut SystemState, stage: u32)
+    -> StageResult {
+        match stage {
+            0 => {
                 let a = state.cpu.reg_sp | 0x100;
                 let _ = self.bus.read(system, state, a as u16);
+                StageResult::Continue
             },
-            (Instruction::Pla, Stage::Execute(1)) => {
+            1 => {
                 state.cpu.reg_a = self.pop_stack(system, state) as u32;
                 state.cpu.flag_s = state.cpu.reg_a;
                 state.cpu.flag_z = state.cpu.reg_a;
+                StageResult::Done
             },
-            (Instruction::Plp, Stage::Execute(0)) => {
+            _ => unreachable!()
+        }
+    }
+
+    fn inst_plp(&self, system: &System, state: &mut SystemState, stage: u32)
+    -> StageResult {
+        match stage {
+            0 => {
                 let a = state.cpu.reg_sp | 0x100;
                 let _ = self.bus.read(system, state, a as u16);
+                StageResult::Continue
             },
-            (Instruction::Plp, Stage::Execute(1)) => {
+            1 => {
                 let value = self.pop_stack(system, state) as u32;
                 state.cpu.set_reg_p(value);
+                StageResult::Done
             },
-            (Instruction::Rol, Stage::Execute(0)) => {
+            _ => unreachable!()
+        }
+    }
+
+    fn inst_rol(&self, system: &System, state: &mut SystemState, addr: u16, stage: u32)
+    -> StageResult {
+        match stage {
+            0 => {
                 if state.cpu.op.addressing == Addressing::Accumulator {
                     let c = if state.cpu.flag_c != 0 { 1 } else { 0 };
                     state.cpu.flag_c = state.cpu.reg_a >> 7 & 1;
                     state.cpu.reg_a = (state.cpu.reg_a << 1 | c) & 0xff;
                     state.cpu.flag_s = state.cpu.reg_a;
                     state.cpu.flag_z = state.cpu.reg_a;
-                    state.cpu.stage = Stage::Fetch;
-                    self.decode(system, state);
-                    return;
+                    StageResult::Next
                 } else {
                     let value = self.bus.read(system, state, addr);
                     state.cpu.decode_stack.push_back(value);
+                    StageResult::Continue
                 }
             },
-            (Instruction::Rol, Stage::Execute(1)) => {
+            1 => {
                 let value = state.cpu.decode_stack.pop_back().unwrap();
                 self.bus.write(system, state, addr, value);
                 let c = if state.cpu.flag_c != 0 { 1 } else { 0 };
@@ -1166,27 +1098,35 @@ impl Cpu {
                 state.cpu.flag_s = value as u32;
                 state.cpu.flag_z = value as u32;
                 state.cpu.decode_stack.push_back(value);
+                StageResult::Continue
             },
-            (Instruction::Rol, Stage::Execute(2)) => {
+            2 => {
                 let value = state.cpu.decode_stack.pop_back().unwrap();
                 self.bus.write(system, state, addr, value);
-            }, 
-            (Instruction::Ror, Stage::Execute(0)) => {
+                StageResult::Done
+            },
+            _ => unreachable!()
+        }
+    }
+
+    fn inst_ror(&self, system: &System, state: &mut SystemState, addr: u16, stage: u32)
+    -> StageResult {
+        match stage {
+            0 => {
                 if state.cpu.op.addressing == Addressing::Accumulator {
                     let c = if state.cpu.flag_c != 0 { 0x80 } else { 0 };
                     state.cpu.flag_c = state.cpu.reg_a & 1;
                     state.cpu.reg_a = (state.cpu.reg_a >> 1 | c) & 0xff;
                     state.cpu.flag_s = state.cpu.reg_a;
                     state.cpu.flag_z = state.cpu.reg_a;
-                    state.cpu.stage = Stage::Fetch;
-                    self.decode(system, state);
-                    return;
+                    StageResult::Next
                 } else {
                     let value = self.bus.read(system, state, addr);
                     state.cpu.decode_stack.push_back(value);
+                    StageResult::Continue
                 }
             },
-            (Instruction::Ror, Stage::Execute(1)) => {
+            1 => {
                 let value = state.cpu.decode_stack.pop_back().unwrap();
                 self.bus.write(system, state, addr, value);
                 let c = if state.cpu.flag_c != 0 { 0x80 } else { 0 };
@@ -1195,145 +1135,175 @@ impl Cpu {
                 state.cpu.flag_s = value as u32;
                 state.cpu.flag_z = value as u32;
                 state.cpu.decode_stack.push_back(value);
+                StageResult::Continue
             },
-            (Instruction::Ror, Stage::Execute(2)) => {
+            2 => {
                 let value = state.cpu.decode_stack.pop_back().unwrap();
                 self.bus.write(system, state, addr, value);
+                StageResult::Done
             },
-            (Instruction::Rti, Stage::Execute(0)) => {
+            _ => unreachable!()
+        }
+    }
+
+    fn inst_rti(&self, system: &System, state: &mut SystemState, stage: u32)
+    -> StageResult {
+        match stage {
+            0 => {
                 let a = state.cpu.reg_sp | 0x100;
                 let _ = self.bus.read(system, state, a as u16);
+                StageResult::Continue
             },
-            (Instruction::Rti, Stage::Execute(1)) => {
+            1 => {
                 let value = self.pop_stack(system, state);
                 state.cpu.set_reg_p(value as u32);
+                StageResult::Continue
             },
-            (Instruction::Rti, Stage::Execute(2)) => {
+            2 => {
                 let value = self.pop_stack(system, state);
                 state.cpu.decode_stack.push_back(value);
+                StageResult::Continue
             },
-            (Instruction::Rti, Stage::Execute(3)) => {
+            3 => {
                 let high_value = (self.pop_stack(system, state) as u16) << 8;
                 let value = state.cpu.decode_stack.pop_back().unwrap() as u16;
                 state.cpu.reg_pc = (high_value | value) as u32;
+                StageResult::Done
             },
-            (Instruction::Rts, Stage::Execute(0)) => {
+            _ => unreachable!()
+        }
+    }
+
+    fn inst_rts(&self, system: &System, state: &mut SystemState, stage: u32)
+    -> StageResult {
+        match stage {
+            0 => {
                 let a = state.cpu.reg_sp | 0x100;
                 let _ = self.bus.read(system, state, a as u16);
+                StageResult::Continue
             },
-            (Instruction::Rts, Stage::Execute(1)) => {
+            1 => {
                 let value = self.pop_stack(system, state);
                 state.cpu.decode_stack.push_back(value);
+                StageResult::Continue
             },
-            (Instruction::Rts, Stage::Execute(2)) => {
+            2 => {
                 let high_value = (self.pop_stack(system, state) as u16) << 8;
                 let value = state.cpu.decode_stack.pop_back().unwrap() as u16;
                 state.cpu.reg_pc = (high_value | value).wrapping_add(1) as u32;
+                StageResult::Continue
             },
-            (Instruction::Rts, Stage::Execute(3)) => {
+            3 => {
                 let a = state.cpu.reg_pc;
                 let _ = self.bus.read(system, state, a as u16);
+                StageResult::Done
             },
-            (Instruction::Sbc, Stage::Execute(0)) => {
-                let value = self.bus.read(system, state, addr) as i32;
-                let temp_a = state.cpu.reg_a as i32;
-                let temp = temp_a.wrapping_sub(
-                            value.wrapping_sub(state.cpu.flag_c as i32 - 1));
-                state.cpu.flag_v = (((temp_a ^ value) &
-                                 (temp_a ^ temp)) >> 7) as u32 & 1;
-                state.cpu.flag_c  = if temp < 0 { 0 } else { 1 };
-                state.cpu.reg_a = (temp as u32) & 0xff;
-                state.cpu.flag_s = state.cpu.reg_a;
-                state.cpu.flag_z = state.cpu.reg_a;
-            },
-            (Instruction::Sec, Stage::Execute(0)) => {
-                state.cpu.flag_c = 1;
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            },
-            (Instruction::Sed, Stage::Execute(0)) => {
-                state.cpu.flag_d = 1;
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            },
-            (Instruction::Sei, Stage::Execute(0)) => {
-                state.cpu.flag_i = 1;
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            },
-            (Instruction::Sta, Stage::Execute(0)) => {
-                let value = state.cpu.reg_a;
-                self.bus.write(system, state, addr, value as u8); 
-            },
-            (Instruction::Stx, Stage::Execute(0)) => {
-                let value = state.cpu.reg_x;
-                self.bus.write(system, state, addr, value as u8); 
-            },
-            (Instruction::Sty, Stage::Execute(0)) => {
-                let value = state.cpu.reg_y;
-                self.bus.write(system, state, addr, value as u8); 
-            },
-            (Instruction::Tax, Stage::Execute(0)) => {
-                state.cpu.reg_x = state.cpu.reg_a;
-                state.cpu.flag_s = state.cpu.reg_x;
-                state.cpu.flag_z = state.cpu.reg_x;
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            },
-            (Instruction::Tay, Stage::Execute(0)) => {
-                state.cpu.reg_y = state.cpu.reg_a;
-                state.cpu.flag_s = state.cpu.reg_y;
-                state.cpu.flag_z = state.cpu.reg_y;
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            },
-            (Instruction::Tsx, Stage::Execute(0)) => {
-                state.cpu.reg_x = state.cpu.reg_sp;
-                state.cpu.flag_s = state.cpu.reg_x;
-                state.cpu.flag_z = state.cpu.reg_x;
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            },
-            (Instruction::Txa, Stage::Execute(0)) => {
-                state.cpu.reg_a = state.cpu.reg_x;
-                state.cpu.flag_s = state.cpu.reg_a;
-                state.cpu.flag_z = state.cpu.reg_a;
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            },
-            (Instruction::Txs, Stage::Execute(0)) => {
-                state.cpu.reg_sp = state.cpu.reg_x;
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            },
-            (Instruction::Tya, Stage::Execute(0)) => {
-                state.cpu.reg_a = state.cpu.reg_y;
-                state.cpu.flag_s = state.cpu.reg_a;
-                state.cpu.flag_z = state.cpu.reg_a;
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            },
-            _ => {
-                state.cpu.stage = Stage::Fetch;
-                self.decode(system, state);
-                return;
-            }
-            
+            _ => unreachable!()
         }
-        state.cpu.stage = current.1.increment();
     }
 
+    fn inst_sbc(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        let value = self.bus.read(system, state, addr) as i32;
+        let temp_a = state.cpu.reg_a as i32;
+        let temp = temp_a.wrapping_sub(
+            value.wrapping_sub(state.cpu.flag_c as i32 - 1));
+        state.cpu.flag_v = (((temp_a ^ value) &
+                             (temp_a ^ temp)) >> 7) as u32 & 1;
+        state.cpu.flag_c  = if temp < 0 { 0 } else { 1 };
+        state.cpu.reg_a = (temp as u32) & 0xff;
+        state.cpu.flag_s = state.cpu.reg_a;
+        state.cpu.flag_z = state.cpu.reg_a;
+        StageResult::Done
+    }
+
+    fn inst_sec(&self, system: &System, state: &mut SystemState)
+    -> StageResult {
+        state.cpu.flag_c = 1;
+        StageResult::Next 
+    }
+
+    fn inst_sed(&self, system: &System, state: &mut SystemState)
+    -> StageResult {
+        state.cpu.flag_d = 1;
+        StageResult::Next 
+    }
+
+    fn inst_sei(&self, system: &System, state: &mut SystemState)
+    -> StageResult {
+        state.cpu.flag_i = 1;
+        StageResult::Next 
+    }
+
+    fn inst_sta(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        let value = state.cpu.reg_a;
+        self.bus.write(system, state, addr, value as u8); 
+        StageResult::Done
+    }
+
+    fn inst_stx(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        let value = state.cpu.reg_x;
+        self.bus.write(system, state, addr, value as u8); 
+        StageResult::Done
+    }
+
+    fn inst_sty(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        let value = state.cpu.reg_y;
+        self.bus.write(system, state, addr, value as u8); 
+        StageResult::Done
+    }
+
+    fn inst_tax(&self, system: &System, state: &mut SystemState)
+        -> StageResult {
+            state.cpu.reg_x = state.cpu.reg_a;
+            state.cpu.flag_s = state.cpu.reg_x;
+            state.cpu.flag_z = state.cpu.reg_x;
+            StageResult::Next
+        }
+
+    fn inst_tay(&self, system: &System, state: &mut SystemState)
+        -> StageResult {
+            state.cpu.reg_y = state.cpu.reg_a;
+            state.cpu.flag_s = state.cpu.reg_y;
+            state.cpu.flag_z = state.cpu.reg_y;
+            StageResult::Next
+        }
+
+    fn inst_tsx(&self, system: &System, state: &mut SystemState)
+        -> StageResult {
+            state.cpu.reg_x = state.cpu.reg_sp;
+            state.cpu.flag_s = state.cpu.reg_x;
+            state.cpu.flag_z = state.cpu.reg_x;
+            StageResult::Next
+        }
+
+    fn inst_txa(&self, system: &System, state: &mut SystemState)
+        -> StageResult {
+            state.cpu.reg_a = state.cpu.reg_x;
+            state.cpu.flag_s = state.cpu.reg_a;
+            state.cpu.flag_z = state.cpu.reg_a;
+            StageResult::Next
+        }
+
+    fn inst_txs(&self, system: &System, state: &mut SystemState)
+        -> StageResult {
+            state.cpu.reg_sp = state.cpu.reg_x;
+            StageResult::Next
+        }
+
+    fn inst_tya(&self, system: &System, state: &mut SystemState)
+        -> StageResult {
+            state.cpu.reg_a = state.cpu.reg_y;
+            state.cpu.flag_s = state.cpu.reg_a;
+            state.cpu.flag_z = state.cpu.reg_a;
+            StageResult::Next
+        }
+
     fn will_wrap(addr: u16, add: u16) -> bool {
-        addr & 0xff00 != add.wrapping_add(add) & 0xff00
+        addr & 0xff00 != addr.wrapping_add(add) & 0xff00
     }
 
     fn wrapping_add(addr: u16, add: u16) -> u16 {
