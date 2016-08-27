@@ -62,6 +62,13 @@ impl CpuState {
 }
 
 #[derive(Copy, Clone)]
+enum StageResult {
+    Continue,
+    Done,
+    Next,
+}
+
+#[derive(Copy, Clone)]
 enum Stage {
     Fetch,
     Address(u32),
@@ -248,209 +255,240 @@ impl Cpu {
     }
 
     fn addressing(&self, system: &System, state: &mut SystemState) {
-        let current = (state.cpu.op.addressing, state.cpu.stage);
-        match current {
-            (Addressing::None, Stage::Address(0)) => {
-                let r = (state.cpu.reg_pc as u16).wrapping_add(1);
-                let _ = self.bus.read(system, state, r);
-            },
-            (Addressing::Accumulator, Stage::Address(0)) => {
-                let r = (state.cpu.reg_pc as u16).wrapping_add(1);
-                let _ = self.bus.read(system, state, r);
-                state.cpu.op_addr = state.cpu.reg_a as u16;      
-            },
-            (Addressing::Immediate, Stage::Address(0)) => {
-                state.cpu.op_addr = state.cpu.reg_pc as u16;
-                state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(1);
-                state.cpu.stage = Stage::Execute(0);
-                self.operation(system, state);
-                return;
-            },
-            (Addressing::ZeroPage, Stage::Address(0)) => {
-                let a = self.read_pc(system, state);
-                state.cpu.op_addr = a as u16;
-            },
-            (Addressing::ZeroPageX, Stage::Address(0)) => {
-                let a = self.read_pc(system, state);
-                state.cpu.op_addr = a as u16;
-            },
-            (Addressing::ZeroPageX, Stage::Address(1)) => {
-                let a = state.cpu.op_addr;
-                let _ = self.bus.read(system, state, a);
-                let a = (state.cpu.op_addr).wrapping_add(state.cpu.reg_x as u16);
-                state.cpu.op_addr = a & 0xff;
-            },
-            (Addressing::ZeroPageY, Stage::Address(0)) => {
-                let a = self.read_pc(system, state);
-                state.cpu.op_addr = a as u16;
-            },
-            (Addressing::ZeroPageY, Stage::Address(1)) => {
-                let a = state.cpu.op_addr;
-                let _ = self.bus.read(system, state, a);
-                let a = (state.cpu.op_addr).wrapping_add(state.cpu.reg_y as u16);
-                state.cpu.op_addr = a & 0xff;
-            },
-            (Addressing::Absolute, Stage::Address(0)) => {
-                let a = self.read_pc(system, state);
-                state.cpu.op_addr = a as u16;
-
-            },
-            (Addressing::Absolute, Stage::Address(1)) => {
-                let a = self.read_pc(system, state);
-                let a = ((a as u16) << 8) | state.cpu.op_addr;
-                state.cpu.op_addr = a;
-            },
-            (Addressing::AbsoluteX, Stage::Address(0)) => {
-                let a = self.read_pc(system, state);
-                state.cpu.op_addr = a as u16;
-
-            },
-            (Addressing::AbsoluteX, Stage::Address(1)) => {
-                let a = self.read_pc(system, state);
-                let a = ((a as u16) << 8) | state.cpu.op_addr;
-                state.cpu.op_addr = a;
-            },
-            (Addressing::AbsoluteX, Stage::Address(2)) => {
-                let a = state.cpu.op_addr;
-                if a & 0xff00 != a.wrapping_add(state.cpu.reg_x as u16) & 0xff00 {
-                    let dummy_a = (a & 0xff00) |
-                        (a.wrapping_add(state.cpu.reg_x as u16) & 0xff);
-                    let _ = self.bus.read(system, state, dummy_a);
-                    state.cpu.op_addr = state.cpu.op_addr
-                        .wrapping_add(state.cpu.reg_x as u16);
-                } else {
-                    state.cpu.op_addr = state.cpu.op_addr
-                        .wrapping_add(state.cpu.reg_x as u16);
+        if let Stage::Address(stage) = state.cpu.stage {
+            let res = match state.cpu.op.addressing {
+                Addressing::None => self.addr_none(system, state),
+                Addressing::Accumulator => self.addr_accumulator(system, state),
+                Addressing::Immediate => self.addr_immediate(system, state),
+                Addressing::ZeroPage => self.addr_zero_page(system, state), 
+                Addressing::ZeroPageX => {
+                    let reg = state.cpu.reg_x;
+                    self.addr_zero_page_offset(system, state, reg, stage)
+                },
+                Addressing::ZeroPageY => {
+                    let reg = state.cpu.reg_y;
+                    self.addr_zero_page_offset(system, state, reg, stage)
+                },
+                Addressing::Absolute => self.addr_absolute(system, state, stage),
+                Addressing::AbsoluteX(d) => {
+                    let reg = state.cpu.reg_x;
+                    self.addr_absolute_offset(system, state, reg, stage, d)
+                },
+                Addressing::AbsoluteY(d) => {
+                    let reg = state.cpu.reg_y;
+                    self.addr_absolute_offset(system, state, reg, stage, d)
+                },
+                Addressing::IndirectAbsolute =>
+                    self.addr_indirect_absolute(system, state, stage),
+                Addressing::Relative => self.addr_relative(system, state), 
+                Addressing::IndirectX => self.addr_indirect_x(system, state, stage),
+                Addressing::IndirectY(d) =>
+                    self.addr_indirect_y(system, state, stage, d),
+            };
+            
+            match res {
+                StageResult::Continue => {
+                    state.cpu.stage = state.cpu.stage.increment();
+                },
+                StageResult::Done => {
+                    state.cpu.stage = Stage::Execute(0);
+                },
+                StageResult::Next => {
                     state.cpu.stage = Stage::Execute(0);
                     self.operation(system, state);
-                    return;
                 }
-            },
-            (Addressing::AbsoluteY, Stage::Address(0)) => {
+            }
+        } else {
+            unreachable!();
+        }
+    }
+
+    fn addr_none(&self, system: &System, state: &mut SystemState) -> StageResult {
+        let r = (state.cpu.reg_pc as u16).wrapping_add(1);
+        let _ = self.bus.read(system, state, r);
+        StageResult::Done
+    }
+
+    fn addr_accumulator(&self, system: &System, state: &mut SystemState)
+    -> StageResult { 
+        let r = (state.cpu.reg_pc as u16).wrapping_add(1);
+        let _ = self.bus.read(system, state, r);
+        state.cpu.op_addr = state.cpu.reg_a as u16;      
+        StageResult::Done
+    }
+
+    fn addr_immediate(&self, system: &System, state: &mut SystemState)
+    -> StageResult {
+        state.cpu.op_addr = state.cpu.reg_pc as u16;
+        state.cpu.reg_pc = state.cpu.reg_pc.wrapping_add(1);
+        StageResult::Next
+    }
+
+    fn addr_zero_page(&self, system: &System, state: &mut SystemState)
+    -> StageResult {
+        let a = self.read_pc(system, state);
+        state.cpu.op_addr = a as u16;
+        StageResult::Done
+    }
+
+    fn addr_zero_page_offset(&self, system: &System, state: &mut SystemState,
+    reg: u32, stage: u32) -> StageResult {
+        match stage {
+            0 => {
                 let a = self.read_pc(system, state);
                 state.cpu.op_addr = a as u16;
-
+                StageResult::Continue
             },
-            (Addressing::AbsoluteY, Stage::Address(1)) => {
+            1 => {
+                let a = state.cpu.op_addr;
+                let _ = self.bus.read(system, state, a);
+                let a = state.cpu.op_addr.wrapping_add(reg as u16);
+                state.cpu.op_addr = a & 0xff;
+                StageResult::Done
+            },
+            _ => unreachable!()
+        }
+    }
+
+    fn addr_absolute(&self, system: &System, state: &mut SystemState, stage: u32)
+    -> StageResult {
+        match stage {
+            0 => {
+                let a = self.read_pc(system, state);
+                state.cpu.op_addr = a as u16;
+                StageResult::Continue
+            },
+            1 => {
                 let a = self.read_pc(system, state);
                 let a = ((a as u16) << 8) | state.cpu.op_addr;
                 state.cpu.op_addr = a;
+                StageResult::Done
             },
-            (Addressing::AbsoluteY, Stage::Address(2)) => {
+            _ => unreachable!()
+        }
+    }
+
+    fn addr_absolute_offset(&self, system: &System, state: &mut SystemState, 
+    reg: u32, stage: u32, dummy: DummyRead) -> StageResult {
+        match stage {
+            0 => {
+                let a = self.read_pc(system, state);
+                state.cpu.op_addr = a as u16;
+                StageResult::Continue
+            },
+            1 => {
+                let a = self.read_pc(system, state);
+                let a = ((a as u16) << 8) | state.cpu.op_addr;
+                state.cpu.op_addr = a;
+                StageResult::Continue
+            },
+            2 => {
                 let a = state.cpu.op_addr;
-                if a & 0xff00 != a.wrapping_add(state.cpu.reg_y as u16) & 0xff00 {
-                    let dummy_a = (a & 0xff00) |
-                        (a.wrapping_add(state.cpu.reg_y as u16) & 0xff);
-                    let _ = self.bus.read(system, state, dummy_a); 
+                if Self::will_wrap(a, (reg & 0xff) as u16) ||
+                    dummy == DummyRead::Always {
+                    let a =Self::wrapping_add(a, (reg & 0xff) as u16);
+                    let _ = self.bus.read(system, state, a);
                     state.cpu.op_addr = state.cpu.op_addr
-                        .wrapping_add(state.cpu.reg_y as u16);
+                        .wrapping_add(reg as u16);
+                    StageResult::Done
                 } else {
                     state.cpu.op_addr = state.cpu.op_addr
-                        .wrapping_add(state.cpu.reg_y as u16);
-                    let a = state.cpu.op_addr;
-                    let v = self.bus.read(system, state, a);
-                    state.cpu.stage = Stage::Execute(0);
-                    self.operation(system, state);
-                    return;
+                        .wrapping_add(reg as u16);
+                    StageResult::Next
                 }
             },
-            (Addressing::AbsoluteXDummyAlways, Stage::Address(0)) => {
-                let a = self.read_pc(system, state);
-                state.cpu.op_addr = a as u16;
+            _ => unreachable!()
+        }
+    }
 
-            },
-            (Addressing::AbsoluteXDummyAlways, Stage::Address(1)) => {
-                let a = self.read_pc(system, state);
-                let a = ((a as u16) << 8) | state.cpu.op_addr;
-                state.cpu.op_addr = a;
-            },
-            (Addressing::AbsoluteXDummyAlways, Stage::Address(2)) => {
-                let a = state.cpu.op_addr;
-                let dummy_a = (a & 0xff00) |
-                    (a.wrapping_add(state.cpu.reg_x as u16) & 0xff);
-                let _ = self.bus.read(system, state, dummy_a);
-                state.cpu.op_addr = state.cpu.op_addr
-                    .wrapping_add(state.cpu.reg_x as u16);
-            },
-            (Addressing::AbsoluteYDummyAlways, Stage::Address(0)) => {
+    fn addr_indirect_absolute(&self, system: &System, state: &mut SystemState,
+    stage: u32) -> StageResult {
+        match stage {
+            0 => {
                 let a = self.read_pc(system, state);
                 state.cpu.op_addr = a as u16;
-
+                StageResult::Continue
             },
-            (Addressing::AbsoluteYDummyAlways, Stage::Address(1)) => {
+            1 => {
                 let a = self.read_pc(system, state);
                 let a = ((a as u16) << 8) | state.cpu.op_addr;
                 state.cpu.op_addr = a;
+                StageResult::Continue
             },
-            (Addressing::AbsoluteYDummyAlways, Stage::Address(2)) => {
-                let a = state.cpu.op_addr;
-                let dummy_a = (a & 0xff00) |
-                    (a.wrapping_add(state.cpu.reg_y as u16) & 0xff);
-                let _ = self.bus.read(system, state, dummy_a);
-                state.cpu.op_addr = state.cpu.op_addr
-                    .wrapping_add(state.cpu.reg_y as u16);
-            },
-            (Addressing::IndirectAbsolute, Stage::Address(0)) => { 
-                let a = self.read_pc(system, state);
-                state.cpu.op_addr = a as u16;
-            },
-            (Addressing::IndirectAbsolute, Stage::Address(1)) => {
-                let a = self.read_pc(system, state);
-                let a = ((a as u16) << 8) | state.cpu.op_addr;
-                state.cpu.op_addr = a;
-            },
-            (Addressing::IndirectAbsolute, Stage::Address(2)) => {
+            2 => {
                 let a = state.cpu.op_addr;
                 let a = self.bus.read(system, state, a);
                 state.cpu.decode_stack.push_back(a);
+                StageResult::Continue
             },
-            (Addressing::IndirectAbsolute, Stage::Address(3)) => {
-                let a = (state.cpu.op_addr & 0xff00) |
-                    (state.cpu.op_addr.wrapping_add(1) & 0xff);
+            3 => {
+                let a = Self::wrapping_add(state.cpu.op_addr, 1);
                 let a = (self.bus.read(system, state, a) as u16) << 8;
                 state.cpu.op_addr = a |
                     state.cpu.decode_stack.pop_back().unwrap() as u16;
+                StageResult::Done
             },
-            (Addressing::Relative, Stage::Address(0)) => {
+            _ => unreachable!()
+        }
+    }
+
+    fn addr_relative(&self, system: &System, state: &mut SystemState)
+    -> StageResult {
+        let a = self.read_pc(system, state);
+        state.cpu.op_addr = a as u16;
+        StageResult::Done
+    }
+
+    fn addr_indirect_x(&self, system: &System, state: &mut SystemState, stage: u32)
+    -> StageResult {
+        match stage {
+            0 => {
                 let a = self.read_pc(system, state);
                 state.cpu.op_addr = a as u16;
+                StageResult::Continue
             },
-            (Addressing::IndirectX, Stage::Address(0)) => {
-                let a = self.read_pc(system, state);
-                state.cpu.op_addr = a as u16;
-            },
-            (Addressing::IndirectX, Stage::Address(1)) => {
+            1 => {
                 let a = state.cpu.op_addr;
                 let _ = self.bus.read(system, state, a);
                 let a = a.wrapping_add(state.cpu.reg_x as u16);
                 let a = a & 0xff;
                 state.cpu.op_addr = a;
+                StageResult::Continue
             },
-            (Addressing::IndirectX, Stage::Address(2)) => {
+            2 => {
                 let a = state.cpu.op_addr;
                 let v = self.bus.read(system, state, 0);
                 let a = self.bus.read(system, state, a);
                 state.cpu.decode_stack.push_back(a);
+                StageResult::Continue
             },
-            (Addressing::IndirectX, Stage::Address(3)) => {
-                let a = (state.cpu.op_addr & 0xff00) |
-                    (state.cpu.op_addr.wrapping_add(1) & 0xff);
+            3 => {
+                let a = Self::wrapping_add(state.cpu.op_addr, 1);
                 let a = (self.bus.read(system, state, a) as u16) << 8;
                 state.cpu.op_addr = a
                     | state.cpu.decode_stack.pop_back().unwrap() as u16;
+                StageResult::Done
             },
-            (Addressing::IndirectY, Stage::Address(0)) => {
+            _ => unreachable!()
+        }
+    }
+
+    fn addr_indirect_y(&self, system: &System, state: &mut SystemState,
+    stage: u32, dummy: DummyRead) -> StageResult {
+        match stage {
+            0 => {
                 let a = self.read_pc(system, state);
                 state.cpu.op_addr = a as u16;
+                StageResult::Continue
             },
-            (Addressing::IndirectY, Stage::Address(1)) => {
+            1 => {
                 let a = state.cpu.op_addr;
                 let a = self.bus.read(system, state, a);
                 state.cpu.decode_stack.push_back(a);
+                StageResult::Continue
             },
-            (Addressing::IndirectY, Stage::Address(2)) => {
-                let a = (state.cpu.op_addr & 0xff00) |
-                    (state.cpu.op_addr.wrapping_add(1) & 0xff);
+            2 => {
+                let a = Self::wrapping_add(state.cpu.op_addr, 1);
                 let a = self.bus.read(system, state, a);
                 let a_low = state.cpu.decode_stack.pop_back().unwrap();
                 state.cpu.decode_stack.push_back(a);
@@ -458,54 +496,25 @@ impl Cpu {
                 state.cpu.op_addr = ((a as u16) << 8) | a_low as u16;
                 state.cpu.op_addr = state.cpu.op_addr.
                     wrapping_add((state.cpu.reg_y & 0xff) as u16);
+                StageResult::Continue
             },
-            (Addressing::IndirectY, Stage::Address(3)) => {
+            3 => {
                 let low = state.cpu.decode_stack.pop_back().unwrap() as u16;
                 let high = (state.cpu.decode_stack.pop_back().unwrap() as u16) << 8;
                 let a = high | low;
-                if high != (a.wrapping_add((state.cpu.reg_y & 0xff) as u16) & 0xff00) {
-                    let a = high | (a.wrapping_add((state.cpu.reg_y & 0xff) as u16) & 0xff);
+                if Self::will_wrap(a, (state.cpu.reg_y & 0xff) as u16) ||
+                    dummy == DummyRead::Always {
+                    let a = Self::wrapping_add(a, (state.cpu.reg_y & 0xff) as u16);
                     let _ = self.bus.read(system, state, a);
+                    StageResult::Done
                 } else {
                     state.cpu.stage = Stage::Execute(0);
                     self.operation(system, state);
-                    return;
+                    StageResult::Next
                 }
             },
-            (Addressing::IndirectYDummyAlways, Stage::Address(0)) => {
-                let a = self.read_pc(system, state);
-                state.cpu.op_addr = a as u16;
-            },
-            (Addressing::IndirectYDummyAlways, Stage::Address(1)) => {
-                let a = state.cpu.op_addr;
-                let a = self.bus.read(system, state, a);
-                state.cpu.decode_stack.push_back(a);
-            },
-            (Addressing::IndirectYDummyAlways, Stage::Address(2)) => {
-                let a = (state.cpu.op_addr & 0xff00) |
-                    (state.cpu.op_addr.wrapping_add(1) & 0xff);
-                let a = self.bus.read(system, state, a);
-                let a_low = state.cpu.decode_stack.pop_back().unwrap();
-                state.cpu.decode_stack.push_back(a);
-                state.cpu.decode_stack.push_back(a_low);
-                state.cpu.op_addr = ((a as u16) << 8) | a_low as u16;
-                state.cpu.op_addr = state.cpu.op_addr.
-                    wrapping_add((state.cpu.reg_y & 0xff) as u16);
-            },
-            (Addressing::IndirectYDummyAlways, Stage::Address(3)) => {
-                let low = state.cpu.decode_stack.pop_back().unwrap() as u16;
-                let high = (state.cpu.decode_stack.pop_back().unwrap() as u16) << 8;
-                let a = high | low;
-                let a = high | (a.wrapping_add((state.cpu.reg_y & 0xff) as u16) & 0xff);
-                let _ = self.bus.read(system, state, a);
-            },
-            _ => {
-                state.cpu.stage = Stage::Execute(0);
-                self.operation(system, state);
-                return;
-            },
+            _ => unreachable!()
         }
-        state.cpu.stage = current.1.increment();
     }
 
     fn operation(&self, system: &System, state: &mut SystemState) {
@@ -1323,5 +1332,12 @@ impl Cpu {
         state.cpu.stage = current.1.increment();
     }
 
+    fn will_wrap(addr: u16, add: u16) -> bool {
+        addr & 0xff00 != add.wrapping_add(add) & 0xff00
+    }
+
+    fn wrapping_add(addr: u16, add: u16) -> u16 {
+        (addr & 0xff00) | (addr.wrapping_add(add) & 0xff)
+    }
 }
 

@@ -97,7 +97,7 @@ impl Debug {
                 let v = read(state, a);
                 format!("${:04X} = ${:02X}", a, v)
             },
-            Addressing::AbsoluteXDummyAlways | Addressing::AbsoluteX => {
+            Addressing::AbsoluteX(_) => {
                 let a_low = read_pc(state) as u16;
                 let a_high = read_pc(state);
                 let a1 = ((a_high as u16) << 8) | a_low;
@@ -105,7 +105,7 @@ impl Debug {
                 let v = read(state, a2);
                 format!("${:04X},X @ {:04X} = {:02X}", a1, a2, v)
             },
-            Addressing::AbsoluteYDummyAlways | Addressing::AbsoluteY => {
+            Addressing::AbsoluteY(_) => {
                 let a_low = read_pc(state) as u16;
                 let a_high = read_pc(state);
                 let a1 = ((a_high as u16) << 8) | a_low;
@@ -140,7 +140,7 @@ impl Debug {
                 let v = read(state, a3);
                 format!("(${:02X},X) @ {:02X} = {:04X} = {:02X}", a1, a2, a3, v)
             },
-            Addressing::IndirectYDummyAlways | Addressing::IndirectY => {
+            Addressing::IndirectY(_) => {
                 let a1 = read_pc(state) as u16;
                 let a2_low = read(state, a1);
                 let a2_high = read(state, (a1 & 0xff00) | (a1.wrapping_add(1) & 0xff));
@@ -177,15 +177,15 @@ impl Debug {
         map.insert(Addressing::ZeroPageX, 2);
         map.insert(Addressing::ZeroPageY, 2);
         map.insert(Addressing::Absolute, 3);
-        map.insert(Addressing::AbsoluteX, 3);
-        map.insert(Addressing::AbsoluteXDummyAlways, 3);
-        map.insert(Addressing::AbsoluteY, 3);
-        map.insert(Addressing::AbsoluteYDummyAlways, 3);
+        map.insert(Addressing::AbsoluteX(DummyRead::OnCarry), 3);
+        map.insert(Addressing::AbsoluteX(DummyRead::Always), 3);
+        map.insert(Addressing::AbsoluteY(DummyRead::OnCarry), 3);
+        map.insert(Addressing::AbsoluteY(DummyRead::Always), 3);
         map.insert(Addressing::IndirectAbsolute, 3);
         map.insert(Addressing::Relative, 2);
         map.insert(Addressing::IndirectX, 2);
-        map.insert(Addressing::IndirectY, 2);
-        map.insert(Addressing::IndirectYDummyAlways, 2);
+        map.insert(Addressing::IndirectY(DummyRead::OnCarry), 2);
+        map.insert(Addressing::IndirectY(DummyRead::Always), 2);
         map
     }
 
