@@ -187,14 +187,14 @@ impl Stage {
     fn increment(&self) -> Stage {
         match *self {
             Stage::Prerender(s, d) => {
-                if d == 341 {
+                if d == 340 {
                     Stage::Dot(0, 0)
                 } else {
                     Stage::Prerender(s, d + 1)
                 }
             },
             Stage::Vblank(s, d) => {
-                if d == 341 {
+                if d == 340 {
                     if s == 260 {
                         Stage::Prerender(261, 0)
                     } else {
@@ -205,7 +205,7 @@ impl Stage {
                 }
             },
             Stage::Hblank(s, d) => {
-                if d == 341 {
+                if d == 340 {
                     if s == 239 {
                         Stage::Vblank(s + 1, 0)
                     } else {

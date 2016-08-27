@@ -818,11 +818,11 @@ impl Cpu {
                 let _ = self.bus.read(system, state, addr);
             },
             (Instruction::Brk, Stage::Execute(1)) => {
-                let value = state.cpu.reg_pc & 0xff;
+                let value = state.cpu.reg_pc >> 8 & 0xff;
                 self.push_stack(system, state, value as u8);
             },
             (Instruction::Brk, Stage::Execute(2)) => {
-                let value = state.cpu.reg_pc >> 8 & 0xff;
+                let value = state.cpu.reg_pc & 0xff;
                 self.push_stack(system, state, value as u8);
             },
             (Instruction::Brk, Stage::Execute(3)) => {
