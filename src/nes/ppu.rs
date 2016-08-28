@@ -614,7 +614,7 @@ impl Ppu {
                     
                     if color != 0 {
                         sprite_zero = x == 0 && state.ppu.sprite_zero_on_line;
-                        sprite_pixel = color | attr;
+                        sprite_pixel = color | pal;
                         behind_bg  = attr & 0x20 != 0;
                     }
                     
@@ -698,7 +698,7 @@ impl Ppu {
         let tile_addr = if state.ppu.is_tall_sprites() {
             let bottom_half = line >= 8;
             let line = if bottom_half { line - 8 } else { line };
-            let line = if flip_vert { 8 - line } else { line };
+            let line = if flip_vert { 7 - line } else { line };
             let pattern_table = (sprite_tile as u16 & 1) << 12;
             let sprite_tile = sprite_tile & 0xfe;
 
@@ -709,7 +709,7 @@ impl Ppu {
                     (((sprite_tile + 1) << 4) | pattern_table) + line,
             }
         } else {
-            let line = if flip_vert { 8 - line } else { line };
+            let line = if flip_vert { 7 - line } else { line };
             ((sprite_tile << 4) | state.ppu.sprite_pattern_table()) + line
         };
 
