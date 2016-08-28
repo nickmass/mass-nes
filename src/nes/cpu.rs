@@ -607,9 +607,38 @@ impl Cpu {
                 Instruction::Txa => self.inst_txa(system, state), 
                 Instruction::Txs => self.inst_txs(system, state),
                 Instruction::Tya => self.inst_tya(system, state),
-                _ => {
+                i => {
                     println!("ILLEGAL");
-                    StageResult::Done
+                    match i {
+                        Instruction::IllAhx => self.ill_inst_ahx(system, state, addr),
+                        Instruction::IllAlr => self.ill_inst_alr(system, state, addr),
+                        Instruction::IllAnc => self.ill_inst_anc(system, state, addr),
+                        Instruction::IllArr => self.ill_inst_arr(system, state, addr),
+                        Instruction::IllAxs => self.ill_inst_axs(system, state, addr),
+                        Instruction::IllDcp =>
+                            self.ill_inst_dcp(system, state, addr, stage),
+                        Instruction::IllIsc =>
+                            self.ill_inst_isc(system, state, addr, stage),
+                        Instruction::IllKil => self.ill_inst_kil(system, state),
+                        Instruction::IllLas => self.ill_inst_las(system, state, addr),
+                        Instruction::IllLax => self.ill_inst_lax(system, state, addr),
+                        Instruction::IllNop => self.ill_inst_nop(system, state, addr),
+                        Instruction::IllRla =>
+                            self.ill_inst_rla(system, state, addr, stage),
+                        Instruction::IllRra =>
+                            self.ill_inst_rra(system, state, addr, stage),
+                        Instruction::IllSax => self.ill_inst_sax(system, state, addr),
+                        Instruction::IllSbc => self.ill_inst_sbc(system, state, addr),
+                        Instruction::IllShx => self.ill_inst_shx(system, state, addr),
+                        Instruction::IllShy => self.ill_inst_shy(system, state, addr),
+                        Instruction::IllSlo =>
+                            self.ill_inst_slo(system, state, addr, stage),
+                        Instruction::IllSre =>
+                            self.ill_inst_sre(system, state, addr, stage),
+                        Instruction::IllTas => self.ill_inst_tas(system, state, addr),
+                        Instruction::IllXaa => self.ill_inst_xaa(system, state, addr),
+                        _ => unreachable!(),
+                    }
                 }
             };
 
@@ -1262,51 +1291,411 @@ impl Cpu {
     }
 
     fn inst_tax(&self, system: &System, state: &mut SystemState)
-        -> StageResult {
-            state.cpu.reg_x = state.cpu.reg_a;
-            state.cpu.flag_s = state.cpu.reg_x;
-            state.cpu.flag_z = state.cpu.reg_x;
-            StageResult::Next
-        }
+    -> StageResult {
+        state.cpu.reg_x = state.cpu.reg_a;
+        state.cpu.flag_s = state.cpu.reg_x;
+        state.cpu.flag_z = state.cpu.reg_x;
+        StageResult::Next
+    }
 
     fn inst_tay(&self, system: &System, state: &mut SystemState)
-        -> StageResult {
-            state.cpu.reg_y = state.cpu.reg_a;
-            state.cpu.flag_s = state.cpu.reg_y;
-            state.cpu.flag_z = state.cpu.reg_y;
-            StageResult::Next
-        }
+    -> StageResult {
+        state.cpu.reg_y = state.cpu.reg_a;
+        state.cpu.flag_s = state.cpu.reg_y;
+        state.cpu.flag_z = state.cpu.reg_y;
+        StageResult::Next
+    }
 
     fn inst_tsx(&self, system: &System, state: &mut SystemState)
-        -> StageResult {
-            state.cpu.reg_x = state.cpu.reg_sp;
-            state.cpu.flag_s = state.cpu.reg_x;
-            state.cpu.flag_z = state.cpu.reg_x;
-            StageResult::Next
-        }
+    -> StageResult {
+        state.cpu.reg_x = state.cpu.reg_sp;
+        state.cpu.flag_s = state.cpu.reg_x;
+        state.cpu.flag_z = state.cpu.reg_x;
+        StageResult::Next
+    }
 
     fn inst_txa(&self, system: &System, state: &mut SystemState)
-        -> StageResult {
-            state.cpu.reg_a = state.cpu.reg_x;
-            state.cpu.flag_s = state.cpu.reg_a;
-            state.cpu.flag_z = state.cpu.reg_a;
-            StageResult::Next
-        }
+    -> StageResult {
+        state.cpu.reg_a = state.cpu.reg_x;
+        state.cpu.flag_s = state.cpu.reg_a;
+        state.cpu.flag_z = state.cpu.reg_a;
+        StageResult::Next
+    }
 
     fn inst_txs(&self, system: &System, state: &mut SystemState)
-        -> StageResult {
-            state.cpu.reg_sp = state.cpu.reg_x;
-            StageResult::Next
-        }
+    -> StageResult {
+        state.cpu.reg_sp = state.cpu.reg_x;
+        StageResult::Next
+    }
 
     fn inst_tya(&self, system: &System, state: &mut SystemState)
-        -> StageResult {
-            state.cpu.reg_a = state.cpu.reg_y;
+    -> StageResult {
+        state.cpu.reg_a = state.cpu.reg_y;
+        state.cpu.flag_s = state.cpu.reg_a;
+        state.cpu.flag_z = state.cpu.reg_a;
+        StageResult::Next
+    }
+
+    fn ill_inst_ahx(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        self.bus.read(system, state, addr);
+        StageResult::Done
+    }
+
+    fn ill_inst_alr(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        let val = self.bus.read(system, state, addr);
+        state.cpu.reg_a &= val as u32;
+        state.cpu.flag_c = state.cpu.reg_a & 1;
+        state.cpu.reg_a >>= 1;
+        state.cpu.flag_s = state.cpu.reg_a;
+        state.cpu.flag_z = state.cpu.reg_a;
+        StageResult::Done
+    }
+
+    fn ill_inst_anc(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        let val = self.bus.read(system, state, addr);
+        state.cpu.reg_a &= val as u32;
+        state.cpu.flag_c = (state.cpu.reg_a >> 7) & 1;
+        state.cpu.flag_s = state.cpu.reg_a;
+        state.cpu.flag_z = state.cpu.reg_a;
+        StageResult::Done
+    }
+
+    fn ill_inst_arr(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        let val = self.bus.read(system, state, addr);
+        state.cpu.reg_a &= val as u32;
+        if state.cpu.flag_c != 0 {
+            state.cpu.flag_c = state.cpu.reg_a & 1;
+            state.cpu.reg_a = ((state.cpu.reg_a >> 1) | 0x80) & 0xff;
             state.cpu.flag_s = state.cpu.reg_a;
             state.cpu.flag_z = state.cpu.reg_a;
-            StageResult::Next
+        } else {
+            state.cpu.flag_c = state.cpu.reg_a & 1;
+            state.cpu.reg_a = (state.cpu.reg_a >> 1) & 0xff;
+            state.cpu.flag_s = state.cpu.reg_a;
+            state.cpu.flag_z = state.cpu.reg_a;
         }
+        match ((state.cpu.reg_a & 0x40), (state.cpu.reg_a & 0x20)) {
+            (0,0) =>{
+                state.cpu.flag_c = 0;
+                state.cpu.flag_v = 0;
+            },
+            (_,0) => {
+                state.cpu.flag_c = 1;
+                state.cpu.flag_v = 1;
+            },
+            (0,_) => {
+                state.cpu.flag_c = 0;
+                state.cpu.flag_v = 1;
+            },
+            (_,_) => {
+                state.cpu.flag_c = 1;
+                state.cpu.flag_v = 0;
+            }
+        }
+        StageResult::Done
+    }
 
+    fn ill_inst_axs(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        state.cpu.reg_x &= state.cpu.reg_a;
+        let val = self.bus.read(system, state, addr);
+        let temp = state.cpu.reg_x.wrapping_sub(val as u32);
+        state.cpu.flag_c = if temp > state.cpu.reg_x { 0 } else { 1 };
+        state.cpu.reg_x = temp & 0xff;
+        state.cpu.flag_s = state.cpu.reg_x;
+        state.cpu.flag_z = state.cpu.reg_x;
+        StageResult::Done
+    }
+    
+    fn ill_inst_dcp(&self, system: &System, state: &mut SystemState, addr: u16,
+                    stage: u32) -> StageResult {
+        match stage {
+            0 => {
+                let val = self.bus.read(system, state, addr);
+                state.cpu.decode_stack.push_back(val);
+                StageResult::Continue
+            },
+            1 => {
+                let val = state.cpu.decode_stack.pop_back().unwrap();
+                self.bus.write(system, state, addr, val);
+                state.cpu.decode_stack.push_back(val);
+                StageResult::Continue
+            },
+            2 => {
+                let val = state.cpu.decode_stack.pop_back().unwrap();
+                let val = val.wrapping_sub(1);
+                state.cpu.flag_s = val as u32;
+                state.cpu.flag_z = val as u32;
+                self.bus.write(system, state, addr, val);
+                state.cpu.flag_c = if state.cpu.reg_a >= val as u32 { 1 } else { 0 };
+                state.cpu.flag_z = if state.cpu.reg_a == val as u32 { 0 } else { 1 };
+                state.cpu.flag_s = state.cpu.reg_a.wrapping_sub(val as u32) & 0xff;
+                StageResult::Done
+            },
+            _ => unreachable!()
+        }
+    }
+    
+    fn ill_inst_isc(&self, system: &System, state: &mut SystemState, addr: u16,
+                    stage: u32) -> StageResult {
+        match stage {
+            0 => {
+                let val = self.bus.read(system, state, addr);
+                state.cpu.decode_stack.push_back(val);
+                StageResult::Continue
+            },
+            1 => {
+                let val = state.cpu.decode_stack.pop_back().unwrap();
+                self.bus.write(system, state, addr, val);
+                state.cpu.decode_stack.push_back(val);
+                StageResult::Continue
+            },
+            2 => {
+                let val = state.cpu.decode_stack.pop_back().unwrap();
+                let val = val.wrapping_add(1);
+                self.bus.write(system, state, addr, val);
+                let val = val as i32;
+                let temp_a = state.cpu.reg_a as i32;
+                let temp = temp_a.wrapping_sub(
+                    val.wrapping_sub(state.cpu.flag_c as i32 - 1));
+                state.cpu.flag_v = (((temp_a ^ val) &
+                                     (temp_a ^ temp)) >> 7) as u32 & 1;
+                state.cpu.flag_c  = if temp < 0 { 0 } else { 1 };
+                state.cpu.reg_a = (temp as u32) & 0xff;
+                state.cpu.flag_s = state.cpu.reg_a;
+                state.cpu.flag_z = state.cpu.reg_a;
+                StageResult::Done
+            },
+            _ => unreachable!()
+        }
+    }
+
+    fn ill_inst_kil(&self, system: &System, state: &mut SystemState) -> StageResult {
+        println!("KIL encountered");
+        StageResult::Next
+    }
+
+    fn ill_inst_las(&self, system: &System, state: &mut SystemState, addr: u16)
+            -> StageResult {
+        let _ = self.bus.read(system, state, addr);
+        StageResult::Done
+    }
+    
+    fn ill_inst_lax(&self, system: &System, state: &mut SystemState, addr: u16) -> StageResult {
+        let val = self.bus.read(system, state, addr);
+        state.cpu.reg_a = val as u32;
+        state.cpu.reg_x = state.cpu.reg_a;
+        state.cpu.flag_s = state.cpu.reg_a;
+        state.cpu.flag_z = state.cpu.reg_a;
+        StageResult::Done
+    }
+    
+    fn ill_inst_nop(&self, system: &System, state: &mut SystemState, addr: u16) -> StageResult {
+        match state.cpu.op.addressing {
+            Addressing::Immediate | Addressing::ZeroPage  |
+            Addressing::Absolute  | Addressing::ZeroPageX |
+            Addressing::AbsoluteX(_) => {
+                let _ = self.bus.read(system, state, addr);
+                StageResult::Done
+            },
+            _ => {
+                StageResult::Next
+            }
+        }
+    }
+    
+    fn ill_inst_rla(&self, system: &System, state: &mut SystemState, addr: u16,
+                    stage: u32) -> StageResult {
+        match stage {
+            0 => {
+                let val = self.bus.read(system, state, addr);
+                state.cpu.decode_stack.push_back(val);
+                StageResult::Continue
+            },
+            1 => {
+                let val = state.cpu.decode_stack.pop_back().unwrap();
+                self.bus.write(system, state, addr, val);
+                state.cpu.decode_stack.push_back(val);
+                StageResult::Continue
+            },
+            2 => {
+                let value = state.cpu.decode_stack.pop_back().unwrap();
+                let c = if state.cpu.flag_c != 0 { 1 } else { 0 };
+                state.cpu.flag_c = value as u32 >> 7 & 1;
+                let value = (value << 1 | c) & 0xff;
+                self.bus.write(system, state, addr, value);
+                state.cpu.reg_a &= value as u32;
+                state.cpu.flag_s = state.cpu.reg_a;
+                state.cpu.flag_z = state.cpu.reg_a;
+                StageResult::Done
+            },
+            _ => unreachable!()
+        }
+    }
+
+    fn ill_inst_rra(&self, system: &System, state: &mut SystemState, addr: u16,
+                    stage: u32) -> StageResult {
+        match stage {
+            0 => {
+                let val = self.bus.read(system, state, addr);
+                state.cpu.decode_stack.push_back(val);
+                StageResult::Continue
+            },
+            1 => {
+                let val = state.cpu.decode_stack.pop_back().unwrap();
+                self.bus.write(system, state, addr, val);
+                state.cpu.decode_stack.push_back(val);
+                StageResult::Continue
+            },
+            2 => {
+                let value = state.cpu.decode_stack.pop_back().unwrap();
+                self.bus.write(system, state, addr, value);
+                let value = value as u32;
+                let c = if state.cpu.flag_c != 0 { 0x80 } else { 0 };
+                state.cpu.flag_c = value as u32 & 1;
+                let value = (value >> 1 | c) & 0xff;
+                self.bus.write(system, state, addr, value as u8);
+                let temp = state.cpu.reg_a.wrapping_add(
+                    value.wrapping_add(state.cpu.flag_c));
+                state.cpu.flag_v = ((!(state.cpu.reg_a ^ value) &
+                                     (state.cpu.reg_a ^ temp)) >> 7) & 1;
+                state.cpu.flag_c  = if temp > 0xff { 1 } else { 0 };
+                state.cpu.reg_a = temp & 0xff;
+                state.cpu.flag_s = temp & 0xff;
+                state.cpu.flag_z = temp & 0xff;
+                StageResult::Done
+            },
+            _ => unreachable!()
+        }
+    }
+    
+    fn ill_inst_sax(&self, system: &System, state: &mut SystemState, addr: u16) -> StageResult {
+        let val = (state.cpu.reg_a & state.cpu.reg_x) & 0xff;
+        self.bus.write(system, state, addr, val as u8);
+        StageResult::Done
+    }
+
+    fn ill_inst_sbc(&self, system: &System, state: &mut SystemState, addr: u16)
+    -> StageResult {
+        let value = self.bus.read(system, state, addr) as i32;
+        let temp_a = state.cpu.reg_a as i32;
+        let temp = temp_a.wrapping_sub(
+            value.wrapping_sub(state.cpu.flag_c as i32 - 1));
+        state.cpu.flag_v = (((temp_a ^ value) &
+                             (temp_a ^ temp)) >> 7) as u32 & 1;
+        state.cpu.flag_c  = if temp < 0 { 0 } else { 1 };
+        state.cpu.reg_a = (temp as u32) & 0xff;
+        state.cpu.flag_s = state.cpu.reg_a;
+        state.cpu.flag_z = state.cpu.reg_a;
+        StageResult::Done
+    }
+    
+    fn ill_inst_shx(&self, system: &System, state: &mut SystemState,
+                    addr: u16) -> StageResult {
+        let temp_addr = addr as u32;
+        let value = (state.cpu.reg_x & ((temp_addr >> 8).wrapping_add(1))) & 0xff;
+        let temp = temp_addr.wrapping_sub(state.cpu.reg_y) & 0xff;
+        if state.cpu.reg_y.wrapping_add(temp) <= 0xff {
+            self.bus.write(system, state, addr, value as u8);
+        } else {
+            let value = self.bus.peek(system, state, addr);
+            self.bus.write(system, state, addr, value);
+        }
+        StageResult::Done
+    }
+
+    fn ill_inst_shy(&self, system: &System, state: &mut SystemState,
+                    addr: u16) -> StageResult {
+        let temp_addr = addr as u32;
+        let value = (state.cpu.reg_y & ((temp_addr >> 8).wrapping_add(1))) & 0xff;
+        let temp = temp_addr.wrapping_sub(state.cpu.reg_x) & 0xff;
+        if state.cpu.reg_x.wrapping_add(temp) <= 0xff {
+            self.bus.write(system, state, addr, value as u8);
+        } else {
+            let value = self.bus.peek(system, state, addr);
+            self.bus.write(system, state, addr, value);
+        }
+        StageResult::Done
+    }
+
+    fn ill_inst_slo(&self, system: &System, state: &mut SystemState, addr: u16,
+                    stage: u32) -> StageResult {
+        match stage {
+            0 => {
+                let val = self.bus.read(system, state, addr);
+                state.cpu.decode_stack.push_back(val);
+                StageResult::Continue
+            },
+            1 => {
+                let val = state.cpu.decode_stack.pop_back().unwrap();
+                self.bus.write(system, state, addr, val);
+                state.cpu.decode_stack.push_back(val);
+                StageResult::Continue
+            },
+            2 => {
+                let mut value = state.cpu.decode_stack.pop_back().unwrap() as u32;
+                state.cpu.flag_c = (value >> 7) & 1;
+                value = (value << 1) & 0xff;
+                self.bus.write(system, state, addr, value as u8);
+                state.cpu.reg_a |= value;
+                state.cpu.flag_s = state.cpu.reg_a;
+                state.cpu.flag_z = state.cpu.reg_a;
+                StageResult::Done
+            },
+            _ => unreachable!()
+        }
+    }
+    
+    fn ill_inst_sre(&self, system: &System, state: &mut SystemState, addr: u16,
+                    stage: u32) -> StageResult {
+        match stage {
+            0 => {
+                let val = self.bus.read(system, state, addr);
+                state.cpu.decode_stack.push_back(val);
+                StageResult::Continue
+            },
+            1 => {
+                let val = state.cpu.decode_stack.pop_back().unwrap();
+                self.bus.write(system, state, addr, val);
+                state.cpu.decode_stack.push_back(val);
+                StageResult::Continue
+            },
+            2 => {
+                let mut value = state.cpu.decode_stack.pop_back().unwrap() as u32;
+                state.cpu.flag_c = value & 1;
+                value >>= 1;
+                self.bus.write(system, state, addr, value as u8);
+                state.cpu.reg_a ^= value;
+                state.cpu.reg_a &= 0xff;
+                state.cpu.flag_s = state.cpu.reg_a;
+                state.cpu.flag_z = state.cpu.reg_a;
+                StageResult::Done
+            },
+            _ => unreachable!()
+        }
+    }
+
+    fn ill_inst_tas(&self, system: &System, state: &mut SystemState,
+                    addr: u16) -> StageResult {
+        state.cpu.reg_sp = state.cpu.reg_x & state.cpu.reg_a;
+        let val = state.cpu.reg_sp & ((addr as u32) >> 8);
+        self.bus.write(system, state, addr, val as u8);
+        StageResult::Done
+    }
+
+    fn ill_inst_xaa(&self, system: &System, state: &mut SystemState,
+                    addr: u16) -> StageResult {
+        let val = self.bus.read(system, state, addr) as u32;
+        state.cpu.reg_a = state.cpu.reg_x & val;
+        state.cpu.flag_s = state.cpu.reg_a;
+        state.cpu.flag_z = state.cpu.reg_a;
+        StageResult::Done
+    }
+    
     fn will_wrap(addr: u16, add: u16) -> bool {
         addr & 0xff00 != addr.wrapping_add(add) & 0xff00
     }
