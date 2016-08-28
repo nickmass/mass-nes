@@ -1,0 +1,27 @@
+language: rust
+rust:
+    - nightly
+os:
+    - linux
+    - osx
+sudo: required
+dist: trusty
+script:
+    - cargo build --verbose
+    - cargo test --verbose --release --no-fail-fast
+before_deploy:
+    - cargo build --release
+    - cd target/release
+    - tar -zcvf mass-nes-${TRAVIS_OS_NAME}-${TRAVIS_TAG}.tar.gz mass_irc
+    - cd ../..
+deploy:
+    provider: releases
+    api_key:
+        secure: XUQlmpXhKp4LtOt0y+eAM8mzpK19WCCjEoEoQY2m9guhK/8/Nljy3b0n6QFc6K2iCkQcnTLSoQLrv3i8mIisAgFhg7U9O/WpACBPvbqf1lBt/apVLUeE7xOT/gby3Uk6negon4cSRC6Ta+qVMAafE4caJi3ZSntCCTas0uYgMoYAWlv2/RHoaAv6KuqzQpD/4DTB7cHsnalmMCP7U5vuGyNyOFptoOH72SfqtnHsGBDbgXUb5gDXnEROvEwrkWEqNdDxkDR0wljGazzm1+tbv5wdUNGNpx7uLonydOvK6TgS2zwN33nwlVALv87pNiZDzqqln6Xhiu/L8vJHPyhSm4JuAonafqB5vBeuUNBC8dj2QKQemfYOhG3M7E+uuD5Yl6RG14+PRGpT5Nzz0eR7nWEnJk5NFj4R4KRPPQDD2pM8qfXo/N7FF2SKipzB9vygtKUh864ur5RkP36y5UUu020gyRAXl2AFRHJIYsttFd3JscHd5nYP7IGeGRXcnTPzRsW0yMF55j6/AC7RFOxrnId96MdPMq6RA3fz/COlIQbntchG7ZNdU2qioDqDlWJyDPUm200cFlw3VG+jUkP2m4RYiRiLUesvpPHaKAqEzS7S8MyO8Sdj0vEeCaW9u3fCDUYqC/OGrzDXWMyENzv8G15ne7fxYAug9l9uRJgJkIQ=
+    file: target/release/mass-nes-${TRAVIS_OS_NAME}-${TRAVIS_TAG}.tar.gz
+    overwrite: true
+    skip_cleanup: true
+    on:
+        tags: true
+notifications:
+    email: false

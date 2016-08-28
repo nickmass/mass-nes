@@ -23,6 +23,14 @@ impl Debug {
         }
     }
 
+    pub fn peek(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
+        system.cpu.bus.peek(system, state, addr)
+    }
+
+    pub fn frame(&self, state: &SystemState) -> u32 {
+        state.ppu.frame
+    }
+
     pub fn color_for(&self, state: &mut SystemState, count: u32) {
         state.debug.color_dots = count;
     }

@@ -7,9 +7,10 @@ pub struct PpuState {
     current_tick: u64,
     last_status_read: u64,
     last_nmi_set: u64,
-    frame: u32,
+    pub frame: u32,
     regs: [u8;8],
-    pub vblank: bool,
+    vblank: bool,
+    pub in_vblank: bool,
     sprite_zero_hit: bool,
     sprite_overflow: bool,
     last_write: u8,
@@ -77,6 +78,7 @@ impl Default for PpuState {
             frame: 0,
             regs: [0;8],
             vblank: false,
+            in_vblank: false,
             sprite_zero_hit: false,
             sprite_overflow: false,
             last_write: 0,
@@ -418,6 +420,7 @@ impl Ppu {
         state.ppu.current_tick += 1;
         match state.ppu.stage {
             Stage::Prerender(261, 1) => {
+                state.ppu.in_vblank = false;
                 state.ppu.vblank = false;
                 state.ppu.sprite_zero_hit = false;
                 state.ppu.sprite_overflow = false;
@@ -512,6 +515,7 @@ impl Ppu {
                 self.horz_reset(state);
             },
             Stage::Vblank(241, 1) => {
+                state.ppu.in_vblank = true;
                 if state.ppu.current_tick != state.ppu.last_status_read + 1 {
                     state.ppu.vblank = true;
                     if state.ppu.is_nmi_enabled() {

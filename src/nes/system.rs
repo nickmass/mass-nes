@@ -23,10 +23,11 @@ impl Region {
 }
 
 
-pub struct Machine<FR, FC, FI, I> where 
+pub struct Machine<FR, FC, FI, I, FD> where 
     FR: FnMut(&[u8;256*240]), 
-    FC: Fn() -> bool, 
-    FI: Fn() -> I, 
+    FC: FnMut() -> bool, 
+    FI: FnMut() -> I,
+    FD: FnMut(&System, &mut SystemState),
     I: InputDevice {
     
     pub state: Box<SystemState>,
@@ -34,15 +35,18 @@ pub struct Machine<FR, FC, FI, I> where
     on_render: FR,
     on_closed: FC,
     on_input: FI,
+    on_debug: FD,
 }
 
-impl<FR, FC, FI, I> Machine<FR, FC, FI, I> where 
+impl<FR, FC, FI, I, FD> Machine<FR, FC, FI, I, FD> where 
     FR: FnMut(&[u8;256*240]),
-    FC: Fn() -> bool,
-    FI: Fn() -> I,
+    FC: FnMut() -> bool,
+    FI: FnMut() -> I,
+    FD: FnMut(&System, &mut SystemState),
     I: InputDevice {
 
-    pub fn new(region: Region, cartridge: Cartridge, render: FR, closed: FC, input: FI) -> Machine<FR, FC, FI, I> {
+    pub fn new(region: Region, cartridge: Cartridge, render: FR, closed: FC, input: FI,
+               debug: FD) -> Machine<FR, FC, FI, I, FD> {
         let mut state = Box::new(SystemState::default());
         let system = System::new(region, cartridge, &mut state);
         Machine {
@@ -51,6 +55,7 @@ impl<FR, FC, FI, I> Machine<FR, FC, FI, I> where
             on_render: render,
             on_closed: closed,
             on_input: input,
+            on_debug: debug,
         }
     }
 
@@ -62,15 +67,16 @@ impl<FR, FC, FI, I> Machine<FR, FC, FI, I> where
             self.system.ppu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
-            if self.state.ppu.vblank && !last_vblank {
+            if self.state.ppu.in_vblank && !last_vblank {
                 (self.on_render)(&self.state.ppu.screen);
+                let input = (self.on_input)().to_byte();
+                self.state.input.input = input;
+                (self.on_debug)(&self.system, &mut self.state);
             }
-            last_vblank = self.state.ppu.vblank;
+            last_vblank = self.state.ppu.in_vblank;
             if (self.on_closed)() {
                 break;
             }
-            let input = (self.on_input)().to_byte();
-            self.state.input.input = input;
         }
     }
 }

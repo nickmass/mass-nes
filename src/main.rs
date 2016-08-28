@@ -35,7 +35,7 @@ fn main() {
             left: input[6],
             right: input[7],
         }
-    });
+    }, |sys, state| {});
 
     machine.run();
 }
