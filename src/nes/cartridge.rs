@@ -57,6 +57,7 @@ pub struct Cartridge {
     pub prg_rom: Vec<u8>,
     pub chr_rom: Vec<u8>,
     pub mirroring: RomMirrioring,
+    pub mapper: u8,
 }
 
 impl Cartridge {
@@ -116,6 +117,7 @@ impl Cartridge {
             prg_rom: rom[data_start..prg_rom_end].to_vec(),
             chr_rom: rom[prg_rom_end..chr_rom_end].to_vec(),
             mirroring: mirroring,
+            mapper: mapper_number,
         };
 
         println!("PRGROM: {}, CHRROM: {}, Mapper: {}", prg_rom_bytes, chr_rom_bytes, mapper_number);

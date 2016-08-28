@@ -124,6 +124,10 @@ impl System {
                                  AndEqualsAndMask(0x2800, 0x2000, 0x7ff));
         system.ppu.register_write(state, DeviceKind::PpuRam,
                                  AndEqualsAndMask(0x2800, 0x2000, 0x7ff));
+        system.ppu.register_read(state, DeviceKind::PpuRam, 
+                                 AndEqualsAndMask(0x2800, 0x2800, 0x7ff));
+        system.ppu.register_write(state, DeviceKind::PpuRam,
+                                 AndEqualsAndMask(0x2800, 0x2800, 0x7ff));
         system.mapper.register(state, &mut system.cpu, &mut system.ppu,
                                &system.cartridge);
         system.cpu.register_read(state, DeviceKind::Input, Address(0x4016));

@@ -437,8 +437,15 @@ impl Ppu {
                 self.fetch_high_bg_pattern(system, state);
             },
             Stage::Prerender(s, c) if c % 8 == 0 && c != 0 && c < 256 => {
-                self.horz_increment(state);
                 self.load_bg_shifters(state);
+                self.horz_increment(state);
+            },
+            Stage::Prerender(s, 256) => {
+                self.horz_increment(state);
+                self.vert_increment(state);
+            },
+            Stage::Prerender(s, 257) => {
+                self.horz_reset(state);
             },
             Stage::Prerender(s, c) if c >= 280 && c <= 304 => {
                 self.vert_reset(state);
@@ -456,14 +463,13 @@ impl Ppu {
                 self.fetch_high_bg_pattern(system, state);
             },
             Stage::Prerender(s, c) if c == 328 || c == 336 => {
-                self.horz_increment(state);
                 self.load_bg_shifters(state);
+                self.horz_increment(state);
             },
-            Stage::Dot(0, 0) => {
+            Stage::Prerender(s, 340) => {
                 //Skip tick on odd frames
                 if state.ppu.frame % 2 == 1 && state.ppu.is_background_enabled() {
                     state.ppu.stage = state.ppu.stage.increment();
-                    self.fetch_nametable(system, state);    
                 }
             },
             Stage::Dot(s, c) if c % 8 == 1 => {
@@ -479,8 +485,8 @@ impl Ppu {
                 self.fetch_high_bg_pattern(system, state);
             },
             Stage::Dot(s, c) if c % 8 == 0 && c != 0 => {
-                self.horz_increment(state);
                 self.load_bg_shifters(state);
+                self.horz_increment(state);
             },
             Stage::Hblank(s, c) if c  == 321 || c == 329 || c == 337 || c == 339 => {
                 self.fetch_nametable(system, state);
@@ -495,8 +501,8 @@ impl Ppu {
                 self.fetch_high_bg_pattern(system, state);
             },
             Stage::Hblank(s, c) if c == 328 || c == 336 => {
-                self.horz_increment(state);
                 self.load_bg_shifters(state);
+                self.horz_increment(state);
             },
             Stage::Hblank(s, 256) => {
                 self.horz_increment(state);
@@ -553,7 +559,7 @@ impl Ppu {
             },
             Stage::Hblank(s, d) if d >=257 && d < 320 && d % 8 == 3 => {
                //Garbage Nametable 
-                self.fetch_nametable(system, state);
+                self.fetch_attribute(system, state);
             },
             Stage::Hblank(s, d) if d >=257 && d < 320 && d % 8 == 5 => {
                 self.sprite_fetch(system, state, s, false);
@@ -663,7 +669,11 @@ impl Ppu {
         if state.ppu.is_grayscale() {
             pixel_result &= 0x30;
         }
-        
+       
+        if system.debug.color(state) {
+            pixel_result = 0x14
+        }
+
         //TODO - Do emphasis bits
         state.ppu.screen[((scanline * 256) + dot) as usize] = pixel_result;
 

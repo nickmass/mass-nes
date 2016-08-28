@@ -9,9 +9,11 @@ use ui::gfx::GliumRenderer;
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::fs;
+use std::env;
 
 fn main() {
-   let mut file = ::std::fs::File::open(std::env::args().nth(1).unwrap_or("/home/nickmass/smb.nes".to_string())).unwrap();
+    let mut file = fs::File::open(env::args().nth(1).unwrap_or("/home/nickmass/smb.nes".to_string())).unwrap();
     let region = Region::Ntsc;
     let pal = region.default_palette();
     let cart = Cartridge::load(&mut file).unwrap();

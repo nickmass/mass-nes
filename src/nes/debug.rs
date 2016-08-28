@@ -5,6 +5,7 @@ use std::collections::HashMap;
 #[derive(Default)]
 pub struct DebugState {
     trace_instrs: u32,
+    color_dots: u32,
 }
 
 pub struct Debug {
@@ -19,6 +20,19 @@ impl Debug {
             ops: Op::load(),
             op_names: Debug::load_op_names(),
             op_lengths: Debug::load_op_lengths(),
+        }
+    }
+
+    pub fn color_for(&self, state: &mut SystemState, count: u32) {
+        state.debug.color_dots = count;
+    }
+
+    pub fn color(&self, state: &mut SystemState) -> bool {
+        if state.debug.color_dots != 0 {
+            state.debug.color_dots -= 1;
+            true
+        } else {
+            false
         }
     }
 
