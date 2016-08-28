@@ -8,6 +8,7 @@ sudo: required
 dist: trusty
 script:
     - cargo build --verbose
+after_script:
     - cargo test --verbose --release --no-fail-fast
 before_deploy:
     - cargo build --release

@@ -10,7 +10,6 @@ build_script:
     - cargo build --verbose
 test_script:
     - cargo test --release --no-fail-fast --verbose
-    - cargo run -- --help
 after_build:
     - SET RELEASE_ARCHIVE=mass-nes-win-%APPVEYOR_REPO_TAG_NAME%.zip
     - IF %APPVEYOR_REPO_TAG% EQU true cargo build --release
