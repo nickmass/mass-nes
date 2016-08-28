@@ -43,8 +43,8 @@ pub struct PpuState {
     low_bg_shift: u16,
     high_bg_shift: u16,
 
-    low_attr_shift: u8,
-    high_attr_shift: u8,
+    low_attr_shift: u16,
+    high_attr_shift: u16,
 
     pub screen: [u8;256*240],
 
@@ -578,8 +578,17 @@ impl Ppu {
         let fine_x = state.ppu.vram_fine_x;
         let color = (((state.ppu.low_bg_shift >> (15 - fine_x)) & 0x1) |
             ((state.ppu.high_bg_shift >> (14 - fine_x)) & 0x2)) as u16;
-        let attr = ((((state.ppu.low_attr_shift >> (7 - fine_x)) & 0x1) |
-            ((state.ppu.high_attr_shift  >> (6 - fine_x)) & 0x2)) << 2) as u16;
+        
+        let high_attr = state.ppu.high_attr_shift as u32;
+        let low_attr = state.ppu.low_attr_shift as u32;
+
+        let high_attr = high_attr << fine_x;
+        let low_attr = low_attr << fine_x;
+
+        let high_attr = (high_attr >> 14) & 0x02;
+        let low_attr = (low_attr >> 15) & 0x01;
+
+        let attr = ((high_attr | low_attr) << 2) as u16;
 
         let attr = if color == 0 { 0 } else { attr };
 
@@ -862,8 +871,10 @@ impl Ppu {
         state.ppu.high_bg_shift &= 0xff00;
         state.ppu.high_bg_shift |= state.ppu.pattern_high as u16;
 
-        state.ppu.low_attr_shift = (state.ppu.attribute_low & 1) * 0xff;
-        state.ppu.high_attr_shift = (state.ppu.attribute_high & 1) * 0xff;
+        state.ppu.low_attr_shift &= 0xff00;
+        state.ppu.low_attr_shift |= ((state.ppu.attribute_low & 1) * 0xff) as u16;
+        state.ppu.high_attr_shift &=0xff00;
+        state.ppu.high_attr_shift |= ((state.ppu.attribute_high & 1) * 0xff) as u16;
 
     }
 
