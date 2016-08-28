@@ -13,7 +13,7 @@ after_script:
 before_deploy:
     - cargo build --release
     - cd target/release
-    - tar -zcvf mass-nes-${TRAVIS_OS_NAME}-${TRAVIS_TAG}.tar.gz mass_irc
+    - tar -zcvf mass-nes-${TRAVIS_OS_NAME}-${TRAVIS_TAG}.tar.gz mass_nes
     - cd ../..
 deploy:
     provider: releases
