@@ -516,8 +516,6 @@ impl Cpu {
                     let _ = self.bus.read(system, state, a);
                     StageResult::Done
                 } else {
-                    state.cpu.stage = Stage::Execute(0);
-                    self.operation(system, state);
                     StageResult::Next
                 }
             },
