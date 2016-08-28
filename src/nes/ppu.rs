@@ -57,6 +57,8 @@ pub struct PpuState {
     found_sprites: u32,
     sprite_reads: u32,
     line_oam_index: usize,
+    sprite_zero_on_line: bool,
+    sprite_zero_on_next_line: bool,
     
     sprite_active: [u8; 8],
     sprite_x: [u8; 8],
@@ -122,6 +124,8 @@ impl Default for PpuState {
             found_sprites: 0,
             sprite_reads: 0,
             line_oam_index: 0,
+            sprite_zero_on_line: false,
+            sprite_zero_on_next_line: false,
 
             sprite_active: [0; 8],
             sprite_x: [0; 8],
@@ -147,7 +151,7 @@ impl PpuState {
     }
 
     fn vram_inc(&self) -> u16 {
-        if self.regs[0] & 0x04 != 0 { 32 } else { 1 }
+        if self.regs[0] & 0x04 != 0 { 0x20 } else { 0x01 }
     }
 
     fn base_nametable(&self) -> u16 {
@@ -264,14 +268,14 @@ impl Ppu {
 
     pub fn peek(&self, bus: BusKind, system: &System, state: &SystemState, address: u16) -> u8 {
         match address {
-            0 => state.ppu.last_write,
-            1 => state.ppu.last_write,
-            2 => state.ppu.ppu_status(),
-            3 => state.ppu.oam_addr, //OAMADDR
-            4 => state.ppu.oam_data[state.ppu.oam_addr as usize], //OANDATA
-            5 => state.ppu.last_write,
-            6 => state.ppu.last_write,
-            7 => { //PPUDATA
+            0x2000 => state.ppu.last_write,
+            0x2001 => state.ppu.last_write,
+            0x2002 => state.ppu.ppu_status(),
+            0x2003 => state.ppu.oam_addr, //OAMADDR
+            0x2004 => state.ppu.oam_data[state.ppu.oam_addr as usize], //OANDATA
+            0x2005 => state.ppu.last_write,
+            0x2006 => state.ppu.last_write,
+            0x2007 => { //PPUDATA
                 let addr = state.ppu.vram_addr;
                 let result = if addr & 0x3f00 == 0x3f00 {
                     let addr  = if addr & 0x03 != 0 { addr & 0x1f } else { addr & 0x0f };
@@ -285,17 +289,17 @@ impl Ppu {
                 };
                 result
             }
-            4014 => 0,
+            0x4014 => 0,
             _ => unreachable!(),
         }
     }
     pub fn read(&self, bus: BusKind, system: &System, state: &mut SystemState, address: u16) -> u8 {
         match address {
-            0 => state.ppu.last_write,
-            1 => state.ppu.last_write,
-            2 => {  
-                state.ppu.write_latch = false;
+            0x2000 => state.ppu.last_write,
+            0x2001 => state.ppu.last_write,
+            0x2002 => {  
                 let status = state.ppu.ppu_status();
+                state.ppu.write_latch = false;
                 state.ppu.vblank = false;
                 state.ppu.last_status_read = state.ppu.current_tick;
                 if state.ppu.last_nmi_set == state.ppu.current_tick ||
@@ -304,17 +308,17 @@ impl Ppu {
                 }
                 status
             }, //PPUSTATUS
-            3 => state.ppu.oam_addr, //OAMADDR
-            4 => {
+            0x2003 => state.ppu.oam_addr, //OAMADDR
+            0x2004 => {
                 if state.ppu.in_sprite_render {
                     0xff
                 } else {
                     state.ppu.oam_data[state.ppu.oam_addr as usize]
                 }
             }, //OANDATA
-            5 => state.ppu.last_write,
-            6 => state.ppu.last_write,
-            7 => { //PPUDATA
+            0x2005 => state.ppu.last_write,
+            0x2006 => state.ppu.last_write,
+            0x2007 => { //PPUDATA
                 let addr = state.ppu.vram_addr;
                 let result = if addr & 0x3f00 == 0x3f00 {
                     let addr  = if addr & 0x03 != 0 { addr & 0x1f } else { addr & 0x0f };
@@ -327,20 +331,21 @@ impl Ppu {
                     state.ppu.data_read_buffer
                 };
                 state.ppu.data_read_buffer = self.bus.read(system, state, addr);
-                state.ppu.vram_addr += state.ppu.vram_inc();
+                state.ppu.vram_addr = state.ppu.vram_addr
+                            .wrapping_add(state.ppu.vram_inc()) & 0x7fff;
                 result
             }
-            4014 => 0,
+            0x4014 => 0,
             _ => unreachable!(),
         }
     }
 
     pub fn write(&self, bus: BusKind, system: &System, state: &mut SystemState, address: u16, value: u8) {
         match address {
-            0 => {
+            0x2000 => {
                 let was_nmi_enabled = state.ppu.is_nmi_enabled();
                 state.ppu.regs[0] = value;
-                state.ppu.vram_addr_temp &= 0xc00;
+                state.ppu.vram_addr_temp &= 0xf3ff;
                 state.ppu.vram_addr_temp |= state.ppu.base_nametable();
                 match state.ppu.stage {
                     Stage::Vblank(_, _) => {
@@ -353,14 +358,14 @@ impl Ppu {
                     _ => {}
                 }
             }, //PPUCTRL
-            1 => state.ppu.regs[1] = value, //PPUMASK
-            2 => state.ppu.regs[2] = value,
-            3 => state.ppu.oam_addr = value, //OAMADDR
-            4 => {
+            0x2001 => state.ppu.regs[1] = value, //PPUMASK
+            0x2002 => state.ppu.regs[2] = value,
+            0x2003 => state.ppu.oam_addr = value, //OAMADDR
+            0x2004 => {
                 state.ppu.oam_data[state.ppu.oam_addr as usize] = value;
                 state.ppu.oam_addr = state.ppu.oam_addr.wrapping_add(1);
             }, //OAMDATA
-            5 => { //PPUSCROLL
+            0x2005 => { //PPUSCROLL
                 if state.ppu.write_latch {
                     let value = value as u16;
                     state.ppu.vram_addr_temp &= 0xfc1f;
@@ -375,7 +380,7 @@ impl Ppu {
                 state.ppu.write_latch = !state.ppu.write_latch;
 
             },
-            6 => { //PPUADDR
+            0x2006 => { //PPUADDR
                 if state.ppu.write_latch {
                     state.ppu.vram_addr_temp &= 0xff00;
                     state.ppu.vram_addr_temp |= value as u16;
@@ -386,14 +391,16 @@ impl Ppu {
                 }
                 state.ppu.write_latch = !state.ppu.write_latch;
             },
-            7 => { //PPUDATA
+            0x2007 => { //PPUDATA
                 let addr = state.ppu.vram_addr;
-                self.bus.write(system, state, addr, value);
                 if addr & 0x3f00 == 0x3f00 {
                     let addr  = if addr & 0x03 != 0 { addr & 0x1f } else { addr & 0x0f };
                     state.ppu.palette_data[addr as usize] = value;
+                } else {
+                    self.bus.write(system, state, addr & 0x3fff, value);
                 }
-                state.ppu.vram_addr += state.ppu.vram_inc();
+                state.ppu.vram_addr = state.ppu.vram_addr
+                    .wrapping_add(state.ppu.vram_inc()) & 0x7fff;
             },
             0x4014 => { //OAMDMA
                 state.cpu.oam_dma_req(value);
@@ -521,6 +528,8 @@ impl Ppu {
                 state.ppu.in_sprite_render = false;
                 state.ppu.sprite_read_loop = false;
                 state.ppu.block_oam_writes = false;
+                state.ppu.sprite_zero_on_line = state.ppu.sprite_zero_on_next_line;
+                state.ppu.sprite_zero_on_next_line = false;
                 self.init_line_oam(system, state, 0);
             },
             Stage::Dot(s, d) if d >= 1 && d < 65 && d % 2 == 1 => {
@@ -567,15 +576,16 @@ impl Ppu {
 
     fn render(&self, system: &System, state: &mut SystemState, dot: u32, scanline: u32) {
         let fine_x = state.ppu.vram_fine_x;
-        let color = ((((state.ppu.low_bg_shift << fine_x) >> 15) & 0x1) |
-            (((state.ppu.high_bg_shift << fine_x) >> 14) & 0x2)) as u16;
-        let attr = ((((state.ppu.low_attr_shift >> 7) & 0x1) |
-            ((state.ppu.high_attr_shift >> 6) & 0x2)) << 2) as u16;
+        let color = (((state.ppu.low_bg_shift >> (15 - fine_x)) & 0x1) |
+            ((state.ppu.high_bg_shift >> (14 - fine_x)) & 0x2)) as u16;
+        let attr = ((((state.ppu.low_attr_shift >> (7 - fine_x)) & 0x1) |
+            ((state.ppu.high_attr_shift  >> (6 - fine_x)) & 0x2)) << 2) as u16;
 
         let attr = if color == 0 { 0 } else { attr };
 
         let palette = color | attr;
 
+        let mut sprite_zero = false;
         let mut sprite_pixel = 0;
         let mut behind_bg = false;
         let mut x = 8;
@@ -594,6 +604,7 @@ impl Ppu {
                                 if low & pal_bit != 0 { 1 } else { 0 };
                     
                     if color != 0 {
+                        sprite_zero = x == 0 && state.ppu.sprite_zero_on_line;
                         sprite_pixel = color | attr;
                         behind_bg  = attr & 0x20 != 0;
                     }
@@ -630,10 +641,10 @@ impl Ppu {
             (false, true, _) => 0x3f10 | sprite_pixel as u16,
             (true, false, _) => 0x3f00 | palette as u16,
             (true, true, false) => {
-                state.ppu.sprite_zero_hit = true;
+                if sprite_zero { state.ppu.sprite_zero_hit = true; }
                 0x3f10 | sprite_pixel as u16 },
             (true, true, true) => { 
-                state.ppu.sprite_zero_hit = true;
+                if sprite_zero { state.ppu.sprite_zero_hit = true; }
                 0x3f00 | palette as u16 },
         };
 
@@ -765,6 +776,7 @@ impl Ppu {
                 state.ppu.line_oam_index += 1;
                 state.ppu.sprite_reads -= 1;    
             } else if is_on_line(state.ppu.next_sprite_byte, scanline) {
+                if state.ppu.sprite_n == 0 { state.ppu.sprite_zero_on_next_line = true; }
                 state.ppu.sprite_m += 1;
                 state.ppu.sprite_reads = 3;
                 state.ppu.line_oam_index += 1;

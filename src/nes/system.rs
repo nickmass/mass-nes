@@ -5,6 +5,7 @@ use nes::cartridge::Cartridge;
 use nes::memory::Pages;
 use nes::debug::{Debug, DebugState};
 use nes::input::{Input, InputState};
+use nes::mapper::Mapper;
 
 pub use nes::input::{Controller, InputDevice};
 
@@ -89,6 +90,7 @@ pub struct System {
     pub ppu: Ppu,
     pub cpu: Cpu,
     pub cartridge: Cartridge,
+    pub mapper: Mapper,
     pub debug: Debug,
     pub input: Input,
 }
@@ -97,12 +99,14 @@ impl System {
     pub fn new(region: Region, cartridge: Cartridge, state: &mut SystemState) -> System {
         let cpu = Cpu::new(state);
         let ppu = Ppu::new(Region::Ntsc, state);
-        
+        let mapper = Mapper::new(&cartridge, state);
+
         let mut system = System {
             region: region,
             ppu: ppu,
             cpu: cpu,
             cartridge: cartridge,
+            mapper: mapper,
             debug: Debug::new(),
             input: Input::new(),
         };
@@ -111,14 +115,17 @@ impl System {
                                  NotAndMask(0x7ff));
         system.cpu.register_write(state, DeviceKind::CpuRam,
                                  NotAndMask(0x7ff));
-        system.cpu.register_read(state, DeviceKind::Ppu, RangeAndMask(0x2000, 0x4000, 0x7));
-        system.cpu.register_write(state, DeviceKind::Ppu, RangeAndMask(0x2000, 0x4000, 0x7));
+        system.cpu.register_read(state, DeviceKind::Ppu,
+                                 RangeAndMask(0x2000, 0x4000, 0x2007));
+        system.cpu.register_write(state, DeviceKind::Ppu,
+                                  RangeAndMask(0x2000, 0x4000, 0x2007));
         system.cpu.register_write(state, DeviceKind::Ppu, Address(0x4014));
         system.ppu.register_read(state, DeviceKind::PpuRam, 
                                  AndEqualsAndMask(0x2800, 0x2000, 0x7ff));
         system.ppu.register_write(state, DeviceKind::PpuRam,
                                  AndEqualsAndMask(0x2800, 0x2000, 0x7ff));
-        system.cartridge.register(state, &mut system.cpu, &mut system.ppu);
+        system.mapper.register(state, &mut system.cpu, &mut system.ppu,
+                               &system.cartridge);
         system.cpu.register_read(state, DeviceKind::Input, Address(0x4016));
         system.cpu.register_read(state, DeviceKind::Input, Address(0x4017));
         system.cpu.register_write(state, DeviceKind::Input, Address(0x4016));

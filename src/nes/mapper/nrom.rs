@@ -1,6 +1,6 @@
 struct NRom;
 use std::rc::Rc;
-use super::bus::AddressBus;
+use nes::bus::AddressBus;
 
 impl NRom {
     pub fn new(cpu_bus: &mut AddressBus, ppu_bus: &mut AddressBus) {

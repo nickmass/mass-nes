@@ -45,17 +45,18 @@ enum RomType {
     Unif,
 }
 
-enum RomMirrioring {
+pub enum RomMirrioring {
     Horizontal,
     Vertical,
     FourScreen,
 }
 
 pub struct Cartridge {
-    prg_ram_bytes: usize,
-    prg_rom: Vec<u8>,
-    chr_rom: Vec<u8>,
-    mirroring: RomMirrioring,
+    pub chr_ram_bytes: usize,
+    pub prg_ram_bytes: usize,
+    pub prg_rom: Vec<u8>,
+    pub chr_rom: Vec<u8>,
+    pub mirroring: RomMirrioring,
 }
 
 impl Cartridge {
@@ -80,6 +81,8 @@ impl Cartridge {
 
         let prg_rom_bytes = (rom[4] as u32) * 2u32.pow(14);
         let chr_rom_bytes = (rom[5] as u32) * 2u32.pow(13);
+
+        let chr_ram_bytes = if chr_rom_bytes == 0 { 0x2000 } else { 0 };
 
         let mapper_number = (rom[6] >> 4) | (rom[7] & 0xF0);
 
@@ -109,6 +112,7 @@ impl Cartridge {
 
         let cartridge = Cartridge {
             prg_ram_bytes: prg_ram_bytes,
+            chr_ram_bytes: chr_ram_bytes,
             prg_rom: rom[data_start..prg_rom_end].to_vec(),
             chr_rom: rom[prg_rom_end..chr_rom_end].to_vec(),
             mirroring: mirroring,
@@ -145,28 +149,5 @@ impl Cartridge {
         }
 
         None
-    }
-
-    pub fn register(&self, state: &mut SystemState, cpu: &mut Cpu, ppu: &mut Ppu) {
-        cpu.register_read(state, DeviceKind::Mapper, AndAndMask(0x8000, (self.prg_rom.len() - 1) as u16));
-        ppu.register_read(state, DeviceKind::Mapper, NotAndMask(0x1fff));
-    }
-
-    pub fn peek(&self, bus: BusKind, state: &SystemState, address: u16) -> u8 {
-        match bus {
-            BusKind::Cpu => self.prg_rom[address as usize],
-            BusKind::Ppu => self.chr_rom[address as usize],
-        }
-    }
-
-    pub fn read(&self, bus: BusKind, state: &SystemState, address: u16) -> u8 {
-        match bus {
-            BusKind::Cpu => self.prg_rom[address as usize],
-            BusKind::Ppu => self.chr_rom[address as usize],
-        }
-    }
-
-    pub fn write(&self, bus: BusKind, state: &SystemState, address: u16, value: u8) {
-        
     }
 }
