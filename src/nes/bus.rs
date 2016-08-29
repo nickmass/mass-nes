@@ -12,12 +12,12 @@ pub enum BusKind {
 #[derive(Clone, Copy, Debug)]
 pub enum DeviceKind {
     CpuRam,
-    PpuRam,
     Ppu,
     Mapper,
     Input,
     Expansion,
     Debug,
+    Nametables,
 }
 
 
@@ -136,7 +136,7 @@ impl AddressBus {
                 match h.1 {
                     DeviceKind::CpuRam => system.cpu.mem.peek(self.kind, state, h.0),
                     DeviceKind::Ppu => system.ppu.peek(self.kind, system, state, h.0),
-                    DeviceKind::PpuRam => system.ppu.mem.peek(self.kind, state, h.0),
+                    DeviceKind::Nametables => system.ppu.nametables.peek(self.kind, state, h.0),
                     DeviceKind::Mapper => system.mapper.peek(self.kind, system, state, h.0),
                     DeviceKind::Input => system.input.peek(self.kind, system, state, h.0),
                     _ => unimplemented!(),
@@ -156,8 +156,8 @@ impl AddressBus {
                 match h.1 {
                     DeviceKind::CpuRam => system.cpu.mem.read(self.kind, state, h.0),
                     DeviceKind::Ppu => system.ppu.read(self.kind, system, state, h.0),
-                    DeviceKind::PpuRam => system.ppu.mem.read(self.kind, state, h.0),
                     DeviceKind::Mapper => system.mapper.read(self.kind, system, state, h.0),
+                    DeviceKind::Nametables => system.ppu.nametables.read(self.kind, state, h.0),
                     DeviceKind::Input => system.input.read(self.kind, system, state, h.0),
                     _ => unimplemented!(),
                 }
@@ -176,8 +176,8 @@ impl AddressBus {
                 match h.1  {
                     DeviceKind::CpuRam => system.cpu.mem.write(self.kind,  state, h.0, value),
                     DeviceKind::Ppu => system.ppu.write(self.kind, system, state, h.0, value),
-                    DeviceKind::PpuRam => system.ppu.mem.write(self.kind, state, h.0, value),
                     DeviceKind::Mapper => system.mapper.write(self.kind, system, state, h.0, value),
+                    DeviceKind::Nametables => system.ppu.nametables.write(self.kind, state, h.0, value),
                     DeviceKind::Input => system.input.write(self.kind, system, state, h.0, value),
                     _ => unimplemented!(),
                 }

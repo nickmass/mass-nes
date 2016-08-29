@@ -45,7 +45,7 @@ enum RomType {
     Unif,
 }
 
-pub enum RomMirrioring {
+pub enum Mirroring {
     Horizontal,
     Vertical,
     FourScreen,
@@ -56,7 +56,7 @@ pub struct Cartridge {
     pub prg_ram_bytes: usize,
     pub prg_rom: Vec<u8>,
     pub chr_rom: Vec<u8>,
-    pub mirroring: RomMirrioring,
+    pub mirroring: Mirroring,
     pub mapper: u8,
 }
 
@@ -93,11 +93,11 @@ impl Cartridge {
             data_start = data_start + 512;
         }
 
-        let mut mirroring = RomMirrioring::Horizontal;
+        let mut mirroring = Mirroring::Horizontal;
         if rom[6] & 0x08 != 0 {
-            mirroring = RomMirrioring::FourScreen;
+            mirroring = Mirroring::FourScreen;
         } else if rom[6] & 0x01 != 0 {
-            mirroring = RomMirrioring::Vertical;
+            mirroring = Mirroring::Vertical;
         }
 
         let mut prg_ram_bytes = 0;

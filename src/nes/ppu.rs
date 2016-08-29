@@ -2,6 +2,7 @@ use std::rc::Rc;
 use nes::bus::{AddressValidator, AddressBus, BusKind, DeviceKind, Address};
 use nes::system::{Region, SystemState, System};
 use nes::memory::MemoryBlock;
+use nes::nametables::{NametablesState, Nametables};
 
 pub struct PpuState {
     current_tick: u64,
@@ -67,6 +68,8 @@ pub struct PpuState {
     sprite_pattern_high: [u8; 8],
     sprite_pattern_low: [u8; 8],
     sprite_render_index: usize,
+
+    pub nametables: NametablesState,
 }
 
 impl Default for PpuState {
@@ -135,6 +138,8 @@ impl Default for PpuState {
             sprite_pattern_high: [0; 8],
             sprite_pattern_low: [0; 8],
             sprite_render_index: 0,
+
+            nametables: Default::default(),
         }
     }
 }
@@ -245,8 +250,8 @@ impl Default for Stage {
 
 pub struct Ppu {
     region: Region,
-    pub mem: MemoryBlock,
     bus: AddressBus,
+    pub nametables: Nametables,
 }
 
 impl Ppu {
@@ -254,7 +259,7 @@ impl Ppu {
         let ppu = Ppu {
             region: region,
             bus: AddressBus::new(BusKind::Ppu, state, 0),
-            mem: MemoryBlock::new(2, &mut state.mem),
+            nametables: Nametables::new(state),
         };
 
         ppu

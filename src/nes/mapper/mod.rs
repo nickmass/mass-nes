@@ -3,7 +3,7 @@ mod nrom;
 use nes::system::{System, SystemState};
 use nes::memory::MemoryBlock;
 use nes::bus::{DeviceKind, BusKind, AndAndMask, NotAndMask};
-use nes::cartridge::Cartridge;
+use nes::cartridge::{Mirroring, Cartridge};
 use nes::cpu::Cpu;
 use nes::ppu::Ppu;
 
@@ -26,6 +26,13 @@ impl Mapper {
                                         (cart.prg_rom.len() - 1) as u16));
         ppu.register_read(state, DeviceKind::Mapper, NotAndMask(0x1fff));
         ppu.register_write(state, DeviceKind::Mapper, NotAndMask(0x1fff));
+        match cart.mirroring {
+            Mirroring::Horizontal => ppu.nametables.set_horizontal(state),
+            Mirroring::Vertical => ppu.nametables.set_vertical(state),
+            Mirroring::FourScreen => {
+                unimplemented!()
+            }
+        }
     }
 
     pub fn peek(&self, bus: BusKind, system: &System, state: &SystemState, addr:u16)
