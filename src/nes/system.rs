@@ -96,23 +96,22 @@ pub struct System {
     pub ppu: Ppu,
     pub cpu: Cpu,
     pub cartridge: Cartridge,
-    pub mapper: Mapper,
     pub debug: Debug,
     pub input: Input,
 }
 
 impl System {
-    pub fn new(region: Region, cartridge: Cartridge, state: &mut SystemState) -> System {
+    pub fn new(region: Region, mut cartridge: Cartridge,
+               state: &mut SystemState) -> System {
         let cpu = Cpu::new(state);
         let ppu = Ppu::new(Region::Ntsc, state);
-        let mapper = Mapper::new(&cartridge, state);
+        cartridge.init(state, &cpu, &ppu);
 
         let mut system = System {
             region: region,
             ppu: ppu,
             cpu: cpu,
             cartridge: cartridge,
-            mapper: mapper,
             debug: Debug::new(),
             input: Input::new(),
         };
@@ -130,11 +129,11 @@ impl System {
                                  RangeAndMask(0x2000, 0x4000, 0xfff));
         system.ppu.register_write(state, DeviceKind::Nametables,
                                  RangeAndMask(0x2000, 0x4000, 0xfff));
-        system.mapper.register(state, &mut system.cpu, &mut system.ppu,
-                               &system.cartridge);
         system.cpu.register_read(state, DeviceKind::Input, Address(0x4016));
         system.cpu.register_read(state, DeviceKind::Input, Address(0x4017));
         system.cpu.register_write(state, DeviceKind::Input, Address(0x4016));
+        system.cartridge.mapper.register(state, &mut system.cpu, &mut system.ppu,
+                               &system.cartridge);
 
         system
     }

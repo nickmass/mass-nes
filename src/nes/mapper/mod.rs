@@ -1,82 +1,53 @@
 mod nrom;
 
 use nes::system::{System, SystemState};
-use nes::memory::MemoryBlock;
-use nes::bus::{DeviceKind, BusKind, AndAndMask, NotAndMask};
-use nes::cartridge::{Mirroring, Cartridge};
+use nes::bus::{DeviceKind, BusKind};
 use nes::cpu::Cpu;
 use nes::ppu::Ppu;
+use nes::cartridge::Cartridge;
 
-pub struct Mapper {
-    chr_ram: MemoryBlock,
-    prg_ram: MemoryBlock,
+pub trait Mapper { 
+    fn register(&self, state: &mut SystemState, cpu: &mut Cpu, ppu: &mut Ppu,
+                cart: &Cartridge);
+    fn peek(&self, bus: BusKind, system: &System, state: &SystemState, addr:u16) -> u8;
+    fn read(&self, bus: BusKind, system: &System, state: &mut SystemState,
+            addr: u16) -> u8;
+    fn write(&self, bus: BusKind, system: &System, state: &mut SystemState, addr: u16,
+             value: u8);
 }
 
-impl Mapper {
-    pub fn new(cartridge: &Cartridge, state: &mut SystemState) -> Mapper {
-        Mapper {
-            chr_ram: MemoryBlock::new(cartridge.chr_ram_bytes >> 10, &mut state.mem),
-            prg_ram: MemoryBlock::new(cartridge.prg_ram_bytes >> 10, &mut state.mem),
+pub fn ines(ines_number: u8, state: &mut SystemState, cart: &Cartridge) -> Box<Mapper> {
+    match ines_number {
+        0 => Box::new(nrom::Nrom::new(cart, state)),
+        _ => {
+            println!("Mapper not implemented.");
+            Box::new(nrom::Nrom::new(cart, state))
         }
+    }
+}
+
+pub struct Null;
+
+impl Mapper for Null { 
+    fn register(&self, state: &mut SystemState, cpu: &mut Cpu, ppu: &mut Ppu,
+                cart: &Cartridge) {
+        panic!("Mapper not initilized");
     }
     
-    pub fn register(&self, state: &mut SystemState, cpu: &mut Cpu, ppu: &mut Ppu,
-    cart: &Cartridge) {
-        cpu.register_read(state, DeviceKind::Mapper, AndAndMask(0x8000,
-                                        (cart.prg_rom.len() - 1) as u16));
-        ppu.register_read(state, DeviceKind::Mapper, NotAndMask(0x1fff));
-        ppu.register_write(state, DeviceKind::Mapper, NotAndMask(0x1fff));
-        match cart.mirroring {
-            Mirroring::Horizontal => ppu.nametables.set_horizontal(state),
-            Mirroring::Vertical => ppu.nametables.set_vertical(state),
-            Mirroring::FourScreen => {
-                unimplemented!()
-            }
-        }
+    fn peek(&self, bus: BusKind, system: &System, state: &SystemState, addr:u16) -> u8 {
+        panic!("Mapper not initilized");
+        0
     }
-
-    pub fn peek(&self, bus: BusKind, system: &System, state: &SystemState, addr:u16)
-    -> u8 {
-        match bus {
-            BusKind::Cpu => {
-                system.cartridge.prg_rom[addr as usize]
-            },
-            BusKind::Ppu => {
-                if system.cartridge.chr_ram_bytes > 0 {
-                    self.chr_ram.peek(bus, state, addr)
-                } else {
-                    system.cartridge.chr_rom[addr as usize]
-                }
-            },
-        }
+    
+    fn read(&self, bus: BusKind, system: &System, state: &mut SystemState,
+            addr: u16) -> u8 {
+        panic!("Mapper not initilized");
+        0
     }
-
-    pub fn read(&self, bus: BusKind, system: &System, state: &mut SystemState, addr: u16)
-    -> u8 {
-        match bus {
-            BusKind::Cpu => {
-                system.cartridge.prg_rom[addr as usize]
-            },
-            BusKind::Ppu => {
-                if system.cartridge.chr_ram_bytes > 0 {
-                    self.chr_ram.read(bus, state, addr)
-                } else {
-                    system.cartridge.chr_rom[addr as usize]
-                }
-            },
-        }
-    }
-
-    pub fn write(&self, bus: BusKind, system: &System, state: &mut SystemState,
-    addr: u16, value: u8) {
-        match bus {
-            BusKind::Cpu => {
-            },
-            BusKind::Ppu => {
-                if system.cartridge.chr_ram_bytes > 0 {
-                    self.chr_ram.write(bus, state, addr, value);
-                }
-            },
-        }
+    
+    fn write(&self, bus: BusKind, system: &System, state: &mut SystemState, addr: u16,
+             value: u8) {
+        panic!("Mapper not initilized");
+    
     }
 }

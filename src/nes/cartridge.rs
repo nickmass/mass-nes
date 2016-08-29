@@ -6,6 +6,8 @@ use nes::system::{System, SystemState};
 use nes::bus::{NotAndMask, AndAndMask, DeviceKind, BusKind};
 use nes::cpu::Cpu;
 use nes::ppu::Ppu;
+use nes::mapper;
+use nes::mapper::Mapper;
 
 #[derive(Debug)]
 pub enum CartridgeError {
@@ -57,7 +59,8 @@ pub struct Cartridge {
     pub prg_rom: Vec<u8>,
     pub chr_rom: Vec<u8>,
     pub mirroring: Mirroring,
-    pub mapper: u8,
+    mapper_number: u8,
+    pub mapper: Box<Mapper>,
 }
 
 impl Cartridge {
@@ -117,7 +120,8 @@ impl Cartridge {
             prg_rom: rom[data_start..prg_rom_end].to_vec(),
             chr_rom: rom[prg_rom_end..chr_rom_end].to_vec(),
             mirroring: mirroring,
-            mapper: mapper_number,
+            mapper: Box::new(mapper::Null),
+            mapper_number: mapper_number,
         };
 
         println!("PRGROM: {}, CHRROM: {}, Mapper: {}", prg_rom_bytes, chr_rom_bytes, mapper_number);
@@ -151,5 +155,14 @@ impl Cartridge {
         }
 
         None
+    }
+
+    pub fn init(&mut self, state: &mut SystemState, cpu: &Cpu, ppu: &Ppu) {
+        match self.mirroring {
+            Mirroring::Horizontal => ppu.nametables.set_horizontal(state),
+            Mirroring::Vertical => ppu.nametables.set_vertical(state),
+            _ => {}
+        }
+        self.mapper = mapper::ines(self.mapper_number, state, self);
     }
 }
