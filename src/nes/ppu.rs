@@ -713,7 +713,6 @@ impl Ppu {
         } else {
             0
         };
-        let line = if line > 8 { 0 } else { line };
         let tile_addr = if state.ppu.is_tall_sprites() {
             let bottom_half = line >= 8;
             let line = if bottom_half { line - 8 } else { line };
