@@ -54,6 +54,10 @@ impl Nametables {
                                      Nametable::Second];
     }
 
+    pub fn set_single(&self, state: &mut SystemState, nt: Nametable) {
+        state.ppu.nametables.mappings = [nt, nt, nt, nt];
+    }
+
     fn get_table(&self, state: &SystemState, addr: u16) -> (Page, u16) {
         let table_ind = (addr >> 10) & 3;
         let table_addr = addr & 0x3ff;

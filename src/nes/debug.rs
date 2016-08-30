@@ -6,6 +6,7 @@ use std::collections::HashMap;
 pub struct DebugState {
     trace_instrs: u32,
     color_dots: u32,
+    log_once: bool,
 }
 
 pub struct Debug {
@@ -44,6 +45,12 @@ impl Debug {
         }
     }
 
+    pub fn log_once_for(&self, state: &mut SystemState, count: u32) {
+        if !state.debug.log_once {
+            state.debug.log_once = true;
+            self.log_for(state, count);
+        }
+    }
     pub fn log_for(&self, state: &mut SystemState, count: u32) {
         state.debug.trace_instrs = count;
     }

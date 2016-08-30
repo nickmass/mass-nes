@@ -51,15 +51,15 @@ impl MemoryBlock {
         }
     }
 
-    pub fn peek(&self, bus: BusKind, state: &SystemState, addr: u16) -> u8 {
+    pub fn peek(&self, state: &SystemState, addr: u16) -> u8 {
         state.mem.read(self.page, addr)
     }
 
-    pub fn read(&self, bus: BusKind, state: &mut SystemState, addr: u16) -> u8 {
+    pub fn read(&self, state: &SystemState, addr: u16) -> u8 {
         state.mem.read(self.page, addr)
     }
 
-    pub fn write(&self, bus: BusKind, state: &mut SystemState, addr: u16, val: u8) {
+    pub fn write(&self, state: &mut SystemState, addr: u16, val: u8) {
         state.mem.write(self.page, addr, val);
     }
 }
@@ -111,6 +111,7 @@ enum Mapped {
     Bank(usize),
 }
 
+#[derive(Copy, Clone)]
 pub enum BankKind {
     Ram,
     Rom,
@@ -133,7 +134,7 @@ impl MappedMemory {
             pages.push(state.mem.alloc_kb(1));
         }
         for x in 0..size_kb {
-            mapping.push(Mapped::Bank(x as usize));
+            mapping.push(Mapped::Bank(0));
         }
         MappedMemory {
             banks: Banks::load(cart, kind),

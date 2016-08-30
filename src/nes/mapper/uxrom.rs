@@ -29,6 +29,29 @@ impl Uxrom {
             state: RefCell::new(rom_state),
         }
     }
+
+    fn read_cpu(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
+        self.state.borrow().mem.read(system, state, addr)
+    }
+
+    fn read_ppu(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
+        if system.cartridge.chr_ram_bytes > 0 {
+            self.chr_ram.read(state, addr)
+        } else {
+            system.cartridge.chr_rom[addr as usize]
+        }
+    }
+
+    fn write_cpu(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
+        let mut state = self.state.borrow_mut();
+        state.mem.map(0x8000, 16, value as usize, BankKind::Rom);
+    }
+
+    fn write_ppu(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
+        if system.cartridge.chr_ram_bytes > 0 {
+            self.chr_ram.write(state, addr, value);
+        }
+    }
 }
 
 impl Mapper for Uxrom {
@@ -53,14 +76,10 @@ impl Mapper for Uxrom {
     -> u8 {
         match bus {
             BusKind::Cpu => {
-                self.state.borrow().mem.read(system, state, addr)
+                self.read_cpu(system, state, addr)
             },
             BusKind::Ppu => {
-                if system.cartridge.chr_ram_bytes > 0 {
-                    self.chr_ram.peek(bus, state, addr)
-                } else {
-                    system.cartridge.chr_rom[addr as usize]
-                }
+                self.read_ppu(system, state, addr)
             },
         }
     }
@@ -69,14 +88,10 @@ impl Mapper for Uxrom {
     -> u8 {
         match bus {
             BusKind::Cpu => {
-                self.state.borrow().mem.read(system, state, addr)
+                self.read_cpu(system, state, addr)
             },
             BusKind::Ppu => {
-                if system.cartridge.chr_ram_bytes > 0 {
-                    self.chr_ram.read(bus, state, addr)
-                } else {
-                    system.cartridge.chr_rom[addr as usize]
-                }
+                self.read_ppu(system, state, addr)
             },
         }
     }
@@ -85,13 +100,10 @@ impl Mapper for Uxrom {
     addr: u16, value: u8) {
         match bus {
             BusKind::Cpu => {
-                    let mut state = self.state.borrow_mut();
-                    state.mem.map(0x8000, 16, value as usize, BankKind::Rom);
+                self.write_cpu(system, state, addr, value)
             },
             BusKind::Ppu => {
-                if system.cartridge.chr_ram_bytes > 0 {
-                    self.chr_ram.write(bus, state, addr, value);
-                }
+                self.write_ppu(system, state, addr, value)
             },
         }
     }

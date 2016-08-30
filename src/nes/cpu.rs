@@ -129,6 +129,7 @@ impl Cpu {
     
     pub fn power(&self, system: &System, state: &mut SystemState) {
         state.cpu.reg_pc = self.bus.read_word(system, state, 0xfffc) as u32;
+        system.debug.log_for(state, 100);
     }
 
     pub fn register_read<T>(&mut self, state: &mut SystemState, device: DeviceKind, addr: T)
@@ -608,7 +609,7 @@ impl Cpu {
                 Instruction::Txs => self.inst_txs(system, state),
                 Instruction::Tya => self.inst_tya(system, state),
                 i => {
-                    println!("ILLEGAL");
+//                    println!("ILLEGAL");
                     match i {
                         Instruction::IllAhx => self.ill_inst_ahx(system, state, addr),
                         Instruction::IllAlr => self.ill_inst_alr(system, state, addr),

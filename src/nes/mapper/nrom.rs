@@ -44,7 +44,7 @@ impl Mapper for Nrom{
             },
             BusKind::Ppu => {
                 if system.cartridge.chr_ram_bytes > 0 {
-                    self.chr_ram.peek(bus, state, addr)
+                    self.chr_ram.peek(state, addr)
                 } else {
                     system.cartridge.chr_rom[addr as usize]
                 }
@@ -60,7 +60,7 @@ impl Mapper for Nrom{
             },
             BusKind::Ppu => {
                 if system.cartridge.chr_ram_bytes > 0 {
-                    self.chr_ram.read(bus, state, addr)
+                    self.chr_ram.read(state, addr)
                 } else {
                     system.cartridge.chr_rom[addr as usize]
                 }
@@ -75,7 +75,7 @@ impl Mapper for Nrom{
             },
             BusKind::Ppu => {
                 if system.cartridge.chr_ram_bytes > 0 {
-                    self.chr_ram.write(bus, state, addr, value);
+                    self.chr_ram.write(state, addr, value);
                 }
             },
         }
