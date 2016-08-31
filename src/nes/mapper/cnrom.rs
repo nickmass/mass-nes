@@ -1,5 +1,5 @@
 use nes::system::{System, SystemState};
-use nes::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
+use nes::memory::{BankKind, MappedMemory, MemKind};
 use nes::bus::{DeviceKind, BusKind, AndAndMask, NotAndMask};
 use nes::cartridge::{Mirroring, Cartridge};
 use nes::cpu::Cpu;
@@ -18,7 +18,7 @@ pub struct Cnrom {
 
 impl Cnrom {
     pub fn new(cartridge: &Cartridge, state: &mut SystemState) -> Cnrom {
-        let mut rom_state = CnromState {
+        let rom_state = CnromState {
             chr : MappedMemory::new(state, cartridge, 0x0000, 0, 8, MemKind::Chr),
         };
         Cnrom {

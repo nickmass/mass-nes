@@ -1,6 +1,6 @@
 use nes::memory::Page;
 use nes::bus::BusKind;
-use nes::system::{System, SystemState};
+use nes::system::SystemState;
 
 pub struct NametablesState {
     mappings: [Nametable; 4],

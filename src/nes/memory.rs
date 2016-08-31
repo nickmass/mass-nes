@@ -1,6 +1,5 @@
 use nes::system::{System, SystemState};
 use nes::cartridge::Cartridge;
-use nes::bus::BusKind;
 
 #[derive(Copy, Clone)]
 pub struct Page {
@@ -147,7 +146,7 @@ impl MappedMemory {
     pub fn map(&mut self, addr: u16, kb: u32, bank: usize, bank_kind: BankKind) {
         if addr & 0x3ff != 0 { panic!("Must map in 1kb chunks"); }
         let offset = (addr - self.base_addr) / 0x400;
-        let bank_start = (bank * kb as usize) ;//% self.mapping.len();
+        let bank_start = bank * kb as usize;
 
         match bank_kind {
             BankKind::Rom => {

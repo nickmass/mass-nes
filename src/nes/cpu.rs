@@ -1,4 +1,4 @@
-use nes::bus::{BusKind, DeviceKind, AddressBus, AddressValidator, Address};
+use nes::bus::{BusKind, DeviceKind, AddressBus, AddressValidator};
 use nes::system::{System, SystemState};
 use nes::ops::*;
 use nes::memory::MemoryBlock;

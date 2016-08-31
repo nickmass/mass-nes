@@ -1,11 +1,10 @@
-use nes::bus::{DeviceMappings, RangeAndMask, AndEqualsAndMask, NotAndMask, Address, DeviceKind};
+use nes::bus::{DeviceMappings, RangeAndMask, NotAndMask, Address, DeviceKind};
 use nes::cpu::{Cpu, CpuState};
 use nes::ppu::{Ppu, PpuState};
 use nes::cartridge::Cartridge;
 use nes::memory::Pages;
 use nes::debug::{Debug, DebugState};
 use nes::input::{Input, InputState};
-use nes::mapper::Mapper;
 
 pub use nes::input::{Controller, InputDevice};
 

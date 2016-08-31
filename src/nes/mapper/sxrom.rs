@@ -1,7 +1,7 @@
 use nes::system::{System, SystemState};
-use nes::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
+use nes::memory::{BankKind, MappedMemory, MemKind};
 use nes::bus::{DeviceKind, BusKind, AndAndMask, NotAndMask, AndEqualsAndMask};
-use nes::cartridge::{Mirroring, Cartridge};
+use nes::cartridge::Cartridge;
 use nes::cpu::Cpu;
 use nes::ppu::Ppu;
 use nes::mapper::Mapper;
@@ -46,7 +46,7 @@ impl Sxrom {
             MappedMemory::new(state, cartridge, 0x6000, 16, 48, MemKind::Prg)
         };
 
-        let mut rom_state = SxromState {
+        let rom_state = SxromState {
             prg : prg,
             chr : chr,
             shift_reg: 0,

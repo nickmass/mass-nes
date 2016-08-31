@@ -1,7 +1,5 @@
-use std::rc::Rc;
-use nes::bus::{AddressValidator, AddressBus, BusKind, DeviceKind, Address};
+use nes::bus::{AddressValidator, AddressBus, BusKind, DeviceKind};
 use nes::system::{Region, SystemState, System};
-use nes::memory::MemoryBlock;
 use nes::nametables::{NametablesState, Nametables};
 
 pub struct PpuState {

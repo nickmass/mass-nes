@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::rc::Rc;
 use nes::system::SystemState;
 use nes::system::System;
 
