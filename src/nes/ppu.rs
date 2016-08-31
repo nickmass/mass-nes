@@ -628,7 +628,6 @@ impl Ppu {
         let attr = if color == 0 { 0 } else { attr };
 
         let palette = color | attr;
-
         let mut sprite_zero = false;
         let mut sprite_pixel = 0;
         let mut behind_bg = false;
@@ -694,6 +693,12 @@ impl Ppu {
                 0x3f00 | palette as u16 },
         };
 
+        let pixel = if !state.ppu.is_rendering() && 
+            state.ppu.vram_addr & 0x3f00 == 0x3f00 {
+            state.ppu.vram_addr & 0x3f1f
+        } else {
+            pixel
+        };
         let addr  = if pixel & 0x03 != 0 { pixel & 0x1f } else { pixel & 0x0f };
         let mut pixel_result = state.ppu.palette_data[addr as usize];
         
