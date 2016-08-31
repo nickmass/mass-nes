@@ -5,7 +5,7 @@ const DIR: &'static str = "sprite_overflow_tests/";
 
 #[test]
 fn basics() {
-    helper::run(format!("{}1.Basics.nes", DIR), 10,
+    helper::run(format!("{}1.Basics.nes", DIR), 30,
     helper::Condition::Equals(0xf8, 0x01));
 }
 

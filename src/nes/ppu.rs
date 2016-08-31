@@ -475,7 +475,7 @@ impl Ppu {
             Stage::Prerender(s, 257) => {
                 self.horz_reset(state);
             },
-            Stage::Prerender(s, c) if c >= 280 && c <= 304 => {
+            Stage::Prerender(s, c) if c >= 280 && c < 304 => {
                 self.vert_reset(state);
             },
             Stage::Prerender(s, c) if c  == 321 || c == 329 || c == 337 || c == 339 => {
@@ -491,6 +491,12 @@ impl Ppu {
                 self.fetch_high_bg_pattern(system, state);
             },
             Stage::Prerender(s, c) if c == 328 || c == 336 => {
+                if c == 336 {
+                    state.ppu.low_bg_shift <<= 8;
+                    state.ppu.high_bg_shift <<= 8;
+                    state.ppu.low_attr_shift <<= 8;
+                    state.ppu.high_attr_shift <<= 8;
+                }
                 self.load_bg_shifters(state);
                 self.horz_increment(state);
             },
@@ -529,6 +535,12 @@ impl Ppu {
                 self.fetch_high_bg_pattern(system, state);
             },
             Stage::Hblank(s, c) if c == 328 || c == 336 => {
+                if c == 336 {
+                    state.ppu.low_bg_shift <<= 8;
+                    state.ppu.high_bg_shift <<= 8;
+                    state.ppu.low_attr_shift <<= 8;
+                    state.ppu.high_attr_shift <<= 8;
+                }
                 self.load_bg_shifters(state);
                 self.horz_increment(state);
             },
@@ -596,6 +608,50 @@ impl Ppu {
             Stage::Hblank(s, d) if d >=257 && d < 320 && d % 8 == 7 => {
                 self.sprite_fetch(system, state, s, true);
             },
+
+            Stage::Prerender(s, 1) => {
+                state.ppu.sprite_render_index = 0;
+                state.ppu.sprite_n = 0;
+                state.ppu.sprite_m = 0;
+                state.ppu.found_sprites = 0;
+                state.ppu.sprite_reads = 0;
+                state.ppu.line_oam_index = 0;
+                state.ppu.in_sprite_render = false;
+                state.ppu.sprite_read_loop = false;
+                state.ppu.block_oam_writes = false;
+                state.ppu.sprite_zero_on_line = state.ppu.sprite_zero_on_next_line;
+                state.ppu.sprite_zero_on_next_line = false;
+                self.init_line_oam(system, state, 0);
+            },
+            Stage::Prerender(s, d) if d >= 1 && d < 65 && d % 2 == 1 => {
+                state.ppu.in_sprite_render = false;
+                self.init_line_oam(system, state, d / 2);
+            },
+            Stage::Prerender(s, 256) => {
+                state.ppu.sprite_n = 0;
+                self.sprite_eval(system, state, s);
+            },
+            Stage::Prerender(s, d) if d >= 65 && d % 2 == 0 => {
+                self.sprite_eval(system, state, s);
+            },
+            Stage::Prerender(s, d) if d >= 65 && d % 2 == 1 => {
+                state.ppu.in_sprite_render = false;
+                self.sprite_read(system, state);
+            },
+            Stage::Prerender(s, d) if d >=257 && d < 320 && d % 8 == 1 => {
+                //Garbage Nametable
+                self.fetch_nametable(system, state);
+            },
+            Stage::Prerender(s, d) if d >=257 && d < 320 && d % 8 == 3 => {
+               //Garbage Nametable 
+                self.fetch_attribute(system, state);
+            },
+            Stage::Prerender(s, d) if d >=257 && d < 320 && d % 8 == 5 => {
+                self.sprite_fetch(system, state, s, false);
+            },
+            Stage::Prerender(s, d) if d >=257 && d < 320 && d % 8 == 7 => {
+                self.sprite_fetch(system, state, s, true);
+            },
             _ => {}
         }
 
@@ -613,19 +669,10 @@ impl Ppu {
         let fine_x = state.ppu.vram_fine_x;
         let color = (((state.ppu.low_bg_shift >> (15 - fine_x)) & 0x1) |
             ((state.ppu.high_bg_shift >> (14 - fine_x)) & 0x2)) as u16;
-        
-        let high_attr = state.ppu.high_attr_shift as u32;
-        let low_attr = state.ppu.low_attr_shift as u32;
+        let attr  = (((state.ppu.low_attr_shift >> (15 - fine_x)) & 0x1) |
+            ((state.ppu.high_attr_shift >> (14 - fine_x)) & 0x2)) as u16;
 
-        let high_attr = high_attr << fine_x;
-        let low_attr = low_attr << fine_x;
-
-        let high_attr = (high_attr >> 14) & 0x02;
-        let low_attr = (low_attr >> 15) & 0x01;
-
-        let attr = ((high_attr | low_attr) << 2) as u16;
-
-        let attr = if color == 0 { 0 } else { attr };
+        let attr = if color == 0 { 0 } else { attr << 2 };
 
         let palette = color | attr;
         let mut sprite_zero = false;
@@ -905,7 +952,7 @@ impl Ppu {
         if !state.ppu.is_rendering() { return; }
         let mut addr = state.ppu.vram_addr;
         let addr_t = state.ppu.vram_addr_temp;
-
+        
         addr &= 0x841f;
         addr |= addr_t & 0x7be0;
         state.ppu.vram_addr = addr;
