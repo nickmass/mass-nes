@@ -388,10 +388,10 @@ impl Ppu {
                 if state.ppu.write_latch {
                     let value = value as u16;
                     state.ppu.vram_addr_temp &= 0x0c1f;
-                    state.ppu.vram_addr_temp |= (value & 0xff07) << 2;
+                    state.ppu.vram_addr_temp |= (value & 0xf8) << 2;
                     state.ppu.vram_addr_temp |= (value & 0x07) << 12;
                 } else {
-                    state.ppu.vram_addr_temp &= 0xffe0;
+                    state.ppu.vram_addr_temp &= 0x7fe0;
                     state.ppu.vram_addr_temp |= (value >> 3) as u16;
                     state.ppu.vram_fine_x = (value & 0x07) as u16;
                 }
@@ -400,12 +400,12 @@ impl Ppu {
             },
             0x2006 => { //PPUADDR
                 if state.ppu.write_latch {
-                    state.ppu.vram_addr_temp &= 0xff00;
+                    state.ppu.vram_addr_temp &= 0x7f00;
                     state.ppu.vram_addr_temp |= value as u16;
                     state.ppu.vram_addr = state.ppu.vram_addr_temp;
                 } else {
                     state.ppu.vram_addr_temp &= 0x00ff;
-                    state.ppu.vram_addr_temp |= ((value & 0x7f) as u16) << 8;
+                    state.ppu.vram_addr_temp |= ((value & 0x3f) as u16) << 8;
                 }
                 state.ppu.write_latch = !state.ppu.write_latch;
             },
