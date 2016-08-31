@@ -2,9 +2,10 @@ mod nrom;
 mod sxrom;
 mod uxrom;
 mod cnrom;
+mod axrom;
 
 use nes::system::{System, SystemState};
-use nes::bus::{DeviceKind, BusKind};
+use nes::bus::BusKind;
 use nes::cpu::Cpu;
 use nes::ppu::Ppu;
 use nes::cartridge::Cartridge;
@@ -25,6 +26,7 @@ pub fn ines(ines_number: u8, state: &mut SystemState, cart: &Cartridge) -> Box<M
         1 => Box::new(sxrom::Sxrom::new(cart, state)),
         2 => Box::new(uxrom::Uxrom::new(cart, state)),
         3 => Box::new(cnrom::Cnrom::new(cart, state)),
+        7 => Box::new(axrom::Axrom::new(cart, state)),
         _ => {
             println!("Mapper not implemented.");
             Box::new(nrom::Nrom::new(cart, state))
@@ -42,13 +44,11 @@ impl Mapper for Null {
     
     fn peek(&self, bus: BusKind, system: &System, state: &SystemState, addr:u16) -> u8 {
         panic!("Mapper not initilized");
-        0
     }
     
     fn read(&self, bus: BusKind, system: &System, state: &mut SystemState,
             addr: u16) -> u8 {
         panic!("Mapper not initilized");
-        0
     }
     
     fn write(&self, bus: BusKind, system: &System, state: &mut SystemState, addr: u16,

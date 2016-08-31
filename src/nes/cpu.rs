@@ -119,7 +119,6 @@ pub struct Cpu {
 
 impl Cpu {
     pub fn new(state: &mut SystemState) -> Cpu {
-        state.cpu.reg_sp = 0xfd; 
         Cpu {
             bus: AddressBus::new(BusKind::Cpu, state, 0),
             mem: MemoryBlock::new(2, &mut state.mem),
@@ -129,6 +128,9 @@ impl Cpu {
     
     pub fn power(&self, system: &System, state: &mut SystemState) {
         state.cpu.reg_pc = self.bus.read_word(system, state, 0xfffc) as u32;
+        state.cpu.set_reg_p(0x34);
+        state.cpu.reg_sp = 0xfd;
+
         system.debug.log_for(state, 100);
     }
 
