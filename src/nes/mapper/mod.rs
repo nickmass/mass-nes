@@ -3,6 +3,7 @@ mod sxrom;
 mod uxrom;
 mod cnrom;
 mod axrom;
+mod txrom;
 
 use nes::system::{System, SystemState};
 use nes::bus::BusKind;
@@ -18,6 +19,7 @@ pub trait Mapper {
             addr: u16) -> u8;
     fn write(&self, bus: BusKind, system: &System, state: &mut SystemState, addr: u16,
              value: u8);
+    fn tick(&self, system: &System, state: &mut SystemState);
 }
 
 pub fn ines(ines_number: u8, state: &mut SystemState, cart: &Cartridge) -> Box<Mapper> {
@@ -26,6 +28,7 @@ pub fn ines(ines_number: u8, state: &mut SystemState, cart: &Cartridge) -> Box<M
         1 => Box::new(sxrom::Sxrom::new(cart, state)),
         2 => Box::new(uxrom::Uxrom::new(cart, state)),
         3 => Box::new(cnrom::Cnrom::new(cart, state)),
+        4 => Box::new(txrom::Txrom::new(cart,state)),
         7 => Box::new(axrom::Axrom::new(cart, state)),
         _ => {
             println!("Mapper not implemented.");
@@ -39,21 +42,25 @@ pub struct Null;
 impl Mapper for Null { 
     fn register(&self, state: &mut SystemState, cpu: &mut Cpu, ppu: &mut Ppu,
                 cart: &Cartridge) {
-        panic!("Mapper not initilized");
+        panic!("Mapper not initialized");
     }
     
     fn peek(&self, bus: BusKind, system: &System, state: &SystemState, addr:u16) -> u8 {
-        panic!("Mapper not initilized");
+        panic!("Mapper not initialized");
     }
     
     fn read(&self, bus: BusKind, system: &System, state: &mut SystemState,
             addr: u16) -> u8 {
-        panic!("Mapper not initilized");
+        panic!("Mapper not initialized");
     }
     
     fn write(&self, bus: BusKind, system: &System, state: &mut SystemState, addr: u16,
              value: u8) {
-        panic!("Mapper not initilized");
+        panic!("Mapper not initialized");
     
+    }
+
+    fn tick(&self, system: &System, state: &mut SystemState) {
+        panic!("Mapper not initialized");
     }
 }

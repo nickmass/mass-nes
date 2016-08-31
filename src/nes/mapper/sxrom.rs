@@ -152,8 +152,6 @@ impl Mapper for Sxrom {
                                                                  0x7fff));
         cpu.register_read(state, DeviceKind::Mapper, AndAndMask(0x8000, 0xffff));
         cpu.register_write(state, DeviceKind::Mapper, AndAndMask(0x8000, 0xe001));
-        cpu.register_read(state, DeviceKind::Mapper, AndEqualsAndMask(0xe000, 0x6000,
-                                                                    0x7fff));
         ppu.register_read(state, DeviceKind::Mapper, NotAndMask(0x1fff));
         ppu.register_write(state, DeviceKind::Mapper, NotAndMask(0x1fff));
         let mut rom = self.state.borrow_mut();
@@ -195,4 +193,6 @@ impl Mapper for Sxrom {
             },
         }
     }
+
+    fn tick(&self, system: &System, state: &mut SystemState) {}
 }

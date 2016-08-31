@@ -96,4 +96,6 @@ impl Mapper for Cnrom {
             },
         }
     }
+
+    fn tick(&self, system: &System, state: &mut SystemState) {}
 }

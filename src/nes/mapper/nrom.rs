@@ -80,4 +80,6 @@ impl Mapper for Nrom{
             },
         }
     }
+
+    fn tick(&self, system: &System, state: &mut SystemState) {}
 }

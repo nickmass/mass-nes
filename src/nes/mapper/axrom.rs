@@ -111,4 +111,6 @@ impl Mapper for Axrom {
             },
         }
     }
+
+    fn tick(&self, system: &System, state: &mut SystemState) {}
 }

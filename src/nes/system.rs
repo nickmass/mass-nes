@@ -63,6 +63,7 @@ impl<FR, FC, FI, I, FD> Machine<FR, FC, FI, I, FD> where
         let mut last_vblank = false;
         loop {
             self.system.cpu.tick(&self.system, &mut self.state);
+            self.system.cartridge.mapper.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
