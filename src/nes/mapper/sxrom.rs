@@ -22,7 +22,6 @@ pub struct SxromState {
 pub struct Sxrom {
     state: RefCell<SxromState>,
     chr_type: BankKind,
-    prg_ram_bytes: usize,
 }
 
 impl Sxrom {
@@ -39,12 +38,7 @@ impl Sxrom {
                 MappedMemory::new(state, cartridge, 0x0000, 8, 8, MemKind::Chr),
         };
         
-        let prg_ram_bytes = cartridge.prg_ram_bytes;
-        let prg = if prg_ram_bytes== 0 {
-            MappedMemory::new(state, cartridge, 0x8000, 0, 32, MemKind::Prg)
-        } else {
-            MappedMemory::new(state, cartridge, 0x6000, 16, 48, MemKind::Prg)
-        };
+        let prg = MappedMemory::new(state, cartridge, 0x6000, 16, 48, MemKind::Prg);
 
         let rom_state = SxromState {
             prg : prg,
@@ -58,7 +52,6 @@ impl Sxrom {
         let rom = Sxrom {
             state: RefCell::new(rom_state),
             chr_type: chr_type,
-            prg_ram_bytes: prg_ram_bytes,
         };
         rom
     }
@@ -106,9 +99,7 @@ impl Sxrom {
     }
 
     fn sync(&self, rom: &mut SxromState, ppu: &Ppu, state: &mut SystemState) {
-        if self.prg_ram_bytes != 0 {
-            rom.prg.map(0x6000, 16, 0, BankKind::Ram);
-        }
+        rom.prg.map(0x6000, 16, 0, BankKind::Ram);
 
         match rom.regs[0] & 3 {
             0 => ppu.nametables.set_single(state, Nametable::First),
@@ -123,11 +114,11 @@ impl Sxrom {
             },
             0x8 => {
                 rom.prg.map(0x8000, 16, 0, BankKind::Rom);
-                rom.prg.map(0x8000, 16, (rom.regs[3] & 0xf) as usize, BankKind::Rom);
+                rom.prg.map(0xc000, 16, (rom.regs[3] & 0xf) as usize, BankKind::Rom);
             },
             0xc => {
                 rom.prg.map(0x8000, 16, (rom.regs[3] & 0xf) as usize, BankKind::Rom);
-                rom.prg.map(0x8000, 16, rom.last, BankKind::Rom);
+                rom.prg.map(0xc000, 16, rom.last, BankKind::Rom);
             },
             _ => unreachable!()
         }

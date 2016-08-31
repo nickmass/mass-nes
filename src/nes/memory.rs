@@ -175,7 +175,7 @@ impl MappedMemory {
                 self.banks.read(system, b, addr & 0x3ff)
             },
             Mapped::Page(p) => {
-                let page = self.pages[p];
+                let page = self.pages[p % self.pages.len()];
                 state.mem.read(page, addr & 0x3ff)
             }
         }
@@ -187,7 +187,7 @@ impl MappedMemory {
         match mapping {
             Mapped::Bank(b) => {},
             Mapped::Page(p) => {
-                let page = self.pages[p];
+                let page = self.pages[p % self.pages.len()];
                 state.mem.write(page, addr & 0x3ff, val);
             }
         }

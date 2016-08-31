@@ -47,8 +47,8 @@ impl InputDevice for Controller {
         if self.select { value |= 0x04; }
         if self.start { value |= 0x08; }
         if self.up { value |= 0x10; }
-        if self.down { value |= 0x20; }
-        if self.left { value |= 0x40; }
+        if self.down && !self.up { value |= 0x20; }
+        if self.left && !self.right { value |= 0x40; }
         if self.right { value |= 0x80; }
 
         value
