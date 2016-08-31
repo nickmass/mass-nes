@@ -1,6 +1,9 @@
 use glium;
 use glium::{DisplayBuild, Surface};
-use glium::texture::{RawImage2d, RawImage1d, ClientFormat, texture2d, texture1d};
+use glium::texture::{RawImage2d, ClientFormat};
+use glium::texture::integral_texture2d::IntegralTexture2d;
+use glium::texture::texture2d::Texture2d;
+use glium::texture;
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -16,12 +19,12 @@ pub struct GliumRenderer {
     program: glium::Program,
     vertex_buffer: glium::VertexBuffer<Vertex>,
     closed: bool,
-    palette: texture1d::Texture1d,
+    palette: Texture2d,
     input: [bool; 8],
 }
 
 impl GliumRenderer {
-    pub fn new(pal: &[u8; 192]) -> GliumRenderer {
+    pub fn new(pal: &[u8; 1536]) -> GliumRenderer {
         let display = glium::glutin::WindowBuilder::new()
             .with_dimensions(512, 480)
             .with_title(format!("Mass NES"))
@@ -58,24 +61,26 @@ impl GliumRenderer {
             in vec2 v_tex_coords;
             out vec4 color;
 
-            uniform sampler2D tex;
-            uniform sampler1D palette;
+            uniform isampler2D tex;
+            uniform sampler2D palette;
 
             void main() {
-                vec4 index = texture(tex, v_tex_coords);
-                color = texture(palette, index.x * 4);
+                ivec4 index = texture(tex, v_tex_coords);
+                color = texelFetch(palette, ivec2(index.x % 64, index.x / 64), 0);
             }
         "#;
 
         let program = glium::Program::from_source(&display, vertex_shader_src, fragment_shader_src, None).unwrap();
 
-        let palette = RawImage1d {
+        let palette = RawImage2d {
             data: ::std::borrow::Cow::Borrowed(&pal[..]),
             width: 64,
+            height: 8,
             format: ClientFormat::U8U8U8,
         };
 
-        let pal_tex = texture1d::Texture1d::new(&display, palette).unwrap();
+        let pal_tex = Texture2d::with_mipmaps(&display, palette, 
+                                        texture::MipmapsOption::NoMipmap).unwrap();
 
         GliumRenderer {
             display: display,
@@ -118,20 +123,22 @@ impl GliumRenderer {
         }
     }
 
-    pub fn render(&mut self, screen: &[u8; 256*240]) {
+    pub fn render(&mut self, screen: &[u16; 256*240]) {
         {
             let img = RawImage2d {
                 data: ::std::borrow::Cow::Borrowed(screen),
                 width: 256,
                 height: 240,
-                format: ClientFormat::U8,
+                format: ClientFormat::U16,
             };
 
-            let tex = texture2d::Texture2d::new(&self.display, img).unwrap();
+            use glium::{uniforms, texture};
+            let tex = IntegralTexture2d::with_mipmaps(
+                &self.display, img, texture::MipmapsOption::NoMipmap).unwrap();
 
             let uniforms = uniform! {
-                tex: tex.sampled().magnify_filter(glium::uniforms::MagnifySamplerFilter::Nearest).minify_filter(glium::uniforms::MinifySamplerFilter::Nearest),
-                palette: self.palette.sampled().magnify_filter(glium::uniforms::MagnifySamplerFilter::Nearest).minify_filter(glium::uniforms::MinifySamplerFilter::Nearest),
+                tex: tex.sampled().magnify_filter(uniforms::MagnifySamplerFilter::Nearest).minify_filter(uniforms::MinifySamplerFilter::Nearest),
+                palette: self.palette.sampled().magnify_filter(uniforms::MagnifySamplerFilter::Nearest).minify_filter(uniforms::MinifySamplerFilter::Nearest),
             };
 
             let mut target = self.display.draw(); 

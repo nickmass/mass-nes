@@ -13,7 +13,7 @@ pub enum Region {
     Pal,
 }
 impl Region {
-    pub fn default_palette(&self) -> &'static [u8; 192] {
+    pub fn default_palette(&self) -> &'static [u8; 1536] {
         match *self {
             Region::Ntsc => include_bytes!("default.pal"),
             Region::Pal => include_bytes!("default.pal"),
@@ -23,7 +23,7 @@ impl Region {
 
 
 pub struct Machine<FR, FC, FI, I, FD> where 
-    FR: FnMut(&[u8;256*240]), 
+    FR: FnMut(&[u16;256*240]), 
     FC: FnMut() -> bool, 
     FI: FnMut() -> I,
     FD: FnMut(&System, &mut SystemState),
@@ -38,7 +38,7 @@ pub struct Machine<FR, FC, FI, I, FD> where
 }
 
 impl<FR, FC, FI, I, FD> Machine<FR, FC, FI, I, FD> where 
-    FR: FnMut(&[u8;256*240]),
+    FR: FnMut(&[u16;256*240]),
     FC: FnMut() -> bool,
     FI: FnMut() -> I,
     FD: FnMut(&System, &mut SystemState),

@@ -46,7 +46,7 @@ pub struct PpuState {
     low_attr_shift: u16,
     high_attr_shift: u16,
 
-    pub screen: [u8;256*240],
+    pub screen: [u16;256*240],
 
     in_sprite_render: bool,
     next_sprite_byte: u8,
@@ -163,6 +163,13 @@ impl PpuState {
         (self.regs[0] as u16 & 3) << 10
     }
 
+    fn emph_bits(&self) -> u16 {
+        let mut val = 0;
+        if self.is_red_emph() { val |= 0x40; }
+        if self.is_green_emph() { val |= 0x80; }
+        if self.is_blue_emph() { val |= 0x100; }
+        val
+    }
     fn is_blue_emph(&self) -> bool { self.regs[1] & 0x80 != 0 }
     fn is_green_emph(&self) -> bool { self.regs[1] & 0x40 != 0 }
     fn is_red_emph(&self) -> bool { self.regs[1] & 0x20 != 0 }
@@ -171,6 +178,9 @@ impl PpuState {
     fn is_left_sprites(&self) -> bool { self.regs[1] & 0x04 != 0 }
     fn is_left_background(&self) -> bool { self.regs[1] & 0x02 != 0 }
     fn is_grayscale(&self) -> bool { self.regs[1] & 0x01 != 0 }
+    fn is_rendering(&self) -> bool { 
+        self.is_sprites_enabled() || self.is_background_enabled() 
+    }
     
     fn ppu_status(&self) -> u8 {
         let mut value = self.last_write & 0x1f;
@@ -331,8 +341,17 @@ impl Ppu {
                     state.ppu.data_read_buffer
                 };
                 state.ppu.data_read_buffer = self.bus.read(system, state, addr);
-                state.ppu.vram_addr = state.ppu.vram_addr
+                match state.ppu.stage {
+                    Stage::Prerender(_,_) | Stage::Dot(_,_) |
+                    Stage::Hblank(_,_) if state.ppu.is_rendering() => {
+                        self.horz_increment(state);
+                        self.vert_increment(state);
+                    },
+                    _ => {
+                        state.ppu.vram_addr = state.ppu.vram_addr
                             .wrapping_add(state.ppu.vram_inc()) & 0x7fff;
+                    }
+                }
                 result
             }
             0x4014 => 0,
@@ -368,9 +387,8 @@ impl Ppu {
             0x2005 => { //PPUSCROLL
                 if state.ppu.write_latch {
                     let value = value as u16;
-                    state.ppu.vram_addr_temp &= 0xfc1f;
+                    state.ppu.vram_addr_temp &= 0x0c1f;
                     state.ppu.vram_addr_temp |= (value & 0xff07) << 2;
-                    state.ppu.vram_addr_temp &= 0x0fff;
                     state.ppu.vram_addr_temp |= (value & 0x07) << 12;
                 } else {
                     state.ppu.vram_addr_temp &= 0xffe0;
@@ -399,8 +417,17 @@ impl Ppu {
                 } else {
                     self.bus.write(system, state, addr & 0x3fff, value);
                 }
-                state.ppu.vram_addr = state.ppu.vram_addr
-                    .wrapping_add(state.ppu.vram_inc()) & 0x7fff;
+                match state.ppu.stage {
+                    Stage::Prerender(_,_) | Stage::Dot(_,_) |
+                    Stage::Hblank(_,_) if state.ppu.is_rendering() => {
+                        self.horz_increment(state);
+                        self.vert_increment(state);
+                    },
+                    _ => {
+                        state.ppu.vram_addr = state.ppu.vram_addr
+                            .wrapping_add(state.ppu.vram_inc()) & 0x7fff;
+                    }
+                }
             },
             0x4014 => { //OAMDMA
                 state.cpu.oam_dma_req(value);
@@ -607,6 +634,8 @@ impl Ppu {
         let mut behind_bg = false;
         let mut x = 8;
         loop {
+            if !state.ppu.is_sprites_enabled() || 
+                (!state.ppu.is_left_sprites() && dot < 8) { break; }
             x -= 1;
             if state.ppu.sprite_active[x] > 0 {
                 if state.ppu.sprite_active[x] <= 8 {
@@ -649,9 +678,9 @@ impl Ppu {
             if x == 0 { break; }
         }
 
-        let bg_colored = color != 0 && (dot > 7 || state.ppu.is_left_background());
-        let sprite_colored = sprite_pixel != 0 && 
-            (dot > 7 || state.ppu.is_left_sprites());
+        let bg_colored = color != 0 && (dot > 7 || state.ppu.is_left_background()) &&
+            state.ppu.is_background_enabled();
+        let sprite_colored = sprite_pixel != 0;
         
         let pixel = match (bg_colored, sprite_colored, behind_bg) {
             (false, false, _) => 0x3f00,
@@ -676,8 +705,8 @@ impl Ppu {
             pixel_result = 0x14
         }
 
-        //TODO - Do emphasis bits
-        state.ppu.screen[((scanline * 256) + dot) as usize] = pixel_result;
+        state.ppu.screen[((scanline * 256) + dot) as usize] = 
+            pixel_result as u16 | state.ppu.emph_bits();
 
         state.ppu.low_attr_shift <<= 1;
         state.ppu.high_attr_shift <<= 1;
@@ -685,7 +714,7 @@ impl Ppu {
         state.ppu.high_bg_shift <<= 1;
     }
     fn sprite_fetch(&self, system: &System, state: &mut SystemState, scanline: u32, high: bool) {
-        if !state.ppu.is_sprites_enabled() { return; }
+        if !state.ppu.is_rendering() { return; }
         let is_tall = state.ppu.is_tall_sprites();
         let is_on_line = |sprite_y, scanline| {
             if is_tall {
@@ -701,7 +730,9 @@ impl Ppu {
         let sprite_x = state.ppu.line_oam_data[(index * 4) + 3];
         
         let flip_vert  = sprite_attr & 0x80 != 0;
-        let line = if scanline >= sprite_y as u32 {
+        let sprite_height = if state.ppu.is_tall_sprites() { 16 } else { 8 };
+        let line = if scanline >= sprite_y as u32 && 
+                    scanline - (sprite_y as u32) < sprite_height {
             (scanline - sprite_y as u32) as u16
         } else {
             0
@@ -740,12 +771,12 @@ impl Ppu {
     }
 
     fn sprite_read(&self, system: &System, state: &mut SystemState) {
-        if !state.ppu.is_sprites_enabled() { return; }
+        if !state.ppu.is_rendering() { return; }
         state.ppu.next_sprite_byte = state.ppu.oam_data[((state.ppu.sprite_n * 4) + state.ppu.sprite_m) as usize];
     }
 
     fn sprite_eval(&self, system: &System, state: &mut SystemState, scanline: u32) {
-        if !state.ppu.is_sprites_enabled() { return; }
+        if !state.ppu.is_rendering() { return; }
         if state.ppu.sprite_read_loop { return; }
         let is_tall = state.ppu.is_tall_sprites();
         let is_on_line = |sprite_y, scanline| {
@@ -822,7 +853,7 @@ impl Ppu {
     }
 
     fn horz_increment(&self, state: &mut SystemState) {
-        if !state.ppu.is_background_enabled() { return; }
+        if !state.ppu.is_rendering() { return; }
         let mut addr = state.ppu.vram_addr;
         if addr & 0x001f == 31 {
             addr &= !0x001f;
@@ -834,7 +865,7 @@ impl Ppu {
     }
 
     fn vert_increment(&self, state: &mut SystemState) {
-        if !state.ppu.is_background_enabled() { return; }
+        if !state.ppu.is_rendering() { return; }
         let mut addr = state.ppu.vram_addr;
         if (addr & 0x7000) != 0x7000 {
             addr += 0x1000;
@@ -856,7 +887,7 @@ impl Ppu {
     }
 
     fn horz_reset(&self, state: &mut SystemState) {
-        if !state.ppu.is_background_enabled() { return; }
+        if !state.ppu.is_rendering() { return; }
         let mut addr = state.ppu.vram_addr;
         let addr_t = state.ppu.vram_addr_temp;
 
@@ -866,7 +897,7 @@ impl Ppu {
     }
 
     fn vert_reset(&self, state: &mut SystemState) {
-        if !state.ppu.is_background_enabled() { return; }
+        if !state.ppu.is_rendering() { return; }
         let mut addr = state.ppu.vram_addr;
         let addr_t = state.ppu.vram_addr_temp;
 
@@ -876,7 +907,7 @@ impl Ppu {
     }
 
     fn load_bg_shifters(&self, state: &mut SystemState) {
-        if !state.ppu.is_background_enabled() { return; }
+        if !state.ppu.is_rendering() { return; }
         state.ppu.low_bg_shift &= 0xff00;
         state.ppu.low_bg_shift |= state.ppu.pattern_low as u16;
         state.ppu.high_bg_shift &= 0xff00;
@@ -890,13 +921,13 @@ impl Ppu {
     }
 
     fn fetch_nametable(&self, system: &System, state: &mut SystemState) {
-        if !state.ppu.is_background_enabled() { return; }
+        if !state.ppu.is_rendering() { return; }
         let nt_addr = 0x2000 | (state.ppu.vram_addr & 0xfff);
         state.ppu.nametable_tile = self.bus.read(system, state, nt_addr);
     }
 
     fn fetch_attribute(&self, system: &System, state: &mut SystemState) {
-        if !state.ppu.is_background_enabled() { return; }
+        if !state.ppu.is_rendering() { return; }
         let v = state.ppu.vram_addr;
         let at_addr = 0x23c0 | (v & 0x0c00) | ((v >> 4) & 0x38) | ((v >> 2) & 0x07);
         let attr = self.bus.read(system, state, at_addr);
@@ -928,7 +959,7 @@ impl Ppu {
     }
 
     fn fetch_low_bg_pattern(&self, system: &System, state: &mut SystemState) {
-        if !state.ppu.is_background_enabled() { return; }
+        if !state.ppu.is_rendering() { return; }
         let v = state.ppu.vram_addr;
         let tile_addr = ((v >> 12) & 0x07) | ((state.ppu.nametable_tile as u16) << 4) |
             state.ppu.background_pattern_table();
@@ -936,7 +967,7 @@ impl Ppu {
     }
     
     fn fetch_high_bg_pattern(&self, system: &System, state: &mut SystemState) {
-        if !state.ppu.is_background_enabled() { return; }
+        if !state.ppu.is_rendering() { return; }
         let v = state.ppu.vram_addr;
         let tile_addr = ((v >> 12) & 0x07) | ((state.ppu.nametable_tile as u16) << 4) |
             state.ppu.background_pattern_table() | 0x08;

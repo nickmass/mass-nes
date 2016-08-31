@@ -130,8 +130,6 @@ impl Cpu {
         state.cpu.reg_pc = self.bus.read_word(system, state, 0xfffc) as u32;
         state.cpu.set_reg_p(0x34);
         state.cpu.reg_sp = 0xfd;
-
-        system.debug.log_for(state, 100);
     }
 
     pub fn register_read<T>(&mut self, state: &mut SystemState, device: DeviceKind, addr: T)
