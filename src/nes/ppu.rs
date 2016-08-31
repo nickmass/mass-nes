@@ -162,13 +162,7 @@ impl PpuState {
     }
 
     fn base_nametable(&self) -> u16 {
-        match self.regs[0] & 3 {
-            0 => 0x000,
-            1 => 0x400,
-            2 => 0x800,
-            3 => 0xc00,
-            _ => unreachable!()
-        }
+        (self.regs[0] as u16 & 3) << 10
     }
 
     fn is_blue_emph(&self) -> bool { self.regs[1] & 0x80 != 0 }
@@ -300,6 +294,7 @@ impl Ppu {
             _ => unreachable!(),
         }
     }
+
     pub fn read(&self, bus: BusKind, system: &System, state: &mut SystemState, address: u16) -> u8 {
         match address {
             0x2000 => state.ppu.last_write,

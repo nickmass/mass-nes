@@ -1,6 +1,7 @@
 mod nrom;
-mod uxrom;
 mod sxrom;
+mod uxrom;
+mod cnrom;
 
 use nes::system::{System, SystemState};
 use nes::bus::{DeviceKind, BusKind};
@@ -23,6 +24,7 @@ pub fn ines(ines_number: u8, state: &mut SystemState, cart: &Cartridge) -> Box<M
         0 => Box::new(nrom::Nrom::new(cart, state)),
         1 => Box::new(sxrom::Sxrom::new(cart, state)),
         2 => Box::new(uxrom::Uxrom::new(cart, state)),
+        3 => Box::new(cnrom::Cnrom::new(cart, state)),
         _ => {
             println!("Mapper not implemented.");
             Box::new(nrom::Nrom::new(cart, state))

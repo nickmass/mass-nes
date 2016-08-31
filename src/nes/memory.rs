@@ -95,7 +95,7 @@ impl Banks {
     }
 
     pub fn read(&self, system: &System, bank: usize, addr: u16) -> u8 {
-        let bank = self.data[bank];
+        let bank = self.data[bank % self.data.len()];
         match self.kind {
             MemKind::Prg =>
                 system.cartridge.prg_rom[bank.start + addr as usize],
