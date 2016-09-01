@@ -23,8 +23,9 @@ impl Region {
 }
 
 
-pub struct Machine<FR, FC, FI, I, FD> where 
+pub struct Machine<FR, FA, FC, FI, I, FD> where 
     FR: FnMut(&[u16;256*240]), 
+    FA: FnMut(&[u8]), 
     FC: FnMut() -> bool, 
     FI: FnMut() -> I,
     FD: FnMut(&System, &mut SystemState),
@@ -33,26 +34,30 @@ pub struct Machine<FR, FC, FI, I, FD> where
     pub state: Box<SystemState>,
     pub system: System,
     on_render: FR,
+    on_audio: FA,
     on_closed: FC,
     on_input: FI,
     on_debug: FD,
 }
 
-impl<FR, FC, FI, I, FD> Machine<FR, FC, FI, I, FD> where 
+impl<FR, FA, FC, FI, I, FD> Machine<FR, FA, FC, FI, I, FD> where 
     FR: FnMut(&[u16;256*240]),
+    FA: FnMut(&[u8]),
     FC: FnMut() -> bool,
     FI: FnMut() -> I,
     FD: FnMut(&System, &mut SystemState),
     I: InputDevice {
 
-    pub fn new(region: Region, cartridge: Cartridge, render: FR, closed: FC, input: FI,
-               debug: FD) -> Machine<FR, FC, FI, I, FD> {
+    pub fn new(region: Region, cartridge: Cartridge, render: FR, audio: FA,
+               closed: FC, input: FI, debug: FD) -> Machine<FR, FA, FC, FI, I, FD> {
+        
         let mut state = Box::new(SystemState::default());
         let system = System::new(region, cartridge, &mut state);
         Machine {
             state: state,
             system: system,
             on_render: render,
+            on_audio: audio,
             on_closed: closed,
             on_input: input,
             on_debug: debug,
@@ -70,6 +75,7 @@ impl<FR, FC, FI, I, FD> Machine<FR, FC, FI, I, FD> where
             self.system.ppu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
             if self.state.ppu.in_vblank && !last_vblank {
+                (self.on_audio)(&self.system.apu.get_samples(&self.system, &mut self.state));
                 (self.on_render)(&self.state.ppu.screen);
                 let input = (self.on_input)().to_byte();
                 self.state.input.input = input;

@@ -22,9 +22,11 @@ fn main() {
     let cart = Cartridge::load(&mut file).unwrap();
     
     let renderer = Rc::new(RefCell::new(GliumRenderer::new(pal)));
+    
     let mut machine = Machine::new(region, cart, |screen| {
         renderer.borrow_mut().render(screen);
-    }, || {
+    }, |samples| {
+    }, ||{
         renderer.borrow().is_closed()
     }, || {
         let input = renderer.borrow().get_input();

@@ -5,12 +5,26 @@ pub const LENGTH_TABLE: [u8; 0x20] = [10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 
                                   12, 26, 14, 12, 16, 24, 18, 48, 20, 96, 22, 192,
                                   24, 72, 26, 16, 28, 32, 30];
 
-#[derive(Default)]
 pub struct ApuState {
     frame_counter: u32,
     five_step_mode: bool,
     irq_inhibit: bool,
     irq: bool,
+    pub samples: [u8; 29781],
+    sample_index: usize,
+}
+
+impl Default for ApuState {
+    fn default() -> ApuState {
+        ApuState {
+            frame_counter: 0,
+            five_step_mode: false,
+            irq_inhibit: false,
+            irq: false,
+            samples: [0; 29781],
+            sample_index: 0,
+        }
+    }
 }
 
 impl ApuState {
@@ -126,6 +140,14 @@ impl Apu {
 
         let pulse1 = self.pulse_one.tick(system, state);
         let pulse2 = self.pulse_two.tick(system, state);
+        state.apu.samples[state.apu.sample_index] = pulse1 +  pulse2;
+        state.apu.sample_index += 1;
     }
-
+    
+    pub fn get_samples<'a>(&'a self, system: &'a System,
+                           state: &'a mut SystemState) -> &[u8] {
+        let index = state.apu.sample_index;
+        state.apu.sample_index = 0;
+        &state.apu.samples[0..index]
+    }
 }
