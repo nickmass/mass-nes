@@ -64,6 +64,7 @@ impl<FR, FC, FI, I, FD> Machine<FR, FC, FI, I, FD> where
         let mut last_vblank = false;
         loop {
             self.system.cpu.tick(&self.system, &mut self.state);
+            self.system.apu.tick(&self.system, &mut self.state);
             self.system.cartridge.mapper.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
@@ -97,6 +98,7 @@ pub struct System {
     region: Region,
     pub ppu: Ppu,
     pub cpu: Cpu,
+    pub apu: Apu,
     pub cartridge: Cartridge,
     pub debug: Debug,
     pub input: Input,
@@ -107,12 +109,14 @@ impl System {
                state: &mut SystemState) -> System {
         let cpu = Cpu::new(state);
         let ppu = Ppu::new(Region::Ntsc, state);
+        let apu = Apu::new(state);
         cartridge.init(state, &cpu, &ppu);
 
         let mut system = System {
             region: region,
             ppu: ppu,
             cpu: cpu,
+            apu: apu,
             cartridge: cartridge,
             debug: Debug::new(),
             input: Input::new(),
@@ -131,6 +135,9 @@ impl System {
                                  RangeAndMask(0x2000, 0x4000, 0xfff));
         system.ppu.register_write(state, DeviceKind::Nametables,
                                  RangeAndMask(0x2000, 0x4000, 0xfff));
+        system.cpu.register_read(state, DeviceKind::Apu, Address(0x4015));
+        system.cpu.register_write(state, DeviceKind::Apu, Address(0x4015));
+        system.cpu.register_write(state, DeviceKind::Apu, Address(0x4017));
         system.cpu.register_read(state, DeviceKind::Input, Address(0x4016));
         system.cpu.register_read(state, DeviceKind::Input, Address(0x4017));
         system.cpu.register_write(state, DeviceKind::Input, Address(0x4016));

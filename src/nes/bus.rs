@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use nes::system::SystemState;
 use nes::system::System;
+use nes::channel::Channel;
 
 #[derive(Clone, Copy)]
 pub enum BusKind {
@@ -16,6 +17,7 @@ pub enum DeviceKind {
     Input,
     Expansion,
     Debug,
+    Apu,
     PulseOne,
     PulseTwo,
     Noise,
@@ -143,6 +145,7 @@ impl AddressBus {
                     DeviceKind::Nametables => system.ppu.nametables.peek(self.kind, state, h.0),
                     DeviceKind::Mapper => system.cartridge.mapper.peek(self.kind, system, state, h.0),
                     DeviceKind::Input => system.input.peek(self.kind, system, state, h.0),
+                    DeviceKind::Apu => system.apu.peek(system, state, h.0),
                     _ => unimplemented!(),
                 }
             },
@@ -163,6 +166,7 @@ impl AddressBus {
                     DeviceKind::Mapper => system.cartridge.mapper.read(self.kind, system, state, h.0),
                     DeviceKind::Nametables => system.ppu.nametables.read(self.kind, state, h.0),
                     DeviceKind::Input => system.input.read(self.kind, system, state, h.0),
+                    DeviceKind::Apu => system.apu.read(system, state, h.0),
                     _ => unimplemented!(),
                 }
             },
@@ -183,6 +187,9 @@ impl AddressBus {
                     DeviceKind::Mapper => system.cartridge.mapper.write(self.kind, system, state, h.0, value),
                     DeviceKind::Nametables => system.ppu.nametables.write(self.kind, state, h.0, value),
                     DeviceKind::Input => system.input.write(self.kind, system, state, h.0, value),
+                    DeviceKind::Apu => system.apu.write(system, state, h.0, value),
+                    DeviceKind::PulseOne => system.apu.pulse_one.write(system, state, h.0, value),
+                    DeviceKind::PulseTwo => system.apu.pulse_two.write(system, state, h.0, value),
                     _ => unimplemented!(),
                 }
             },

@@ -1,4 +1,6 @@
-pub mod pulse;
+mod pulse;
+
+pub use self::pulse::{Pulse, PulseChannel};
 
 use nes::system::{System, SystemState};
 use nes::cpu::Cpu;

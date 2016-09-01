@@ -259,7 +259,7 @@ impl Channel for Pulse {
     }
 
     fn get_state(&self, system: &System, state: &mut SystemState) -> bool {
-        let mut channel = self.state.borrow_mut();
+        let channel = self.state.borrow();
         channel.length_counter > 0
     }
 }
