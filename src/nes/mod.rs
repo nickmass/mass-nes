@@ -2,6 +2,8 @@ mod system;
 mod bus;
 mod cpu;
 mod ppu;
+mod apu;
+mod channel;
 mod cartridge;
 mod memory;
 mod ops;

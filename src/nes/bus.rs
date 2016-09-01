@@ -16,6 +16,11 @@ pub enum DeviceKind {
     Input,
     Expansion,
     Debug,
+    PulseOne,
+    PulseTwo,
+    Noise,
+    Triangle,
+    Dmc,
     Nametables,
 }
 

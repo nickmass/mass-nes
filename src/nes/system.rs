@@ -1,6 +1,7 @@
 use nes::bus::{DeviceMappings, RangeAndMask, NotAndMask, Address, DeviceKind};
 use nes::cpu::{Cpu, CpuState};
 use nes::ppu::{Ppu, PpuState};
+use nes::apu::{Apu, ApuState};
 use nes::cartridge::Cartridge;
 use nes::memory::Pages;
 use nes::debug::{Debug, DebugState};
@@ -85,6 +86,7 @@ impl<FR, FC, FI, I, FD> Machine<FR, FC, FI, I, FD> where
 pub struct SystemState {
     pub cpu: CpuState,
     pub ppu: PpuState,
+    pub apu: ApuState,
     pub mem: Pages,
     pub mappings: DeviceMappings,
     pub input: InputState,
