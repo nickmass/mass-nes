@@ -5,3 +5,5 @@ authors = ["Nick Massey <nickmass@nickmass.com>"]
 
 [dependencies]
 glium = "0.15"
+cpal = "0.3"
+futures = "0.1"

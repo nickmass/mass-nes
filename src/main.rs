@@ -9,6 +9,7 @@ use nes::{Controller, Machine, Cartridge, Region};
 
 mod ui;
 use ui::gfx::GliumRenderer;
+use ui::audio::Audio;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -22,10 +23,15 @@ fn main() {
     let cart = Cartridge::load(&mut file).unwrap();
     
     let renderer = Rc::new(RefCell::new(GliumRenderer::new(pal)));
+    let mut audio = Audio::new();
     
     let mut machine = Machine::new(region, cart, |screen| {
         renderer.borrow_mut().render(screen);
     }, |samples| {
+        let short_samples = samples.iter().map(|x| {
+            (((*x as i32) << 8) - std::i16::MAX as i32) as i16
+        }).enumerate().filter(|x| x.0 % 324 == 0).map(|x| x.1);
+        audio.add_samples(short_samples.collect());
     }, ||{
         renderer.borrow().is_closed()
     }, || {

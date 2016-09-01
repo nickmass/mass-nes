@@ -150,6 +150,7 @@ impl System {
         system.cartridge.mapper.register(state, &mut system.cpu, &mut system.ppu,
                                &system.cartridge);
 
+        system.apu.register(state, &mut system.cpu);
         system
     }
 }

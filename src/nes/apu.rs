@@ -1,5 +1,6 @@
 use nes::system::{System, SystemState};
 use nes::channel::{Channel, Pulse, PulseChannel};
+use nes::cpu::Cpu;
 
 pub const LENGTH_TABLE: [u8; 0x20] = [10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14,
                                   12, 26, 14, 12, 16, 24, 18, 48, 20, 96, 22, 192,
@@ -140,7 +141,7 @@ impl Apu {
 
         let pulse1 = self.pulse_one.tick(system, state);
         let pulse2 = self.pulse_two.tick(system, state);
-        state.apu.samples[state.apu.sample_index] = pulse1 +  pulse2;
+        state.apu.samples[state.apu.sample_index] = (pulse1 +  pulse2) * 4; 
         state.apu.sample_index += 1;
     }
     
@@ -149,5 +150,10 @@ impl Apu {
         let index = state.apu.sample_index;
         state.apu.sample_index = 0;
         &state.apu.samples[0..index]
+    }
+    
+    pub fn register(&self, state: &mut SystemState, cpu: &mut Cpu) {
+        self.pulse_one.register(state, cpu);
+        self.pulse_two.register(state, cpu);
     }
 }
