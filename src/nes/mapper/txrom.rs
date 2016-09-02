@@ -11,6 +11,7 @@ use std::cell::RefCell;
 pub struct TxromState {
     prg: MappedMemory,
     chr: MappedMemory,
+    chr_type: BankKind,
     bank_data: [u8;8],
     bank_select: u8,
     ram_protect: bool,
@@ -39,9 +40,13 @@ impl Txrom {
         let chr = match chr_type {
             BankKind::Rom => 
                 MappedMemory::new(state, cartridge, 0x0000, 0, 8, MemKind::Chr),
-            BankKind::Ram =>
-                MappedMemory::new(state, cartridge, 0x0000, 8, 8, MemKind::Chr),
+            BankKind::Ram => {
+                let mut mem = MappedMemory::new(state, cartridge, 0x0000, 8, 8, MemKind::Chr);
+                mem.map(0x0000, 8, 0, BankKind::Ram);
+                mem
+            },  
         };
+
         
         let mut prg = MappedMemory::new(state, cartridge, 0x6000, 16, 48, MemKind::Prg);
         prg.map(0x6000, 16, 0, BankKind::Ram);
@@ -49,6 +54,7 @@ impl Txrom {
         let rom_state = TxromState {
             prg : prg,
             chr : chr,
+            chr_type: chr_type,
             bank_data: [0;8],
             bank_select: 0,
             ram_protect: false,
@@ -148,24 +154,26 @@ impl Txrom {
     }
 
     fn sync(&self, rom: &mut TxromState) {
-        if rom.bank_select & 0x80 == 0{
-            rom.chr.map(0x0000, 1, (rom.bank_data[0] & 0xfe) as usize, BankKind::Rom); 
-            rom.chr.map(0x0400, 1, (rom.bank_data[0] | 0x1) as usize, BankKind::Rom); 
-            rom.chr.map(0x0800, 1, (rom.bank_data[1] & 0xfe) as usize, BankKind::Rom); 
-            rom.chr.map(0x0c00, 1, (rom.bank_data[1] | 0x01) as usize, BankKind::Rom); 
-            rom.chr.map(0x1000, 1, rom.bank_data[2] as usize, BankKind::Rom); 
-            rom.chr.map(0x1400, 1, rom.bank_data[3] as usize, BankKind::Rom); 
-            rom.chr.map(0x1800, 1, rom.bank_data[4] as usize, BankKind::Rom); 
-            rom.chr.map(0x1c00, 1, rom.bank_data[5] as usize, BankKind::Rom); 
-        } else {
-            rom.chr.map(0x0000, 1, rom.bank_data[2] as usize, BankKind::Rom); 
-            rom.chr.map(0x0400, 1, rom.bank_data[3] as usize, BankKind::Rom); 
-            rom.chr.map(0x0800, 1, rom.bank_data[4] as usize, BankKind::Rom); 
-            rom.chr.map(0x0c00, 1, rom.bank_data[5] as usize, BankKind::Rom); 
-            rom.chr.map(0x1000, 1, (rom.bank_data[0] & 0xfe) as usize, BankKind::Rom); 
-            rom.chr.map(0x1400, 1, (rom.bank_data[0] | 0x1) as usize, BankKind::Rom); 
-            rom.chr.map(0x1800, 1, (rom.bank_data[1] & 0xfe) as usize, BankKind::Rom); 
-            rom.chr.map(0x1c00, 1, (rom.bank_data[1] | 0x01) as usize, BankKind::Rom); 
+        if rom.chr_type == BankKind::Rom {
+            if rom.bank_select & 0x80 == 0{
+                rom.chr.map(0x0000, 1, (rom.bank_data[0] & 0xfe) as usize, BankKind::Rom); 
+                rom.chr.map(0x0400, 1, (rom.bank_data[0] | 0x1) as usize, BankKind::Rom); 
+                rom.chr.map(0x0800, 1, (rom.bank_data[1] & 0xfe) as usize, BankKind::Rom); 
+                rom.chr.map(0x0c00, 1, (rom.bank_data[1] | 0x01) as usize, BankKind::Rom); 
+                rom.chr.map(0x1000, 1, rom.bank_data[2] as usize, BankKind::Rom); 
+                rom.chr.map(0x1400, 1, rom.bank_data[3] as usize, BankKind::Rom); 
+                rom.chr.map(0x1800, 1, rom.bank_data[4] as usize, BankKind::Rom); 
+                rom.chr.map(0x1c00, 1, rom.bank_data[5] as usize, BankKind::Rom); 
+            } else {
+                rom.chr.map(0x0000, 1, rom.bank_data[2] as usize, BankKind::Rom); 
+                rom.chr.map(0x0400, 1, rom.bank_data[3] as usize, BankKind::Rom); 
+                rom.chr.map(0x0800, 1, rom.bank_data[4] as usize, BankKind::Rom); 
+                rom.chr.map(0x0c00, 1, rom.bank_data[5] as usize, BankKind::Rom); 
+                rom.chr.map(0x1000, 1, (rom.bank_data[0] & 0xfe) as usize, BankKind::Rom); 
+                rom.chr.map(0x1400, 1, (rom.bank_data[0] | 0x1) as usize, BankKind::Rom); 
+                rom.chr.map(0x1800, 1, (rom.bank_data[1] & 0xfe) as usize, BankKind::Rom); 
+                rom.chr.map(0x1c00, 1, (rom.bank_data[1] | 0x01) as usize, BankKind::Rom); 
+            }
         }
 
         if rom.bank_select & 0x40 == 0{ 

@@ -89,7 +89,11 @@ impl PulseState {
         };
 
         period = if self.sweep_negate() {
+            if period != 0 && self.period > period - chan {
                 self.period - (period - chan)
+            } else {
+                self.period
+            }
         } else {
             self.period + period
         };

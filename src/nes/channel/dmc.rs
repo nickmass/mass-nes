@@ -145,7 +145,9 @@ impl Channel for Dmc {
 
                 channel.output_shifter >>= 1;
             }
-            channel.bits_remaining -= 1;
+            if channel.bits_remaining != 0 {
+                channel.bits_remaining -= 1;
+            }
             if channel.bits_remaining == 0 {
                 channel.bits_remaining = 8;
                 if channel.sample_buffer_empty {
