@@ -1,10 +1,12 @@
 mod pulse;
 mod noise;
 mod triangle;
+mod dmc;
 
 pub use self::pulse::{Pulse, PulseChannel};
 pub use self::noise::Noise;
 pub use self::triangle::Triangle;
+pub use self::dmc::Dmc;
 
 use nes::system::{System, SystemState};
 use nes::cpu::Cpu;

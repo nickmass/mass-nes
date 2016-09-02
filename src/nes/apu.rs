@@ -1,5 +1,5 @@
 use nes::system::{System, SystemState};
-use nes::channel::{Channel, Pulse, PulseChannel, Triangle, Noise};
+use nes::channel::{Channel, Pulse, PulseChannel, Triangle, Noise, Dmc};
 use nes::cpu::Cpu;
 
 pub const LENGTH_TABLE: [u8; 0x20] = [10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14,
@@ -75,6 +75,7 @@ pub struct Apu {
     pub pulse_two: Pulse,
     pub triangle: Triangle,
     pub noise: Noise,
+    pub dmc: Dmc,
 }
 
 impl Apu {
@@ -84,6 +85,7 @@ impl Apu {
             pulse_two: Pulse::new(PulseChannel::InternalTwo),
             triangle: Triangle::new(),
             noise: Noise::new(),
+            dmc: Dmc::new(),
         }
     }
 
@@ -99,7 +101,9 @@ impl Apu {
                 if self.pulse_two.get_state(system, state) { val |= 0x02; }
                 if self.triangle.get_state(system, state) { val |= 0x04; }
                 if self.noise.get_state(system, state) { val |= 0x08; }
+                if self.dmc.get_state(system, state) { val |= 0x10; }
                 if state.apu.irq { val |= 0x40; }
+                if self.dmc.get_irq() { val |= 0x80; }
                 state.apu.irq = false;
                 val
             },
@@ -130,6 +134,11 @@ impl Apu {
                     self.noise.enable(system, state);
                 } else {
                     self.noise.disable(system, state);
+                }
+                if value & 0x10 != 0 {
+                    self.dmc.enable(system, state);
+                } else {
+                    self.dmc.disable(system, state);
                 }
             },
             0x4017 => {
@@ -169,7 +178,9 @@ impl Apu {
         let pulse2 = self.pulse_two.tick(system, state);
         let triangle = self.triangle.tick(system, state);
         let noise = self.noise.tick(system, state);
-        state.apu.samples[state.apu.sample_index] = (pulse1 + pulse2 + triangle + noise) * 2; 
+        let dmc = self.dmc.tick(system, state);
+
+        state.apu.samples[state.apu.sample_index] = (pulse1 + pulse2 + triangle + noise + dmc); 
         state.apu.sample_index += 1;
     }
     
@@ -185,5 +196,6 @@ impl Apu {
         self.pulse_two.register(state, cpu);
         self.triangle.register(state, cpu);
         self.noise.register(state, cpu);
+        self.dmc.register(state, cpu);
     }
 }

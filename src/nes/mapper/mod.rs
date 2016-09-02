@@ -29,7 +29,7 @@ pub trait Mapper {
 pub fn ines(ines_number: u8, state: &mut SystemState, cart: &Cartridge) -> Box<Mapper> {
     match ines_number {
         0 => Box::new(nrom::Nrom::new(cart, state)),
-        1 => Box::new(sxrom::Sxrom::new(cart, state)),
+        1 | 65 => Box::new(sxrom::Sxrom::new(cart, state)),
         2 => Box::new(uxrom::Uxrom::new(cart, state)),
         3 => Box::new(cnrom::Cnrom::new(cart, state)),
         4 => Box::new(txrom::Txrom::new(cart,state)),

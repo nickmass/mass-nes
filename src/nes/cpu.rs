@@ -27,7 +27,8 @@ pub struct CpuState {
     oam_dma_buffer: u8,
     oam_dma_addr: u16,
     pending_irq: bool,
-
+    pending_dmc: u32, 
+    dmc_addr: u16,
     pending_nmi: Option<u32>,
 }
 
@@ -63,6 +64,11 @@ impl CpuState {
 
     pub fn irq_req(&mut self) {
         self.pending_irq = true;
+    }
+
+    pub fn dmc_req(&mut self, addr: u16) {
+        self.pending_dmc = 4;
+        self.dmc_addr = addr;
     }
 
     pub fn nmi_cancel(&mut self) {
@@ -157,6 +163,15 @@ impl Cpu {
 
     pub fn tick(&self, system: &System, state: &mut SystemState) {
         state.cpu.current_tick += 1;
+        if state.cpu.pending_dmc != 0 {
+            state.cpu.pending_dmc -= 1;
+            if state.cpu.pending_dmc == 0 {
+                let addr = state.cpu.dmc_addr;
+                let value = self.bus.read(system, state, addr);
+                system.apu.dmc.dmc_read(value);
+                return;
+            }
+        }
         match state.cpu.stage {
             Stage::Fetch => {
                 self.decode(system, state);
