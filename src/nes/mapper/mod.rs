@@ -20,6 +20,10 @@ pub trait Mapper {
     fn write(&self, bus: BusKind, system: &System, state: &mut SystemState, addr: u16,
              value: u8);
     fn tick(&self, system: &System, state: &mut SystemState);
+    fn nt_peek(&self, system: &System, state: &SystemState, addr: u16) -> u8;
+    fn nt_read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8;
+    fn nt_write(&self, system: &System, state: &mut SystemState, addr: u16, 
+                value: u8);
 }
 
 pub fn ines(ines_number: u8, state: &mut SystemState, cart: &Cartridge) -> Box<Mapper> {
@@ -62,5 +66,17 @@ impl Mapper for Null {
 
     fn tick(&self, system: &System, state: &mut SystemState) {
         panic!("Mapper not initialized");
+    }
+
+    fn nt_peek(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
+        system.ppu.nametables.read(state, addr)
+    }
+
+    fn nt_read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
+        system.ppu.nametables.read(state, addr)
+    }
+
+    fn nt_write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
+        system.ppu.nametables.write(state, addr, value);
     }
 }

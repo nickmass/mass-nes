@@ -142,7 +142,8 @@ impl AddressBus {
                 match h.1 {
                     DeviceKind::CpuRam => system.cpu.mem.peek(state, h.0),
                     DeviceKind::Ppu => system.ppu.peek(self.kind, system, state, h.0),
-                    DeviceKind::Nametables => system.ppu.nametables.peek(self.kind, state, h.0),
+                    DeviceKind::Nametables => system.cartridge.mapper.nt_peek(
+                        system, state, h.0),
                     DeviceKind::Mapper => system.cartridge.mapper.peek(self.kind, system, state, h.0),
                     DeviceKind::Input => system.input.peek(self.kind, system, state, h.0),
                     DeviceKind::Apu => system.apu.peek(system, state, h.0),
@@ -164,7 +165,8 @@ impl AddressBus {
                     DeviceKind::CpuRam => system.cpu.mem.read(state, h.0),
                     DeviceKind::Ppu => system.ppu.read(self.kind, system, state, h.0),
                     DeviceKind::Mapper => system.cartridge.mapper.read(self.kind, system, state, h.0),
-                    DeviceKind::Nametables => system.ppu.nametables.read(self.kind, state, h.0),
+                    DeviceKind::Nametables => system.cartridge.mapper.nt_read(
+                        system, state, h.0),
                     DeviceKind::Input => system.input.read(self.kind, system, state, h.0),
                     DeviceKind::Apu => system.apu.read(system, state, h.0),
                     _ => unimplemented!(),
@@ -185,7 +187,8 @@ impl AddressBus {
                     DeviceKind::CpuRam => system.cpu.mem.write(state, h.0, value),
                     DeviceKind::Ppu => system.ppu.write(self.kind, system, state, h.0, value),
                     DeviceKind::Mapper => system.cartridge.mapper.write(self.kind, system, state, h.0, value),
-                    DeviceKind::Nametables => system.ppu.nametables.write(self.kind, state, h.0, value),
+                    DeviceKind::Nametables => system.cartridge.mapper.nt_write(
+                         system, state, h.0, value),
                     DeviceKind::Input => system.input.write(self.kind, system, state, h.0, value),
                     DeviceKind::Apu => system.apu.write(system, state, h.0, value),
                     DeviceKind::PulseOne => system.apu.pulse_one.write(system, state, h.0, value),

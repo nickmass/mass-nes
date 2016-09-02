@@ -18,7 +18,7 @@ pub struct PpuState {
     
     data_read_buffer: u8,
 
-    vram_addr: u16,
+    pub vram_addr: u16,
     vram_addr_temp: u16,
     vram_fine_x: u16,
 

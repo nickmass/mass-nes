@@ -15,13 +15,51 @@ pub struct Audio {
 }
 
 impl Audio {
-    pub fn new(sample_rate: u32) -> Audio {
+    pub fn new() -> Audio {
+        let allowed_sample_rates = vec![cpal::SamplesRate(48000), cpal::SamplesRate(44100), cpal::SamplesRate(96000)];
         let endpoint = cpal::get_default_endpoint().unwrap();
-        let format = endpoint.get_supported_formats_list().unwrap().filter(|x| {
-            x.samples_rate == cpal::SamplesRate(sample_rate) &&
-            x.data_type == cpal::SampleFormat::I16 &&
-            x.channels.len() == 1}).next().unwrap();
         
+        struct Match {
+            sr: usize,
+            chan: usize,
+            data_type: cpal::SampleFormat,
+            format: cpal::Format,
+        }
+ 
+        let mut best_match = None;
+        let formats = endpoint.get_supported_formats_list().expect("No audio formats found");
+        for f in formats {
+            let s = allowed_sample_rates.iter().position(|x| *x == f.samples_rate); 
+            let c = f.channels.len();
+            let d = f.data_type;
+            if s.is_none() { continue; }
+            let s = s.unwrap();
+            let new_m = Match {sr: s, chan: c, data_type: d, format: f.clone() };
+            if best_match.is_none() {
+                best_match = Some(new_m);
+                continue;
+            }
+            if best_match.as_ref().unwrap().sr > s {
+                best_match = Some(new_m);
+                continue;
+            }
+            if best_match.as_ref().unwrap().sr < s {
+                continue;
+            }
+            if best_match.as_ref().unwrap().chan > c {
+                best_match = Some(new_m);
+                continue;
+            }
+            if best_match.as_ref().unwrap().chan < c {
+                continue;
+            }
+            if d == cpal::SampleFormat::I16 {
+                best_match = Some(new_m);
+            }
+        }
+
+        let best_match = best_match.expect("No supported audio format found");
+        let format = best_match.format;
         let channels = format.channels.len();
 
         let event_loop = cpal::EventLoop::new();
@@ -34,7 +72,11 @@ impl Audio {
         stream.for_each(move |buffer| -> Result<_, ()> {
             match buffer {
                 cpal::UnknownTypeBuffer::U16(mut buffer) => {
-                    println!("u16");
+                    for (sample, value) in buffer.chunks_mut(channels).
+                        zip(&mut samples) {
+                        let value = ((value as i32) + ::std::i16::MAX as i32) as u16;
+                        for out in sample.iter_mut() { *out = value; }
+                    }
                 },
 
                 cpal::UnknownTypeBuffer::I16(mut buffer) => {
@@ -45,7 +87,11 @@ impl Audio {
                 },
 
                 cpal::UnknownTypeBuffer::F32(mut buffer) => {
-                    println!("float");
+                    for (sample, value) in buffer.chunks_mut(channels).
+                        zip(&mut samples) {
+                        let value = (value as f32) / ::std::i16::MAX as f32;
+                        for out in sample.iter_mut() { *out = value; }
+                    }
                 },
             }
 
@@ -62,6 +108,11 @@ impl Audio {
             voice: voice,
             tx: tx,
         }
+    }
+    
+    pub fn sample_rate(&self) -> u32 {
+        let cpal::SamplesRate(rate) = self.format.samples_rate;
+        rate
     }
 
     pub fn add_samples(&mut self, samples: Vec<i16>) {

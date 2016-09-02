@@ -17,6 +17,7 @@ struct NoiseState {
     decay_counter: u8,
     regs: [u8;4],
     current_tick: u64,
+    forced_clock: bool,
 }
 
 impl NoiseState {
@@ -80,6 +81,11 @@ impl Noise {
             state: RefCell::new(state),
         }
     }
+
+    pub fn forced_clock(&self) {
+        let mut channel = self.state.borrow_mut();
+        channel.forced_clock = true;
+    }
 }
 
 impl Channel for Noise {
@@ -123,7 +129,7 @@ impl Channel for Noise {
             }
         }
 
-        if state.apu.is_quarter_frame() { 
+        if state.apu.is_quarter_frame() || channel.forced_clock { 
             if channel.envelope_start {
                 channel.envelope_start = false;
                 channel.decay_counter = 0xf;
@@ -142,11 +148,13 @@ impl Channel for Noise {
             }
         }
 
-        if state.apu.is_half_frame() {
+        if state.apu.is_half_frame() || channel.forced_clock {
             if channel.length_counter != 0 && !channel.halt() {
                 channel.length_counter -= 1;
             }
         }
+
+        channel.forced_clock = false;
 
         if (channel.shifter & 1) == 1 || channel.length_counter == 0 {
             0

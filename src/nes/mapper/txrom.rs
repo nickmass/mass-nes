@@ -78,7 +78,7 @@ impl Txrom {
     }
 
     fn read_ppu(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
-        self.irq_tick(addr);
+        //self.irq_tick(addr);
         self.state.borrow().chr.read(system, state, addr)
     }
 
@@ -126,7 +126,7 @@ impl Txrom {
     }
 
     fn write_ppu(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
-        self.irq_tick(addr);
+        //self.irq_tick(addr);
         self.state.borrow_mut().chr.write(system, state, addr, value);
     }
 
@@ -238,5 +238,19 @@ impl Mapper for Txrom {
         if self.state.borrow().irq {
             state.cpu.irq_req();
         }
+    }
+    
+    fn nt_peek(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
+        system.ppu.nametables.read(state, addr)
+    }
+
+    fn nt_read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
+        self.irq_tick(addr);
+        system.ppu.nametables.read(state, addr)
+    }
+
+    fn nt_write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
+        self.irq_tick(addr);
+        system.ppu.nametables.write(state, addr, value);
     }
 }

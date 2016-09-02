@@ -52,7 +52,7 @@ impl ApuState {
                 self.frame_counter == 29829
         }
     }
-
+    
     fn increment_frame_counter(&mut self) {
         if self.five_step_mode {
             if self.frame_counter >= 37282 {
@@ -138,9 +138,19 @@ impl Apu {
                 if state.apu.irq_inhibit {
                     state.apu.irq = false
                 }
+                if state.apu.five_step_mode {
+                    self.forced_clock();
+                }
             },
             _ => unreachable!(),
         }
+    }
+
+    fn forced_clock(&self) {
+        self.pulse_one.forced_clock();
+        self.pulse_two.forced_clock();
+        self.triangle.forced_clock();
+        self.noise.forced_clock();
     }
 
     pub fn tick(&self, system: &System, state: &mut SystemState) {

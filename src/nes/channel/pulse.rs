@@ -31,6 +31,7 @@ struct PulseState {
     sweep_divider: u8,
     regs: [u8;4],
     current_tick: u64,
+    forced_clock: bool,
 }
 
 impl PulseState {
@@ -88,11 +89,7 @@ impl PulseState {
         };
 
         period = if self.sweep_negate() {
-            if self.period - (period - chan) > self.period { //overflow
-                0
-            } else {
                 self.period - (period - chan)
-            }
         } else {
             self.period + period
         };
@@ -102,7 +99,8 @@ impl PulseState {
 
     fn sweep_timer(&self) -> u16 {
         let target = self.sweep_target();
-        if target < 8 || target > 0x7ff || !self.sweep_enabled() {
+        if self.period < 8 || target > 0x7ff || !self.sweep_enabled() || 
+                self.shift_count() == 0 {
             self.period
         } else {
             target
@@ -111,7 +109,7 @@ impl PulseState {
 
     fn sweep_output(&self) -> u8 {
         let target = self.sweep_target();
-        if target < 8 || target > 0x7ff { 0 } else { self.envelope_output() }
+        if self.period < 8 || target > 0x7ff { 0 } else { self.envelope_output() }
     }
 
     fn duty_sequence(&self) -> [bool; 8] {
@@ -145,6 +143,11 @@ impl Pulse {
             state: RefCell::new(state),
             channel: chan
         }
+    }
+
+    pub fn forced_clock(&self) {
+        let mut channel = self.state.borrow_mut();
+        channel.forced_clock = true;
     }
 }
 
@@ -201,7 +204,7 @@ impl Channel for Pulse {
             }
         }
 
-        if state.apu.is_quarter_frame() {
+        if state.apu.is_quarter_frame() || channel.forced_clock {
             if channel.envelope_start {
                 channel.envelope_start = false;
                 channel.decay_counter = 0xf;
@@ -220,7 +223,7 @@ impl Channel for Pulse {
             }
         }
 
-        if state.apu.is_half_frame() {
+        if state.apu.is_half_frame() || channel.forced_clock {
             if channel.length_counter != 0 && !channel.halt() {
                 channel.length_counter -= 1;
             }
@@ -239,6 +242,7 @@ impl Channel for Pulse {
             }
         }
 
+        channel.forced_clock = false;
         if !channel.duty() || channel.length_counter == 0 || channel.timer_counter < 8 {
             0
         } else  {

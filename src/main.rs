@@ -6,7 +6,7 @@ extern crate glium;
 extern crate blip_buf;
 
 use blip_buf::BlipBuf;
-const SAMPLE_RATE: u32 = 48000;
+
 const CLOCK_RATE: f64 = 28780.5 * 60.0;
 
 mod nes;
@@ -28,23 +28,22 @@ fn main() {
     let cart = Cartridge::load(&mut file).unwrap();
     
     let renderer = Rc::new(RefCell::new(GliumRenderer::new(pal)));
-    let mut audio = Audio::new(SAMPLE_RATE);
+    let mut audio = Audio::new();
+    let sample_rate = audio.sample_rate();
    
     let mut delta = 0;
-    let mut blip = BlipBuf::new(SAMPLE_RATE / 30);
-    blip.set_rates(CLOCK_RATE, SAMPLE_RATE as f64);
+    let mut blip = BlipBuf::new(sample_rate / 30);
+    blip.set_rates(CLOCK_RATE, sample_rate as f64);
 
     let mut machine = Machine::new(region, cart, |screen| {
         renderer.borrow_mut().render(screen);
     }, |samples| {
         let count = samples.len();
-        let short_samples = samples.iter().map(|x| {
-            (((*x as i32) << 8) - std::i16::MAX as i32) as i16
-        }).enumerate();
         
-        for (i, v) in short_samples {
-            blip.add_delta(i as u32, v as i32 - delta);
-            delta = v as i32;
+        for (i, v) in samples.iter().enumerate() {
+            let v = ((*v as i32) << 8) - std::i16::MAX as i32;
+            blip.add_delta(i as u32, v - delta);
+            delta = v;
         }
         blip.end_frame(count as u32);
         while blip.samples_avail() > 0 {

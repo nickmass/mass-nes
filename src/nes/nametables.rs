@@ -1,5 +1,4 @@
 use nes::memory::Page;
-use nes::bus::BusKind;
 use nes::system::SystemState;
 
 pub struct NametablesState {
@@ -69,17 +68,12 @@ impl Nametables {
         }
     }
 
-    pub fn peek(&self, bus: BusKind, state: &SystemState, addr: u16) -> u8 {
+    pub fn read(&self, state: &SystemState, addr: u16) -> u8 {
         let table = self.get_table(state, addr);
         state.mem.read(table.0, table.1)
     }
 
-    pub fn read(&self, bus: BusKind, state: &mut SystemState, addr: u16) -> u8 {
-        let table = self.get_table(state, addr);
-        state.mem.read(table.0, table.1)
-    }
-
-    pub fn write(&self, bus: BusKind, state: &mut SystemState, addr: u16, val: u8) {
+    pub fn write(&self, state: &mut SystemState, addr: u16, val: u8) {
         let table = self.get_table(state, addr);
         state.mem.write(table.0, table.1, val);
     }
