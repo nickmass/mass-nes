@@ -191,6 +191,7 @@ impl AddressBus {
                     DeviceKind::PulseOne => system.apu.pulse_one.write(system, state, h.0, value),
                     DeviceKind::PulseTwo => system.apu.pulse_two.write(system, state, h.0, value),
                     DeviceKind::Noise => system.apu.noise.write(system, state, h.0, value),
+                    DeviceKind::Triangle => system.apu.triangle.write(system, state, h.0, value),
                     _ => unimplemented!(),
                 }
             },

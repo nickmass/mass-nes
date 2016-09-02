@@ -8,7 +8,6 @@ use std::cell::RefCell;
 
 #[derive(Default)]
 struct NoiseState {
-    period: u16,
     timer_counter: u16,
     length_counter: u8,
     enabled: bool,
@@ -102,7 +101,6 @@ impl Channel for Noise {
             1 => {
             },
             2 => {
-                channel.period = channel.timer_period();
             },
             3 => {
                 channel.length_counter = channel.length_load();
@@ -118,7 +116,7 @@ impl Channel for Noise {
 
         if channel.current_tick & 1 == 0 {
             if channel.timer_counter == 0 {
-                channel.timer_counter = channel.period;
+                channel.timer_counter = channel.timer_period();
                 channel.clock_shifter();             
             } else {
                 channel.timer_counter -= 1;
