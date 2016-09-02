@@ -199,13 +199,9 @@ impl Channel for Pulse {
             } else {
                 channel.timer_counter -= 1;
             }
-            
-            if channel.length_counter != 0 && !channel.halt() {
-                channel.length_counter -= 1;
-            }
         }
 
-        if state.apu.is_quarter_frame() || state.apu.is_half_frame() {
+        if state.apu.is_quarter_frame() {
             if channel.envelope_start {
                 channel.envelope_start = false;
                 channel.decay_counter = 0xf;
@@ -225,6 +221,10 @@ impl Channel for Pulse {
         }
 
         if state.apu.is_half_frame() {
+            if channel.length_counter != 0 && !channel.halt() {
+                channel.length_counter -= 1;
+            }
+
             if channel.sweep_reload {
                 if channel.sweep_divider == 0 {
                     channel.period = channel.sweep_timer();

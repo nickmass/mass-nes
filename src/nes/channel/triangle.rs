@@ -104,21 +104,25 @@ impl Channel for Triangle {
             channel.timer_counter -= 1;
         }
             
-        if channel.current_tick & 1 == 0 {
-            if channel.linear_reload {
-                channel.linear_counter = channel.linear_load();
-            } else if channel.linear_counter != 0 {
-                channel.linear_counter -= 1;
+        if state.apu.is_quarter_frame() {
+            if channel.current_tick & 1 == 0 {
+                if channel.linear_reload {
+                    channel.linear_counter = channel.linear_load();
+                } else if channel.linear_counter != 0 {
+                    channel.linear_counter -= 1;
+                }
+                if !channel.halt() {
+                    channel.linear_reload = false;
+                }
             }
-            if !channel.halt() {
-                channel.linear_reload = false;
-            }
+        }            
 
+        if state.apu.is_half_frame() {
             if channel.length_counter != 0 && !channel.halt() {
                 channel.length_counter -= 1;
             }
         }
-
+        
         channel.sequence()
     }
 

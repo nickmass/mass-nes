@@ -121,13 +121,9 @@ impl Channel for Noise {
             } else {
                 channel.timer_counter -= 1;
             }
-            
-            if channel.length_counter != 0 && !channel.halt() {
-                channel.length_counter -= 1;
-            }
         }
 
-        if state.apu.is_quarter_frame() || state.apu.is_half_frame() {
+        if state.apu.is_quarter_frame() { 
             if channel.envelope_start {
                 channel.envelope_start = false;
                 channel.decay_counter = 0xf;
@@ -143,6 +139,12 @@ impl Channel for Noise {
                 } else {
                     channel.envelope_divider -= 1;
                 }
+            }
+        }
+
+        if state.apu.is_half_frame() {
+            if channel.length_counter != 0 && !channel.halt() {
+                channel.length_counter -= 1;
             }
         }
 
