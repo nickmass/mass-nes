@@ -22,6 +22,8 @@ pub fn run<T>(rom: T, frames: u32, condition: Condition) where T: AsRef<str> {
     let mut machine = Machine::new(Region::Ntsc, cart,
     |_| {
     },
+    |_| {
+    },
     || {
         *closed.lock().unwrap()
     },
