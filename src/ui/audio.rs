@@ -15,10 +15,13 @@ pub struct Audio {
 }
 
 impl Audio {
-    pub fn new() -> Audio {
+    pub fn new(sample_rate: u32) -> Audio {
         let endpoint = cpal::get_default_endpoint().unwrap();
-        let format = endpoint.get_supported_formats_list().unwrap().next().unwrap();
-
+        let format = endpoint.get_supported_formats_list().unwrap().filter(|x| {
+            x.samples_rate == cpal::SamplesRate(sample_rate) &&
+            x.data_type == cpal::SampleFormat::I16 &&
+            x.channels.len() == 1}).next().unwrap();
+        
         let channels = format.channels.len();
 
         let event_loop = cpal::EventLoop::new();

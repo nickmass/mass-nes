@@ -7,3 +7,4 @@ authors = ["Nick Massey <nickmass@nickmass.com>"]
 glium = "0.15"
 cpal = "0.3"
 futures = "0.1"
+blip_buf = "0.1"
