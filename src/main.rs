@@ -41,9 +41,8 @@ fn main() {
         let count = samples.len();
         
         for (i, v) in samples.iter().enumerate() {
-            let v = ((*v as i32) << 8) - std::i16::MAX as i32;
-            blip.add_delta(i as u32, v - delta);
-            delta = v;
+            blip.add_delta(i as u32, *v as i32 - delta);
+            delta = *v as i32;
         }
         blip.end_frame(count as u32);
         while blip.samples_avail() > 0 {

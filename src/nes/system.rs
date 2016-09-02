@@ -25,7 +25,7 @@ impl Region {
 
 pub struct Machine<FR, FA, FC, FI, I, FD> where 
     FR: FnMut(&[u16;256*240]), 
-    FA: FnMut(&[u8]), 
+    FA: FnMut(&[i16]), 
     FC: FnMut() -> bool, 
     FI: FnMut() -> I,
     FD: FnMut(&System, &mut SystemState),
@@ -42,7 +42,7 @@ pub struct Machine<FR, FA, FC, FI, I, FD> where
 
 impl<FR, FA, FC, FI, I, FD> Machine<FR, FA, FC, FI, I, FD> where 
     FR: FnMut(&[u16;256*240]),
-    FA: FnMut(&[u8]),
+    FA: FnMut(&[i16]),
     FC: FnMut() -> bool,
     FI: FnMut() -> I,
     FD: FnMut(&System, &mut SystemState),
@@ -75,7 +75,7 @@ impl<FR, FA, FC, FI, I, FD> Machine<FR, FA, FC, FI, I, FD> where
             self.system.ppu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
             if self.state.ppu.in_vblank && !last_vblank {
-                (self.on_audio)(&self.system.apu.get_samples(&self.system, &mut self.state));
+                (self.on_audio)(self.system.apu.get_samples(&self.system, &mut self.state));
                 (self.on_render)(&self.state.ppu.screen);
                 let input = (self.on_input)().to_byte();
                 self.state.input.input = input;

@@ -11,7 +11,7 @@ pub struct ApuState {
     five_step_mode: bool,
     irq_inhibit: bool,
     irq: bool,
-    pub samples: [u8; 29781],
+    pub samples: [i16; 29781],
     sample_index: usize,
 }
 
@@ -76,16 +76,32 @@ pub struct Apu {
     pub triangle: Triangle,
     pub noise: Noise,
     pub dmc: Dmc,
+    pulse_table: Vec<i16>,
+    tnd_table: Vec<i16>,
 }
 
 impl Apu {
     pub fn new(state: &mut SystemState) -> Apu {
+        let mut pulse_table = Vec::new();
+        for x in 0..32 {
+            let f_val = 95.52 / (8128.0 / (x as f64) + 100.0);
+            pulse_table.push(((f_val - 0.5) * ::std::i16::MAX as f64) as i16);
+        }
+
+        let mut tnd_table = Vec::new();
+        for x in 0..204 {
+            let f_val = 163.67 / (24329.0 / (x as f64) + 100.0);
+            tnd_table.push(((f_val - 0.5) * ::std::i16::MAX as f64) as i16);
+        }
+
         Apu {
             pulse_one: Pulse::new(PulseChannel::InternalOne),
             pulse_two: Pulse::new(PulseChannel::InternalTwo),
             triangle: Triangle::new(),
             noise: Noise::new(),
             dmc: Dmc::new(),
+            pulse_table: pulse_table,
+            tnd_table: tnd_table,
         }
     }
 
@@ -180,12 +196,15 @@ impl Apu {
         let noise = self.noise.tick(system, state);
         let dmc = self.dmc.tick(system, state);
 
-        state.apu.samples[state.apu.sample_index] = (pulse1 + pulse2 + triangle + noise + dmc); 
+        let pulse_out = self.pulse_table[(pulse1 + pulse2) as usize];
+        let tnd_out = self.tnd_table[((3 * triangle) + (2 * noise) + dmc) as usize];
+
+        state.apu.samples[state.apu.sample_index] = pulse_out + tnd_out;
         state.apu.sample_index += 1;
     }
     
     pub fn get_samples<'a>(&'a self, system: &'a System,
-                           state: &'a mut SystemState) -> &[u8] {
+                           state: &'a mut SystemState) -> &[i16] {
         let index = state.apu.sample_index;
         state.apu.sample_index = 0;
         &state.apu.samples[0..index]
