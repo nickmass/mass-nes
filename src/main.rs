@@ -7,7 +7,7 @@ extern crate blip_buf;
 
 use blip_buf::BlipBuf;
 const SAMPLE_RATE: u32 = 48000;
-const CLOCK_RATE: f64 = 28781.0 * 60.0;
+const CLOCK_RATE: f64 = 28780.5 * 60.0;
 
 mod nes;
 use nes::{Controller, Machine, Cartridge, Region};

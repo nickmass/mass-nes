@@ -1,6 +1,10 @@
 language: rust
 rust:
     - nightly
+addons:
+    apt:
+        packages:
+            - libasound2-dev
 os:
     - linux
     - osx
