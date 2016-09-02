@@ -1,6 +1,8 @@
 mod pulse;
+mod noise;
 
 pub use self::pulse::{Pulse, PulseChannel};
+pub use self::noise::Noise;
 
 use nes::system::{System, SystemState};
 use nes::cpu::Cpu;

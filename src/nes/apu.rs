@@ -1,5 +1,5 @@
 use nes::system::{System, SystemState};
-use nes::channel::{Channel, Pulse, PulseChannel};
+use nes::channel::{Channel, Pulse, PulseChannel, Noise};
 use nes::cpu::Cpu;
 
 pub const LENGTH_TABLE: [u8; 0x20] = [10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14,
@@ -73,6 +73,7 @@ impl ApuState {
 pub struct Apu {
     pub pulse_one: Pulse,
     pub pulse_two: Pulse,
+    pub noise: Noise,
 }
 
 impl Apu {
@@ -80,6 +81,7 @@ impl Apu {
         Apu {
             pulse_one: Pulse::new(PulseChannel::InternalOne),
             pulse_two: Pulse::new(PulseChannel::InternalTwo),
+            noise: Noise::new(),
         }
     }
 
@@ -93,6 +95,7 @@ impl Apu {
                 let mut val = 0;
                 if self.pulse_one.get_state(system, state) { val |= 0x01; }
                 if self.pulse_two.get_state(system, state) { val |= 0x02; }
+                if self.noise.get_state(system, state) { val |= 0x08; }
                 if state.apu.irq { val |= 0x40; }
                 state.apu.irq = false;
                 val
@@ -115,6 +118,11 @@ impl Apu {
                 } else {
                     self.pulse_two.disable(system, state);
                 }
+                if value & 0x8 != 0 {
+                    self.noise.enable(system, state);
+                } else {
+                    self.noise.disable(system, state);
+                }
             },
             0x4017 => {
                 state.apu.five_step_mode = value & 0x80 != 0;
@@ -129,7 +137,7 @@ impl Apu {
 
     pub fn tick(&self, system: &System, state: &mut SystemState) {
         state.apu.increment_frame_counter();
-        if !state.apu.five_step_mode && ! state.apu.irq_inhibit {
+        if !state.apu.five_step_mode && !state.apu.irq_inhibit {
             if state.apu.frame_counter == 0 || state.apu.frame_counter == 29828 ||
                     state.apu.frame_counter == 29829 {
                 state.apu.irq = true;
@@ -141,7 +149,8 @@ impl Apu {
 
         let pulse1 = self.pulse_one.tick(system, state);
         let pulse2 = self.pulse_two.tick(system, state);
-        state.apu.samples[state.apu.sample_index] = (pulse1 +  pulse2) * 4; 
+        let noise = self.noise.tick(system, state);
+        state.apu.samples[state.apu.sample_index] = (pulse1 +  pulse2 + noise) * 3; 
         state.apu.sample_index += 1;
     }
     
@@ -155,5 +164,6 @@ impl Apu {
     pub fn register(&self, state: &mut SystemState, cpu: &mut Cpu) {
         self.pulse_one.register(state, cpu);
         self.pulse_two.register(state, cpu);
+        self.noise.register(state, cpu);
     }
 }
