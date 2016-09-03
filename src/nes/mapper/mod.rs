@@ -24,6 +24,7 @@ pub trait Mapper {
     fn nt_read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8;
     fn nt_write(&self, system: &System, state: &mut SystemState, addr: u16, 
                 value: u8);
+    fn update_ppu_addr(&self, system: &System, state: &mut SystemState, addr: u16);
 }
 
 pub fn ines(ines_number: u8, state: &mut SystemState, cart: &Cartridge) -> Box<Mapper> {
@@ -79,4 +80,6 @@ impl Mapper for Null {
     fn nt_write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
         system.ppu.nametables.write(state, addr, value);
     }
+
+    fn update_ppu_addr(&self, system: &System, state: &mut SystemState, addr: u16) {}
 }

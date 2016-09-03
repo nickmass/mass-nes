@@ -6,9 +6,30 @@ pub const LENGTH_TABLE: [u8; 0x20] = [10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 
                                   12, 26, 14, 12, 16, 24, 18, 48, 20, 96, 22, 192,
                                   24, 72, 26, 16, 28, 32, 30];
 
+const FOUR_STEP_SEQ: &'static [u32] = &[7457, 14913, 22371, 29829, 29830];
+const FIVE_STEP_SEQ: &'static [u32] = &[7457, 14913, 22371, 37281, 37282];
+
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum SequenceMode {
+    FourStep,
+    FiveStep
+}
+
+impl SequenceMode {
+    fn steps(&self) -> &[u32] {
+        match *self {
+            SequenceMode::FourStep => FOUR_STEP_SEQ,
+            SequenceMode::FiveStep => FIVE_STEP_SEQ,
+        }
+    }
+}
+
 pub struct ApuState {
+    current_tick: u32,
+    reset_delay: u32,
     frame_counter: u32,
-    five_step_mode: bool,
+    sequence_mode: SequenceMode,
     irq_inhibit: bool,
     irq: bool,
     pub samples: [i16; 29781],
@@ -18,8 +39,10 @@ pub struct ApuState {
 impl Default for ApuState {
     fn default() -> ApuState {
         ApuState {
+            current_tick: 0,
+            reset_delay: 0,
             frame_counter: 0,
-            five_step_mode: false,
+            sequence_mode: SequenceMode::FourStep,
             irq_inhibit: false,
             irq: false,
             samples: [0; 29781],
@@ -30,42 +53,36 @@ impl Default for ApuState {
 
 impl ApuState {
     pub fn is_quarter_frame(&self) -> bool {
-        if self.five_step_mode {
-            self.frame_counter == 7457 ||
-                self.frame_counter == 14913||
-                self.frame_counter == 22371||
-                self.frame_counter == 37281
-        } else {
-            self.frame_counter == 7457 ||
-                self.frame_counter == 14913||
-                self.frame_counter == 22371||
-                self.frame_counter == 29829
-        }
+        let steps = self.sequence_mode.steps();
+        self.frame_counter == steps[0] ||
+        self.frame_counter == steps[1] ||
+        self.frame_counter == steps[2] ||
+        self.frame_counter == steps[3]
     }
 
     pub fn is_half_frame(&self) -> bool {
-        if self.five_step_mode {
-            self.frame_counter == 14913||
-                self.frame_counter == 37281
-        } else {
-            self.frame_counter == 14913||
-                self.frame_counter == 29829
+        let steps = self.sequence_mode.steps();
+        self.frame_counter == steps[1] ||
+        self.frame_counter == steps[3]
+    }
+
+    fn is_irq_frame(&self) -> bool {
+        match self.sequence_mode {
+            SequenceMode::FourStep => {
+                let steps = self.sequence_mode.steps();
+                !self.irq_inhibit &&
+                (self.frame_counter == steps[3] -1 ||
+                 self.frame_counter == steps[3]    ||
+                 self.frame_counter == 0)
+            },
+            SequenceMode::FiveStep => false,
         }
     }
     
     fn increment_frame_counter(&mut self) {
-        if self.five_step_mode {
-            if self.frame_counter >= 37282 {
-                self.frame_counter = 0;
-            } else {
-                self.frame_counter += 1;
-            }
-        } else {
-            if self.frame_counter >= 29830 {
-                self.frame_counter = 0;
-            } else {
-                self.frame_counter += 1;
-            }
+        self.frame_counter += 1;
+        if self.frame_counter == self.sequence_mode.steps()[4] {
+            self.frame_counter = 0;
         }
     }
 }
@@ -158,14 +175,22 @@ impl Apu {
                 }
             },
             0x4017 => {
-                state.apu.five_step_mode = value & 0x80 != 0;
+                state.apu.sequence_mode = match value & 0x80 {
+                    0 => SequenceMode::FourStep,
+                    _ => SequenceMode::FiveStep,
+                };
                 state.apu.irq_inhibit = value & 0x40 != 0;
                 if state.apu.irq_inhibit {
                     state.apu.irq = false
                 }
-                if state.apu.five_step_mode {
+                if state.apu.sequence_mode == SequenceMode::FiveStep {
                     self.forced_clock();
                 }
+                state.apu.reset_delay = if state.apu.current_tick & 1 == 0 {
+                    3
+                } else {
+                    4
+                };
             },
             _ => unreachable!(),
         }
@@ -179,15 +204,16 @@ impl Apu {
     }
 
     pub fn tick(&self, system: &System, state: &mut SystemState) {
+        state.apu.current_tick += 1;
         state.apu.increment_frame_counter();
-        if !state.apu.five_step_mode && !state.apu.irq_inhibit {
-            if state.apu.frame_counter == 0 || state.apu.frame_counter == 29828 ||
-                    state.apu.frame_counter == 29829 {
-                state.apu.irq = true;
-            }
-        }
+        if state.apu.is_irq_frame() { state.apu.irq = true; }
         if state.apu.irq {
             state.cpu.irq_req();
+        }
+
+        if state.apu.reset_delay != 0 {
+            state.apu.reset_delay -= 1;
+            if state.apu.reset_delay == 0 { state.apu.frame_counter = 0; }
         }
 
         let pulse1 = self.pulse_one.tick(system, state);

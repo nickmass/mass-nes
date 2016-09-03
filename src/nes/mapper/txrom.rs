@@ -9,6 +9,8 @@ use nes::mapper::Mapper;
 use std::cell::RefCell;
 
 pub struct TxromState {
+    current_tick: u64,
+    last_a12_low_tick: u64,
     prg: MappedMemory,
     chr: MappedMemory,
     chr_type: BankKind,
@@ -52,6 +54,8 @@ impl Txrom {
         prg.map(0x6000, 16, 0, BankKind::Ram);
 
         let rom_state = TxromState {
+            current_tick: 0,
+            last_a12_low_tick: 0,
             prg : prg,
             chr : chr,
             chr_type: chr_type,
@@ -84,7 +88,7 @@ impl Txrom {
     }
 
     fn read_ppu(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
-        //self.irq_tick(addr);
+        self.irq_tick(addr);
         self.state.borrow().chr.read(system, state, addr)
     }
 
@@ -132,14 +136,17 @@ impl Txrom {
     }
 
     fn write_ppu(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
-        //self.irq_tick(addr);
+        self.irq_tick(addr);
         self.state.borrow_mut().chr.write(system, state, addr, value);
     }
 
     fn irq_tick(&self, addr: u16) {
         let mut rom = self.state.borrow_mut();
         let a12 = addr >> 12 & 1 == 1;
-        if rom.was_a12_low && a12 {
+        if !rom.was_a12_low && !a12 {
+            rom.last_a12_low_tick = rom.current_tick;
+        }
+        if rom.was_a12_low && a12 && rom.current_tick - rom.last_a12_low_tick >= 5 {
             if rom.irq_counter == 0 || rom.irq_reload_pending {
                 rom.irq_counter = rom.irq_latch;
                 rom.irq_reload_pending = false;
@@ -243,7 +250,9 @@ impl Mapper for Txrom {
     }
 
     fn tick(&self, system: &System, state: &mut SystemState) {
-        if self.state.borrow().irq {
+        let mut rom = self.state.borrow_mut();
+        rom.current_tick += 1;
+        if rom.irq {
             state.cpu.irq_req();
         }
     }
@@ -260,5 +269,9 @@ impl Mapper for Txrom {
     fn nt_write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
         self.irq_tick(addr);
         system.ppu.nametables.write(state, addr, value);
+    }
+
+    fn update_ppu_addr(&self, system: &System, state: &mut SystemState, addr: u16) {
+        self.irq_tick(addr);
     }
 }

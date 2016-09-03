@@ -19,7 +19,7 @@ pub struct PpuState {
     data_read_buffer: u8,
 
     pub vram_addr: u16,
-    vram_addr_temp: u16,
+    pub vram_addr_temp: u16,
     vram_fine_x: u16,
 
     oam_addr: u8,
@@ -344,12 +344,14 @@ impl Ppu {
                 match state.ppu.stage {
                     Stage::Prerender(_,_) | Stage::Dot(_,_) |
                     Stage::Hblank(_,_) if state.ppu.is_rendering() => {
-                        self.horz_increment(state);
-                        self.vert_increment(state);
+                        self.horz_increment(system, state);
+                        self.vert_increment(system, state);
                     },
                     _ => {
                         state.ppu.vram_addr = state.ppu.vram_addr
                             .wrapping_add(state.ppu.vram_inc()) & 0x7fff;
+                        let addr = state.ppu.vram_addr;
+                        system.cartridge.mapper.update_ppu_addr(system, state, addr);
                     }
                 }
                 result
@@ -403,6 +405,8 @@ impl Ppu {
                     state.ppu.vram_addr_temp &= 0x7f00;
                     state.ppu.vram_addr_temp |= value as u16;
                     state.ppu.vram_addr = state.ppu.vram_addr_temp;
+                    let addr = state.ppu.vram_addr;
+                    system.cartridge.mapper.update_ppu_addr(system, state, addr);
                 } else {
                     state.ppu.vram_addr_temp &= 0x00ff;
                     state.ppu.vram_addr_temp |= ((value & 0x3f) as u16) << 8;
@@ -420,12 +424,14 @@ impl Ppu {
                 match state.ppu.stage {
                     Stage::Prerender(_,_) | Stage::Dot(_,_) |
                     Stage::Hblank(_,_) if state.ppu.is_rendering() => {
-                        self.horz_increment(state);
-                        self.vert_increment(state);
+                        self.horz_increment(system, state);
+                        self.vert_increment(system, state);
                     },
                     _ => {
                         state.ppu.vram_addr = state.ppu.vram_addr
                             .wrapping_add(state.ppu.vram_inc()) & 0x7fff;
+                        let addr = state.ppu.vram_addr;
+                        system.cartridge.mapper.update_ppu_addr(system, state, addr);
                     }
                 }
             },
@@ -466,17 +472,17 @@ impl Ppu {
             },
             Stage::Prerender(s, c) if c % 8 == 0 && c != 0 && c < 256 => {
                 self.load_bg_shifters(state);
-                self.horz_increment(state);
+                self.horz_increment(system, state);
             },
             Stage::Prerender(s, 256) => {
-                self.horz_increment(state);
-                self.vert_increment(state);
+                self.horz_increment(system, state);
+                self.vert_increment(system, state);
             },
             Stage::Prerender(s, 257) => {
-                self.horz_reset(state);
+                self.horz_reset(system, state);
             },
             Stage::Prerender(s, c) if c >= 280 && c < 304 => {
-                self.vert_reset(state);
+                self.vert_reset(system, state);
             },
             Stage::Prerender(s, c) if c  == 321 || c == 329 || c == 337 || c == 339 => {
                 self.fetch_nametable(system, state);
@@ -498,7 +504,7 @@ impl Ppu {
                     state.ppu.high_attr_shift <<= 8;
                 }
                 self.load_bg_shifters(state);
-                self.horz_increment(state);
+                self.horz_increment(system, state);
             },
             Stage::Prerender(s, 340) => {
                 //Skip tick on odd frames
@@ -520,7 +526,7 @@ impl Ppu {
             },
             Stage::Dot(s, c) if c % 8 == 0 && c != 0 => {
                 self.load_bg_shifters(state);
-                self.horz_increment(state);
+                self.horz_increment(system, state);
             },
             Stage::Hblank(s, c) if c  == 321 || c == 329 || c == 337 || c == 339 => {
                 self.fetch_nametable(system, state);
@@ -542,14 +548,14 @@ impl Ppu {
                     state.ppu.high_attr_shift <<= 8;
                 }
                 self.load_bg_shifters(state);
-                self.horz_increment(state);
+                self.horz_increment(system, state);
             },
             Stage::Hblank(s, 256) => {
-                self.horz_increment(state);
-                self.vert_increment(state);
+                self.horz_increment(system, state);
+                self.vert_increment(system, state);
             },
             Stage::Hblank(s, 257) => {
-                self.horz_reset(state);
+                self.horz_reset(system, state);
             },
             Stage::Vblank(241, 1) => {
                 state.ppu.in_vblank = true;
@@ -904,7 +910,7 @@ impl Ppu {
         state.ppu.line_oam_data[addr as usize] = 0xff;
     }
 
-    fn horz_increment(&self, state: &mut SystemState) {
+    fn horz_increment(&self,system: &System, state: &mut SystemState) {
         if !state.ppu.is_rendering() { return; }
         let mut addr = state.ppu.vram_addr;
         if addr & 0x001f == 31 {
@@ -916,7 +922,7 @@ impl Ppu {
         state.ppu.vram_addr = addr;
     }
 
-    fn vert_increment(&self, state: &mut SystemState) {
+    fn vert_increment(&self,system: &System, state: &mut SystemState) {
         if !state.ppu.is_rendering() { return; }
         let mut addr = state.ppu.vram_addr;
         if (addr & 0x7000) != 0x7000 {
@@ -938,7 +944,7 @@ impl Ppu {
         state.ppu.vram_addr = addr;
     }
 
-    fn horz_reset(&self, state: &mut SystemState) {
+    fn horz_reset(&self,system: &System, state: &mut SystemState) {
         if !state.ppu.is_rendering() { return; }
         let mut addr = state.ppu.vram_addr;
         let addr_t = state.ppu.vram_addr_temp;
@@ -948,7 +954,7 @@ impl Ppu {
         state.ppu.vram_addr = addr;
     }
 
-    fn vert_reset(&self, state: &mut SystemState) {
+    fn vert_reset(&self,system: &System, state: &mut SystemState) {
         if !state.ppu.is_rendering() { return; }
         let mut addr = state.ppu.vram_addr;
         let addr_t = state.ppu.vram_addr_temp;

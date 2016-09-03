@@ -134,7 +134,7 @@ impl Channel for Dmc {
         if channel.timer_counter != 0 {
             channel.timer_counter -= 1
         } else {
-            channel.timer_counter = channel.rate();
+            channel.timer_counter = channel.rate() - 1;
             if !channel.silence {
                 let offset = if channel.output_shifter & 1 == 1 {
                     if channel.output_value <= 125 { 2 } else { 0 }

@@ -32,6 +32,7 @@ struct PulseState {
     regs: [u8;4],
     current_tick: u64,
     forced_clock: bool,
+    last_tick: u64,
 }
 
 impl PulseState {
@@ -231,6 +232,7 @@ impl Channel for Pulse {
             if channel.length_counter != 0 && !channel.halt() {
                 channel.length_counter -= 1;
             }
+            
 
             if channel.sweep_reload {
                 if channel.sweep_divider == 0 {

@@ -110,4 +110,6 @@ impl Mapper for Cnrom {
     fn nt_write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
         system.ppu.nametables.write(state, addr, value);
     }
+
+    fn update_ppu_addr(&self, system: &System, state: &mut SystemState, addr: u16) {}
 }
