@@ -10,7 +10,7 @@ use std::cell::RefCell;
 
 pub struct TxromState {
     current_tick: u64,
-    last_a12_low_tick: u64,
+    last_a12_tick: u64,
     prg: MappedMemory,
     chr: MappedMemory,
     chr_type: BankKind,
@@ -23,7 +23,7 @@ pub struct TxromState {
     irq_latch: u8,
     irq_counter: u8,
     irq_reload_pending: bool,
-    was_a12_low: bool,
+    last_a12: bool,
     last: usize,
 }
 
@@ -55,7 +55,7 @@ impl Txrom {
 
         let rom_state = TxromState {
             current_tick: 0,
-            last_a12_low_tick: 0,
+            last_a12_tick: 0,
             prg : prg,
             chr : chr,
             chr_type: chr_type,
@@ -68,7 +68,7 @@ impl Txrom {
             irq_latch: 0,
             irq_counter: 0,
             irq_reload_pending: false,
-            was_a12_low: false,
+            last_a12: false,
             last: (cartridge.prg_rom.len() / 0x2000) -1 
         };
         let rom = Txrom {
@@ -88,7 +88,7 @@ impl Txrom {
     }
 
     fn read_ppu(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
-        self.irq_tick(addr);
+        self.irq_tick(system,state,addr);
         self.state.borrow().chr.read(system, state, addr)
     }
 
@@ -121,8 +121,12 @@ impl Txrom {
                 rom.ram_protect = value & 0x40 != 0;
                 rom.ram_enabled = value & 0x80 != 0;
             },
-            0xc000 => rom.irq_latch = value,
-            0xc001 => rom.irq_reload_pending = true,
+            0xc000 => {
+                rom.irq_latch = value;
+            },
+            0xc001 => {
+                rom.irq_reload_pending = true;
+            },
             0xe000 => {
                 rom.irq = false;
                 rom.irq_enabled = false;
@@ -136,28 +140,40 @@ impl Txrom {
     }
 
     fn write_ppu(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
-        self.irq_tick(addr);
+        self.irq_tick(system,state,addr);
         self.state.borrow_mut().chr.write(system, state, addr, value);
     }
 
-    fn irq_tick(&self, addr: u16) {
+    fn irq_tick(&self, system: &System, state: &SystemState, addr: u16) {
         let mut rom = self.state.borrow_mut();
-        let a12 = addr >> 12 & 1 == 1;
-        if !rom.was_a12_low && !a12 {
-            rom.last_a12_low_tick = rom.current_tick;
+        let a12 = addr & 0x1000 != 0;
+        let mut clock = !rom.last_a12 && a12;
+        if clock {
+            if rom.current_tick - rom.last_a12_tick < 5 {
+                clock = false
+            }
+            rom.last_a12_tick = rom.current_tick;
         }
-        if rom.was_a12_low && a12 && rom.current_tick - rom.last_a12_low_tick >= 5 {
-            if rom.irq_counter == 0 || rom.irq_reload_pending {
+        rom.last_a12 = a12;
+        let mut is_zero = false;
+        if clock {
+            if rom.irq_reload_pending {
                 rom.irq_counter = rom.irq_latch;
                 rom.irq_reload_pending = false;
+                if rom.irq_counter == 0 {
+                    is_zero = true;
+                }
             } else {
                 rom.irq_counter -= 1;
-                if rom.irq_counter == 0 && rom.irq_enabled {
-                    rom.irq = true;
+                if rom.irq_counter == 0 {
+                    is_zero = true;
+                    rom.irq_reload_pending = true;
                 }
             }
+            if is_zero && rom.irq_enabled {
+                rom.irq = true;
+            }
         }
-        rom.was_a12_low = !a12;
     }
 
     fn sync(&self, rom: &mut TxromState) {
@@ -262,16 +278,16 @@ impl Mapper for Txrom {
     }
 
     fn nt_read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
-        self.irq_tick(addr);
+        self.irq_tick(system,state,addr);
         system.ppu.nametables.read(state, addr)
     }
 
     fn nt_write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
-        self.irq_tick(addr);
+        self.irq_tick(system,state,addr);
         system.ppu.nametables.write(state, addr, value);
     }
 
     fn update_ppu_addr(&self, system: &System, state: &mut SystemState, addr: u16) {
-        self.irq_tick(addr);
+        self.irq_tick(system,state,addr);
     }
 }

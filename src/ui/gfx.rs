@@ -26,7 +26,7 @@ pub struct GliumRenderer {
 impl GliumRenderer {
     pub fn new(pal: &[u8; 1536]) -> GliumRenderer {
         let display = glium::glutin::WindowBuilder::new()
-            .with_dimensions(512, 480)
+            .with_dimensions(256 * 3, 240 * 3)
             .with_title(format!("Mass NES"))
             .build_glium()
             .unwrap();

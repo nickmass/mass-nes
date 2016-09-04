@@ -191,6 +191,15 @@ impl PpuState {
     }
 
     fn oam_address(&self) -> u8 { self.regs[3] }
+
+    pub fn scanline(&self) -> (u32, u32) {
+        match self.stage {
+            Stage::Prerender(s,c) => (s,c),
+            Stage::Vblank(s,c) => (s,c),
+            Stage::Hblank(s,c) => (s,c),
+            Stage::Dot(s,c) => (s,c),
+        }
+    }
 }
 
 enum Stage {
@@ -605,7 +614,7 @@ impl Ppu {
                 self.fetch_nametable(system, state);
             },
             Stage::Hblank(s, d) if d >=257 && d < 320 && d % 8 == 3 => {
-               //Garbage Nametable 
+                //Garbage Nametable 
                 self.fetch_attribute(system, state);
             },
             Stage::Hblank(s, d) if d >=257 && d < 320 && d % 8 == 5 => {

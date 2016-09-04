@@ -28,6 +28,8 @@ pub struct CpuState {
     oam_dma_addr: u16,
     pending_irq: bool,
     pending_dmc: u32, 
+    irq_delay: u32,
+    irq_set_delay: u32,
     dmc_addr: u16,
     pending_nmi: Option<u32>,
 }
@@ -253,6 +255,10 @@ impl Cpu {
             Stage::Irq(4) => {
                 let val = state.cpu.reg_p() | 0x20;
                 self.push_stack(system, state, val);
+                if state.cpu.pending_nmi.is_some() {
+                    state.cpu.pending_nmi = None;
+                    state.cpu.stage = Stage::Nmi(4);
+                }
             },
             Stage::Irq(5) => {
                 let val = self.bus.read(system, state, 0xfffe);
@@ -318,12 +324,17 @@ impl Cpu {
             let val = state.cpu.pending_nmi.unwrap();
             state.cpu.pending_nmi = Some(val - 1);
         }
-        if state.cpu.pending_irq && state.cpu.flag_i == 0 {
+        if state.cpu.pending_irq &&
+           (state.cpu.flag_i == 0 || state.cpu.irq_set_delay != 0) &&
+           state.cpu.irq_delay == 0 {
+            if state.cpu.irq_set_delay != 0 { state.cpu.irq_set_delay -= 1; }
             state.cpu.stage = Stage::Irq(0);
             state.cpu.pending_irq = false;
             self.irq(system, state);
             return;
         }
+        if state.cpu.irq_set_delay != 0 { state.cpu.irq_set_delay -= 1; }
+        if state.cpu.irq_delay != 0 { state.cpu.irq_delay -= 1; }
         if state.cpu.pending_oam_dma.is_some() {
             state.cpu.oam_dma_addr = (state.cpu.pending_oam_dma.unwrap() as u16) << 8;
             state.cpu.pending_oam_dma = None;
@@ -869,6 +880,10 @@ impl Cpu {
                 let value = state.cpu.reg_p() | 0x30;
                 self.push_stack(system, state, value);
                 state.cpu.flag_i = 1;
+                if state.cpu.pending_nmi.is_some() {
+                    state.cpu.pending_nmi = None;
+                    state.cpu.stage = Stage::Nmi(4);
+                }
                 StageResult::Continue
             },
             4 => {
@@ -900,6 +915,9 @@ impl Cpu {
 
     fn inst_cli(&self, system: &System, state: &mut SystemState)
     -> StageResult {
+        if state.cpu.flag_i == 1 {
+            state.cpu.irq_delay = 1;
+        }
         state.cpu.flag_i = 0;
         StageResult::Next
     }
@@ -1175,6 +1193,12 @@ impl Cpu {
             },
             1 => {
                 let value = self.pop_stack(system, state) as u32;
+                if state.cpu.flag_i == 1 && value & 0x04 == 0 {
+                    state.cpu.irq_delay = 1;
+                }
+                if state.cpu.flag_i == 0 && value & 0x04 != 0 {
+                    state.cpu.irq_set_delay = 1;
+                }
                 state.cpu.set_reg_p(value);
                 StageResult::Done
             },
@@ -1341,6 +1365,9 @@ impl Cpu {
 
     fn inst_sei(&self, system: &System, state: &mut SystemState)
     -> StageResult {
+        if state.cpu.flag_i == 0 {
+            state.cpu.irq_set_delay = 1;
+        }
         state.cpu.flag_i = 1;
         StageResult::Next 
     }

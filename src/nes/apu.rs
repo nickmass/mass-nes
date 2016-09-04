@@ -41,9 +41,9 @@ impl Default for ApuState {
         ApuState {
             current_tick: 0,
             reset_delay: 0,
-            frame_counter: 0,
+            frame_counter: 6,
             sequence_mode: SequenceMode::FourStep,
-            irq_inhibit: false,
+            irq_inhibit: true, //TODO - This should be false, but SMB3 wont boot if it is
             irq: false,
             samples: [0; 29781],
             sample_index: 0,
