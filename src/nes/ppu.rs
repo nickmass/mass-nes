@@ -684,13 +684,13 @@ impl Ppu {
         let mut sprite_zero = false;
         let mut sprite_pixel = 0;
         let mut behind_bg = false;
-        let mut x = 8;
-        loop {
-            if !state.ppu.is_sprites_enabled() || 
-                (!state.ppu.is_left_sprites() && dot < 8) { break; }
-            x -= 1;
-            if state.ppu.sprite_active[x] > 0 {
-                if state.ppu.sprite_active[x] <= 8 {
+        if state.ppu.is_sprites_enabled() {
+            for x in 0..8 {
+                if state.ppu.sprite_x[x] == 0 {
+                    state.ppu.sprite_active[x] = 1;
+                }
+                if state.ppu.sprite_active[x] > 0 && 
+                    state.ppu.sprite_active[x] <= 8 {
                     let attr = state.ppu.sprite_attr[x];
                     let high = state.ppu.sprite_pattern_high[x];
                     let low = state.ppu.sprite_pattern_low[x];
@@ -698,15 +698,17 @@ impl Ppu {
                     let pal = (attr & 0x3) << 2;
 
                     let pal_bit = if flip_horz { 0x1 } else {0x80};
-                    let color = if high & pal_bit != 0 { 2 } else { 0 } |
-                                if low & pal_bit != 0 { 1 } else { 0 };
-                    
-                    if color != 0 {
-                        sprite_zero = x == 0 && state.ppu.sprite_zero_on_line;
+                    let mut color = if high & pal_bit != 0 { 2 } else { 0 } |
+                        if low & pal_bit != 0 { 1 } else { 0 };
+
+                    if !state.ppu.is_left_sprites() && dot < 8 { color = 0; }
+
+                    if color != 0 && sprite_pixel == 0 {
+                        sprite_zero = x == 0 && state.ppu.sprite_zero_on_line && dot < 255;
                         sprite_pixel = color | pal;
                         behind_bg  = attr & 0x20 != 0;
                     }
-                    
+
                     state.ppu.sprite_active[x] += 1;
 
                     if flip_horz {
@@ -717,17 +719,14 @@ impl Ppu {
                         state.ppu.sprite_pattern_low[x] <<= 1;
                     }
                 }
-            } else {
-                if state.ppu.sprite_x[x] != 0 && state.ppu.sprite_x[x] != 0xff {
-                    state.ppu.sprite_x[x] -= 1;
-                }
-                if state.ppu.sprite_x[x] == 0 {
-                    if dot != 254 {
+            }
+            for x in 0..8 {
+                if state.ppu.sprite_active[x] == 0 {
+                    if state.ppu.sprite_x[x] != 0 {
+                        state.ppu.sprite_x[x] -= 1;
                     }
-                    state.ppu.sprite_active[x] = 1;
                 }
             }
-            if x == 0 { break; }
         }
 
         let bg_colored = color != 0 && (dot > 7 || state.ppu.is_left_background()) &&
@@ -771,16 +770,19 @@ impl Ppu {
         state.ppu.low_bg_shift <<= 1;
         state.ppu.high_bg_shift <<= 1;
     }
+
+    fn sprite_on_line(&self, system: &System, state: &SystemState, sprite_y: u8, 
+                      scanline: u32) -> bool {
+        if sprite_y > 239 { return false; }
+        if state.ppu.is_tall_sprites() {
+            (sprite_y as u32)+ 16 > scanline && (sprite_y as u32) <= scanline
+        } else {
+            (sprite_y as u32)+ 8 > scanline && (sprite_y as u32) <= scanline
+        }
+    }
+
     fn sprite_fetch(&self, system: &System, state: &mut SystemState, scanline: u32, high: bool) {
         if !state.ppu.is_rendering() { return; }
-        let is_tall = state.ppu.is_tall_sprites();
-        let is_on_line = |sprite_y, scanline| {
-            if is_tall {
-                (sprite_y as u32)+ 16 > scanline && (sprite_y as u32) <= scanline
-            } else {
-                (sprite_y as u32)+ 8 > scanline && (sprite_y as u32) <= scanline
-            }
-        };
         let index = state.ppu.sprite_render_index;
         let sprite_y = state.ppu.line_oam_data[(index * 4)];
         let sprite_tile = state.ppu.line_oam_data[(index * 4) + 1] as u16;
@@ -819,12 +821,16 @@ impl Ppu {
         if high {
             state.ppu.sprite_pattern_high[index]
                 = self.bus.read(system, state, tile_addr | 0x08);
-            if !is_on_line(sprite_y, scanline){state.ppu.sprite_pattern_high[index] = 0};
+            if !self.sprite_on_line(system, state, sprite_y, scanline) {
+                state.ppu.sprite_pattern_high[index] = 0;
+            }
             state.ppu.sprite_render_index += 1;
         } else {
             state.ppu.sprite_pattern_low[index]
                 = self.bus.read(system, state, tile_addr);
-            if !is_on_line(sprite_y, scanline){state.ppu.sprite_pattern_low[index] = 0};
+            if !self.sprite_on_line(system, state, sprite_y, scanline) {
+                state.ppu.sprite_pattern_low[index] = 0;
+            }
         }
     }
 
@@ -836,14 +842,6 @@ impl Ppu {
     fn sprite_eval(&self, system: &System, state: &mut SystemState, scanline: u32) {
         if !state.ppu.is_rendering() { return; }
         if state.ppu.sprite_read_loop { return; }
-        let is_tall = state.ppu.is_tall_sprites();
-        let is_on_line = |sprite_y, scanline| {
-            if is_tall {
-                (sprite_y as u32)+ 16 > scanline && (sprite_y as u32) <= scanline
-            } else {
-                (sprite_y as u32)+ 8 > scanline && (sprite_y as u32) <= scanline
-            }
-        };
 
         if !state.ppu.block_oam_writes {
             state.ppu.line_oam_data[state.ppu.line_oam_index] =
@@ -863,7 +861,8 @@ impl Ppu {
                 }
                 state.ppu.sprite_reads -= 1;
             } else {
-                if is_on_line(state.ppu.next_sprite_byte, scanline) {
+                if self.sprite_on_line(system, state,state.ppu.next_sprite_byte,
+                                       scanline) {
                         state.ppu.sprite_overflow = true;
                         state.ppu.sprite_m += 1;
                         state.ppu.sprite_m &= 3;
@@ -884,12 +883,17 @@ impl Ppu {
                 state.ppu.sprite_m &= 3;
                 state.ppu.line_oam_index += 1;
                 state.ppu.sprite_reads -= 1;    
-            } else if is_on_line(state.ppu.next_sprite_byte, scanline) {
-                if state.ppu.sprite_n == 0 { state.ppu.sprite_zero_on_next_line = true; }
+                if state.ppu.sprite_reads == 0 {
+                    state.ppu.found_sprites += 1;
+                }
+            } else if self.sprite_on_line(system, state, state.ppu.next_sprite_byte,
+                                          scanline) {
+                if state.ppu.sprite_n == 0 {
+                    state.ppu.sprite_zero_on_next_line = true; 
+                }
                 state.ppu.sprite_m += 1;
                 state.ppu.sprite_reads = 3;
                 state.ppu.line_oam_index += 1;
-                state.ppu.found_sprites += 1;
             }
             if state.ppu.sprite_reads == 0 {
                 state.ppu.sprite_n += 1;
