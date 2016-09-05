@@ -110,7 +110,7 @@ impl Channel for Triangle {
             channel.timer_counter -= 1;
         }
             
-        if state.apu.is_quarter_frame() || channel.forced_clock {
+        if state.apu.is_quarter_frame(system) || channel.forced_clock {
             if channel.current_tick & 1 == 0 {
                 if channel.linear_reload {
                     channel.linear_counter = channel.linear_load();
@@ -123,7 +123,7 @@ impl Channel for Triangle {
             }
         }            
 
-        if state.apu.is_half_frame() || channel.forced_clock {
+        if state.apu.is_half_frame(system) || channel.forced_clock {
             if channel.length_counter != 0 && !channel.halt() {
                 channel.length_counter -= 1;
             }

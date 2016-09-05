@@ -31,9 +31,8 @@ impl DmcState {
         self.regs[0] & 0x40 != 0
     }
 
-    fn rate(&self) -> u16 {
-        let rates = [428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128,
-                    106, 84, 72, 54];
+    fn rate(&self, system: &System) -> u16 {
+        let rates = system.region.dmc_rates();
         rates[(self.regs[0] & 0xf) as usize]
     }
 
@@ -134,7 +133,7 @@ impl Channel for Dmc {
         if channel.timer_counter != 0 {
             channel.timer_counter -= 1
         } else {
-            channel.timer_counter = channel.rate() - 1;
+            channel.timer_counter = channel.rate(system) - 1;
             if !channel.silence {
                 let offset = if channel.output_shifter & 1 == 1 {
                     if channel.output_value <= 125 { 2 } else { 0 }

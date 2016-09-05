@@ -209,7 +209,7 @@ impl Channel for Pulse {
             }
         }
 
-        if state.apu.is_quarter_frame() || channel.forced_clock {
+        if state.apu.is_quarter_frame(system) || channel.forced_clock {
             if channel.envelope_start {
                 channel.envelope_start = false;
                 channel.decay_counter = 0xf;
@@ -228,7 +228,7 @@ impl Channel for Pulse {
             }
         }
 
-        if state.apu.is_half_frame() || channel.forced_clock {
+        if state.apu.is_half_frame(system) || channel.forced_clock {
             if channel.length_counter != 0 && !channel.halt() {
                 channel.length_counter -= 1;
             }

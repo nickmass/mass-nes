@@ -33,7 +33,9 @@ fn main() {
    
     let mut delta = 0;
     let mut blip = BlipBuf::new(sample_rate / 30);
-    blip.set_rates(CLOCK_RATE, sample_rate as f64);
+    //TODO - Should be region.refresh_rate instead of 60.0.
+    //Currently we are syncing to computer vsync instead of console framerate
+    blip.set_rates(region.frame_ticks() * 60.0, sample_rate as f64);
 
     let mut machine = Machine::new(region, cart, |screen| {
         renderer.borrow_mut().render(screen);

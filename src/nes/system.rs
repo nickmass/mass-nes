@@ -14,14 +14,103 @@ pub enum Region {
     Pal,
 }
 impl Region {
+    pub fn frame_ticks(&self) -> f64 {
+        match *self {
+            Region::Ntsc => 29780.5,
+            Region::Pal => 33247.5,
+        }
+    }
+
     pub fn default_palette(&self) -> &'static [u8; 1536] {
         match *self {
             Region::Ntsc => include_bytes!("default.pal"),
             Region::Pal => include_bytes!("default.pal"),
         }
     }
+
+    pub fn vblank_line(&self) -> u32 {
+        match *self {
+            Region::Ntsc => 240,
+            Region::Pal => 239,
+        }
+    }
+
+    pub fn prerender_line(&self) -> u32 {
+        match *self {
+            Region::Ntsc => 261,
+            Region::Pal => 310,
+        }
+    }
+
+    pub fn uneven_frames(&self) -> bool {
+        match *self {
+            Region::Ntsc => true,
+            Region::Pal => false,
+        }
+    }
+
+    pub fn emph_bits(&self) -> EmphMode {
+        match *self {
+            Region::Ntsc => EmphMode::Bgr,
+            Region::Pal => EmphMode::Brg,
+        }
+    }
+
+    pub fn extra_ppu_tick(&self) -> bool {
+        match *self {
+            Region::Ntsc => false,
+            Region::Pal => true,
+        }
+    }
+
+    pub fn refresh_rate(&self) -> f32 {
+        match *self {
+            Region::Ntsc => 60.0988,
+            Region::Pal => 50.007,
+        }
+    }
+
+    pub fn five_step_seq(&self) -> &'static [u32] {
+        match *self {
+            Region::Ntsc => FIVE_STEP_SEQ_NTSC,
+            Region::Pal => FIVE_STEP_SEQ_PAL,
+        }
+    }
+
+    pub fn four_step_seq(&self) -> &'static [u32] {
+        match *self {
+            Region::Ntsc => FOUR_STEP_SEQ_NTSC,
+            Region::Pal => FOUR_STEP_SEQ_PAL,
+        }
+    }
+
+    pub fn dmc_rates(&self) -> &'static [u16] {
+        match *self {
+            Region::Ntsc => DMC_RATES_NTSC,
+            Region::Pal => DMC_RATES_PAL,
+        }
+    }
+
 }
 
+const FIVE_STEP_SEQ_NTSC: &'static [u32] = &[7457, 14913, 22371, 37281, 37282];
+const FIVE_STEP_SEQ_PAL: &'static [u32] = &[8314, 16628, 24940, 33254, 41566];
+
+const FOUR_STEP_SEQ_NTSC: &'static [u32] = &[7457, 14913, 22371, 29829, 29830];
+const FOUR_STEP_SEQ_PAL: &'static [u32] = &[8314, 16626, 24940, 33254, 33255];
+
+const DMC_RATES_NTSC: &'static [u16] = &[428, 380, 340, 320, 286, 254, 226, 214,
+                                        190, 160, 142, 128, 106, 84, 72, 54];
+const DMC_RATES_PAL: &'static [u16] = &[398, 354, 316, 298, 276, 236, 210, 198,
+                                        176, 148, 132, 118, 98, 78, 66, 50];
+
+
+
+
+pub enum EmphMode {
+    Bgr,
+    Brg,
+}
 
 pub struct Machine<FR, FA, FC, FI, I, FD> where 
     FR: FnMut(&[u16;256*240]), 
@@ -67,6 +156,7 @@ impl<FR, FA, FC, FI, I, FD> Machine<FR, FA, FC, FI, I, FD> where
     pub fn run(&mut self) {
         self.system.cpu.power(&self.system, &mut self.state);
         let mut last_vblank = false;
+        let mut cycle: u64 = 0;
         loop {
             self.system.cpu.tick(&self.system, &mut self.state);
             self.system.apu.tick(&self.system, &mut self.state);
@@ -74,6 +164,10 @@ impl<FR, FA, FC, FI, I, FD> Machine<FR, FA, FC, FI, I, FD> where
             self.system.ppu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
+            if self.system.region.extra_ppu_tick() && cycle % 5 == 0 {
+                self.system.ppu.tick(&self.system, &mut self.state);
+            }
+            cycle += 1;
             if self.state.ppu.in_vblank && !last_vblank {
                 (self.on_audio)(self.system.apu.get_samples(&self.system, &mut self.state));
                 (self.on_render)(&self.state.ppu.screen);
@@ -101,7 +195,7 @@ pub struct SystemState {
 }
 
 pub struct System {
-    region: Region,
+    pub region: Region,
     pub ppu: Ppu,
     pub cpu: Cpu,
     pub apu: Apu,

@@ -2,13 +2,10 @@ use nes::system::{System, SystemState};
 use nes::channel::{Channel, Pulse, PulseChannel, Triangle, Noise, Dmc};
 use nes::cpu::Cpu;
 
+//TODO - Is this table the same for both PAL and NTSC?
 pub const LENGTH_TABLE: [u8; 0x20] = [10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14,
                                   12, 26, 14, 12, 16, 24, 18, 48, 20, 96, 22, 192,
                                   24, 72, 26, 16, 28, 32, 30];
-
-const FOUR_STEP_SEQ: &'static [u32] = &[7457, 14913, 22371, 29829, 29830];
-const FIVE_STEP_SEQ: &'static [u32] = &[7457, 14913, 22371, 37281, 37282];
-
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum SequenceMode {
@@ -17,10 +14,10 @@ enum SequenceMode {
 }
 
 impl SequenceMode {
-    fn steps(&self) -> &[u32] {
+    fn steps(&self, system: &System) -> &[u32] {
         match *self {
-            SequenceMode::FourStep => FOUR_STEP_SEQ,
-            SequenceMode::FiveStep => FIVE_STEP_SEQ,
+            SequenceMode::FourStep => system.region.four_step_seq(),
+            SequenceMode::FiveStep => system.region.five_step_seq(),
         }
     }
 }
@@ -32,7 +29,7 @@ pub struct ApuState {
     sequence_mode: SequenceMode,
     irq_inhibit: bool,
     irq: bool,
-    pub samples: [i16; 29781],
+    samples: [i16; 33248], //Max cycles for the longer pal frame
     sample_index: usize,
 }
 
@@ -45,31 +42,31 @@ impl Default for ApuState {
             sequence_mode: SequenceMode::FourStep,
             irq_inhibit: true, //TODO - This should be false, but SMB3 wont boot if it is
             irq: false,
-            samples: [0; 29781],
+            samples: [0; 33248],
             sample_index: 0,
         }
     }
 }
 
 impl ApuState {
-    pub fn is_quarter_frame(&self) -> bool {
-        let steps = self.sequence_mode.steps();
+    pub fn is_quarter_frame(&self, system: &System) -> bool {
+        let steps = self.sequence_mode.steps(system);
         self.frame_counter == steps[0] ||
         self.frame_counter == steps[1] ||
         self.frame_counter == steps[2] ||
         self.frame_counter == steps[3]
     }
 
-    pub fn is_half_frame(&self) -> bool {
-        let steps = self.sequence_mode.steps();
+    pub fn is_half_frame(&self, system: &System) -> bool {
+        let steps = self.sequence_mode.steps(system);
         self.frame_counter == steps[1] ||
         self.frame_counter == steps[3]
     }
 
-    fn is_irq_frame(&self) -> bool {
+    fn is_irq_frame(&self, system: &System) -> bool {
         match self.sequence_mode {
             SequenceMode::FourStep => {
-                let steps = self.sequence_mode.steps();
+                let steps = self.sequence_mode.steps(system);
                 !self.irq_inhibit &&
                 (self.frame_counter == steps[3] -1 ||
                  self.frame_counter == steps[3]    ||
@@ -79,9 +76,9 @@ impl ApuState {
         }
     }
     
-    fn increment_frame_counter(&mut self) {
+    fn increment_frame_counter(&mut self, system: &System) {
         self.frame_counter += 1;
-        if self.frame_counter == self.sequence_mode.steps()[4] {
+        if self.frame_counter == self.sequence_mode.steps(system)[4] {
             self.frame_counter = 0;
         }
     }
@@ -205,8 +202,8 @@ impl Apu {
 
     pub fn tick(&self, system: &System, state: &mut SystemState) {
         state.apu.current_tick += 1;
-        state.apu.increment_frame_counter();
-        if state.apu.is_irq_frame() { state.apu.irq = true; }
+        state.apu.increment_frame_counter(system);
+        if state.apu.is_irq_frame(system) { state.apu.irq = true; }
         if state.apu.irq {
             state.cpu.irq_req();
         }
