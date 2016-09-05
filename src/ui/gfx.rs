@@ -157,3 +157,84 @@ impl GliumRenderer {
         self.closed
     }
 }
+
+use std::sync::mpsc::{Sender, Receiver, channel, TryRecvError};
+
+pub struct Renderer {
+    tx: Sender<Box<[u16; 256*240]>>,
+    input_rx: Receiver<(bool, [bool; 8])>,
+    closed: bool,
+    input: [bool; 8],
+}
+
+impl Renderer {
+    pub fn new(pal: &[u8; 1536]) -> Renderer {
+        let pal = *pal;
+        let (tx, rx) = channel();
+
+        let (input_tx, input_rx) = channel();
+        
+        ::std::thread::spawn(move || {
+            let mut gl = GliumRenderer::new(&pal);
+            
+            loop {
+                //Drop frames until we get to the most recent
+                let mut frame: Option<Box<_>> = None;
+                let mut empty = false;
+                while !empty {
+                    match rx.try_recv() {
+                        Ok(f) => frame = Some(f),
+                        Err(TryRecvError::Empty) => empty = true,
+                        Err(TryRecvError::Disconnected) => return,
+                    }
+                }
+                
+
+                if frame.is_some() {
+                    gl.render(&*frame.as_ref().unwrap());
+                    let _ = input_tx.send((gl.is_closed(), gl.get_input())).unwrap();
+                }
+            }
+        });
+
+        Renderer {
+            tx: tx,
+            input_rx: input_rx,
+            closed: false,
+            input: [false; 8],
+        }
+    }
+
+    fn process_input(&mut self) { 
+        let mut input = None;
+        let mut empty = false;
+        while !empty {
+            match self.input_rx.try_recv() {
+                Ok(i) => input = Some(i),
+                Err(TryRecvError::Empty) => empty = true,
+                Err(TryRecvError::Disconnected) => return,
+            }
+        }
+
+        if input.is_none() { return; }
+        let input = input.unwrap();
+        self.closed = input.0;
+        self.input = input.1;
+    }
+
+
+    pub fn add_frame(&mut self, frame: &[u16; 256*240]) {
+        let frame = Box::new(*frame);
+        let _ = self.tx.send(frame).unwrap();
+        self.process_input();
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.closed
+    }
+
+    pub fn get_input(&self) -> [bool;8] {
+        self.input
+    }
+}
+

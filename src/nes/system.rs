@@ -63,7 +63,7 @@ impl Region {
         }
     }
 
-    pub fn refresh_rate(&self) -> f32 {
+    pub fn refresh_rate(&self) -> f64 {
         match *self {
             Region::Ntsc => 60.0988,
             Region::Pal => 50.007,

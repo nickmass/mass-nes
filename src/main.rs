@@ -7,14 +7,13 @@ extern crate blip_buf;
 
 use blip_buf::BlipBuf;
 
-const CLOCK_RATE: f64 = 29780.5 * 60.0;
-
 mod nes;
 use nes::{Controller, Machine, Cartridge, Region};
 
 mod ui;
-use ui::gfx::GliumRenderer;
+use ui::gfx::Renderer;
 use ui::audio::Audio;
+use ui::sync::FrameSync;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -27,18 +26,21 @@ fn main() {
     let pal = region.default_palette();
     let cart = Cartridge::load(&mut file).unwrap();
     
-    let renderer = Rc::new(RefCell::new(GliumRenderer::new(pal)));
+    let window = Rc::new(RefCell::new(Renderer::new(pal)));
     let mut audio = Audio::new();
+    
     let sample_rate = audio.sample_rate();
-   
     let mut delta = 0;
     let mut blip = BlipBuf::new(sample_rate / 30);
-    //TODO - Should be region.refresh_rate instead of 60.0.
-    //Currently we are syncing to computer vsync instead of console framerate
-    blip.set_rates(region.frame_ticks() * 60.0, sample_rate as f64);
-
+    blip.set_rates(region.frame_ticks() * region.refresh_rate(), sample_rate as f64);
+    
+    let mut frame_sync = FrameSync::new(region.refresh_rate());
+    frame_sync.begin_frame();
+    
     let mut machine = Machine::new(region, cart, |screen| {
-        renderer.borrow_mut().render(screen);
+        window.borrow_mut().add_frame(screen);
+        frame_sync.end_frame();
+        frame_sync.begin_frame();
     }, |samples| {
         let count = samples.len();
         
@@ -53,9 +55,9 @@ fn main() {
             audio.add_samples(buf[0..count].to_vec());
         }
     }, || {
-        renderer.borrow().is_closed()
+        window.borrow().is_closed()
     }, || {
-        let input = renderer.borrow().get_input();
+        let input = window.borrow().get_input();
         Controller {
             a: input[0],
             b: input[1],
