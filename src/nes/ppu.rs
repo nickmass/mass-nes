@@ -68,6 +68,7 @@ pub struct PpuState {
     sprite_render_index: usize,
 
     pub nametables: NametablesState,
+    reset_delay: u32,
 }
 
 impl Default for PpuState {
@@ -138,6 +139,7 @@ impl Default for PpuState {
             sprite_render_index: 0,
 
             nametables: Default::default(),
+            reset_delay: 0,
         }
     }
 }
@@ -285,6 +287,28 @@ impl Ppu {
         ppu
     }
 
+    pub fn power(&self, system: &System, state: &mut SystemState) {
+        self.write(system, state, 0x2000, 0);
+        self.write(system, state, 0x2001, 0);
+        self.write(system, state, 0x2002, 0xa0);
+        self.write(system, state, 0x2003, 0);
+        self.write(system, state, 0x2005, 0);
+        self.write(system, state, 0x2005, 0);
+        self.write(system, state, 0x2006, 0);
+        self.write(system, state, 0x2006, 0);
+        state.ppu.data_read_buffer = 0;
+        state.ppu.reset_delay = 29658 * 3;
+    }
+
+    pub fn reset(&self, system: &System, state: &mut SystemState) {
+        self.write(system, state, 0x2000, 0);
+        self.write(system, state, 0x2001, 0);
+        self.write(system, state, 0x2005, 0);
+        self.write(system, state, 0x2005, 0);
+        state.ppu.data_read_buffer = 0;
+        state.ppu.reset_delay = 29658 * 3;
+    }
+
     pub fn register_read<T>(&mut self, state: &mut SystemState, device: DeviceKind, addr: T) where T: AddressValidator {
         self.bus.register_read(state, device, addr);
     }
@@ -293,7 +317,7 @@ impl Ppu {
         self.bus.register_write(state, device, addr);
     }
 
-    pub fn peek(&self, bus: BusKind, system: &System, state: &SystemState, address: u16) -> u8 {
+    pub fn peek(&self, system: &System, state: &SystemState, address: u16) -> u8 {
         match address {
             0x2000 => state.ppu.last_write,
             0x2001 => state.ppu.last_write,
@@ -321,7 +345,7 @@ impl Ppu {
         }
     }
 
-    pub fn read(&self, bus: BusKind, system: &System, state: &mut SystemState, address: u16) -> u8 {
+    pub fn read(&self, system: &System, state: &mut SystemState, address: u16) -> u8 {
         match address {
             0x2000 => state.ppu.last_write,
             0x2001 => state.ppu.last_write,
@@ -379,9 +403,10 @@ impl Ppu {
         }
     }
 
-    pub fn write(&self, bus: BusKind, system: &System, state: &mut SystemState, address: u16, value: u8) {
+    pub fn write(&self, system: &System, state: &mut SystemState, address: u16, value: u8) {
         match address {
             0x2000 => {
+                if state.ppu.reset_delay != 0 { return; }
                 let was_nmi_enabled = state.ppu.is_nmi_enabled();
                 state.ppu.regs[0] = value;
                 state.ppu.vram_addr_temp &= 0xf3ff;
@@ -397,7 +422,10 @@ impl Ppu {
                     _ => {}
                 }
             }, //PPUCTRL
-            0x2001 => state.ppu.regs[1] = value, //PPUMASK
+            0x2001 => {
+                if state.ppu.reset_delay != 0 { return; }
+                state.ppu.regs[1] = value
+            }, //PPUMASK
             0x2002 => state.ppu.regs[2] = value,
             0x2003 => state.ppu.oam_addr = value, //OAMADDR
             0x2004 => {
@@ -405,6 +433,7 @@ impl Ppu {
                 state.ppu.oam_addr = state.ppu.oam_addr.wrapping_add(1);
             }, //OAMDATA
             0x2005 => { //PPUSCROLL
+                if state.ppu.reset_delay != 0 { return; }
                 if state.ppu.write_latch {
                     let value = value as u16;
                     state.ppu.vram_addr_temp &= 0x0c1f;
@@ -419,6 +448,7 @@ impl Ppu {
 
             },
             0x2006 => { //PPUADDR
+                if state.ppu.reset_delay != 0 { return; }
                 if state.ppu.write_latch {
                     state.ppu.vram_addr_temp &= 0x7f00;
                     state.ppu.vram_addr_temp |= value as u16;
@@ -466,6 +496,7 @@ impl Ppu {
     }
 
     pub fn tick(&self, system: &System, state: &mut SystemState) {
+        if state.ppu.reset_delay != 0 { state.ppu.reset_delay -= 1; }
         state.ppu.current_tick += 1;
         match state.ppu.stage {
             Stage::Prerender(_, 1) => {

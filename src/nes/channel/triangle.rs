@@ -134,19 +134,19 @@ impl Channel for Triangle {
         channel.sequence()
     }
 
-    fn enable(&self, system: &System, state: &mut SystemState) {
+    fn enable(&self) {
         let mut channel = self.state.borrow_mut();
         channel.enabled = true;
         
     }
 
-    fn disable(&self, system: &System, state: &mut SystemState) {
+    fn disable(&self) {
         let mut channel = self.state.borrow_mut();
         channel.enabled = false;
         channel.length_counter = 0;
     }
 
-    fn get_state(&self, system: &System, state: &mut SystemState) -> bool {
+    fn get_state(&self) -> bool {
         let channel = self.state.borrow();
         channel.length_counter > 0
     }

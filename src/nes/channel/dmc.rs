@@ -162,7 +162,7 @@ impl Channel for Dmc {
         channel.output_value 
     }
 
-    fn enable(&self, system: &System, state: &mut SystemState) {
+    fn enable(&self) {
         let mut channel = self.state.borrow_mut();
         if channel.bytes_remaining == 0 {
             channel.bytes_remaining = channel.sample_length();
@@ -172,13 +172,13 @@ impl Channel for Dmc {
         
     }
 
-    fn disable(&self, system: &System, state: &mut SystemState) {
+    fn disable(&self) {
         let mut channel = self.state.borrow_mut();
         channel.bytes_remaining = 0;
         channel.irq = false;
     }
 
-    fn get_state(&self, system: &System, state: &mut SystemState) -> bool {
+    fn get_state(&self) -> bool {
         let channel = self.state.borrow();
         channel.bytes_remaining > 0
     }

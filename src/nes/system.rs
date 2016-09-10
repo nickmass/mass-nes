@@ -9,6 +9,12 @@ use nes::input::{Input, InputState};
 
 pub use nes::input::{Controller, InputDevice};
 
+pub enum UserInput {
+    PlayerOne(Controller),
+    Power,
+    Reset,
+}
+
 pub enum Region {
     Ntsc,
     Pal,
@@ -112,13 +118,12 @@ pub enum EmphMode {
     Brg,
 }
 
-pub struct Machine<FR, FA, FC, FI, I, FD> where 
+pub struct Machine<FR, FA, FC, FI, FD> where 
     FR: FnMut(&[u16;256*240]), 
     FA: FnMut(&[i16]), 
     FC: FnMut() -> bool, 
-    FI: FnMut() -> I,
-    FD: FnMut(&System, &mut SystemState),
-    I: InputDevice {
+    FI: FnMut() -> Vec<UserInput>,
+    FD: FnMut(&System, &mut SystemState) {
     
     pub state: Box<SystemState>,
     pub system: System,
@@ -129,16 +134,15 @@ pub struct Machine<FR, FA, FC, FI, I, FD> where
     on_debug: FD,
 }
 
-impl<FR, FA, FC, FI, I, FD> Machine<FR, FA, FC, FI, I, FD> where 
+impl<FR, FA, FC, FI, FD> Machine<FR, FA, FC, FI, FD> where 
     FR: FnMut(&[u16;256*240]),
     FA: FnMut(&[i16]),
     FC: FnMut() -> bool,
-    FI: FnMut() -> I,
-    FD: FnMut(&System, &mut SystemState),
-    I: InputDevice {
+    FI: FnMut() -> Vec<UserInput>,
+    FD: FnMut(&System, &mut SystemState) {
 
     pub fn new(region: Region, cartridge: Cartridge, render: FR, audio: FA,
-               closed: FC, input: FI, debug: FD) -> Machine<FR, FA, FC, FI, I, FD> {
+               closed: FC, input: FI, debug: FD) -> Machine<FR, FA, FC, FI, FD> {
         
         let mut state = Box::new(SystemState::default());
         let system = System::new(region, cartridge, &mut state);
@@ -171,14 +175,23 @@ impl<FR, FA, FC, FI, I, FD> Machine<FR, FA, FC, FI, I, FD> where
             if self.state.ppu.in_vblank && !last_vblank {
                 (self.on_audio)(self.system.apu.get_samples(&self.system, &mut self.state));
                 (self.on_render)(&self.state.ppu.screen);
-                let input = (self.on_input)().to_byte();
-                self.state.input.input = input;
+                for i in (self.on_input)() {
+                    self.handle_input(i);
+                }
                 (self.on_debug)(&self.system, &mut self.state);
             }
             last_vblank = self.state.ppu.in_vblank;
             if (self.on_closed)() {
                 break;
             }
+        }
+    }
+
+    fn handle_input(&mut self, input: UserInput) {
+        match input {
+            UserInput::PlayerOne(c) => self.state.input.input = c.to_byte(),
+            UserInput::Power => self.system.power(&mut self.state),
+            UserInput::Reset => self.system.reset(&mut self.state),
         }
     }
 }
@@ -245,6 +258,19 @@ impl System {
                                &system.cartridge);
 
         system.apu.register(state, &mut system.cpu);
+        system.power(state);
         system
+    }
+
+    pub fn power(&self, state: &mut SystemState) {
+        self.cpu.power(self, state);
+        self.apu.power(self, state);
+        self.ppu.power(self, state);
+    }
+
+    pub fn reset(&self, state: &mut SystemState) {
+        self.cpu.reset(self, state);
+        self.apu.reset(self, state);
+        self.ppu.power(self, state);
     }
 }

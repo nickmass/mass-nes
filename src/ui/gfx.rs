@@ -4,6 +4,9 @@ use glium::texture::{RawImage2d, ClientFormat};
 use glium::texture::integral_texture2d::IntegralTexture2d;
 use glium::texture::texture2d::Texture2d;
 use glium::texture;
+pub use glium::glutin::VirtualKeyCode as Key;
+
+use std::collections::HashMap;
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -20,7 +23,7 @@ pub struct GliumRenderer {
     vertex_buffer: glium::VertexBuffer<Vertex>,
     closed: bool,
     palette: Texture2d,
-    input: [bool; 8],
+    input: HashMap<Key, bool>,
 }
 
 impl GliumRenderer {
@@ -89,7 +92,7 @@ impl GliumRenderer {
             vertex_buffer: vertex_buffer,
             closed: false,
             palette: pal_tex,
-            input: [false; 8],
+            input: HashMap::new(),
         }
     }
 
@@ -100,23 +103,10 @@ impl GliumRenderer {
                     self.closed = true;
                 },
                 glium::glutin::Event::KeyboardInput(state, _, key_opt) => {
-                    let mut input = self.input;
                     let pressed = state == glium::glutin::ElementState::Pressed;
                     if let Some(key) = key_opt {
-                        use glium::glutin::VirtualKeyCode as K;
-                        match key {
-                            K::Z => input[0] = pressed,
-                            K::X => input[1] = pressed,
-                            K::RShift => input[2] = pressed,
-                            K::Return => input[3] = pressed,
-                            K::Up => input[4] = pressed,
-                            K::Down => input[5] = pressed,
-                            K::Left => input[6] = pressed,
-                            K::Right => input[7] = pressed,
-                             _ => {}
-                        }
+                        self.input.insert(key, pressed);
                     }
-                    self.input = input;
                 }, 
                 _ => {}
             }
@@ -149,8 +139,8 @@ impl GliumRenderer {
         self.process_events();
     }
    
-    pub fn get_input(&self) -> [bool; 8] {
-        self.input
+    pub fn get_input(&self) -> HashMap<Key, bool> {
+        self.input.clone()
     }
 
     pub fn is_closed(&self) -> bool {
@@ -162,9 +152,9 @@ use std::sync::mpsc::{Sender, Receiver, channel, TryRecvError};
 
 pub struct Renderer {
     tx: Sender<Box<[u16; 256*240]>>,
-    input_rx: Receiver<(bool, [bool; 8])>,
+    input_rx: Receiver<(bool, HashMap<Key, bool>)>,
     closed: bool,
-    input: [bool; 8],
+    input: HashMap<Key, bool>,
 }
 
 impl Renderer {
@@ -188,7 +178,6 @@ impl Renderer {
                         Err(TryRecvError::Disconnected) => return,
                     }
                 }
-                
 
                 if frame.is_some() {
                     gl.render(&*frame.as_ref().unwrap());
@@ -201,7 +190,7 @@ impl Renderer {
             tx: tx,
             input_rx: input_rx,
             closed: false,
-            input: [false; 8],
+            input: HashMap::new(),
         }
     }
 
@@ -233,8 +222,8 @@ impl Renderer {
         self.closed
     }
 
-    pub fn get_input(&self) -> [bool;8] {
-        self.input
+    pub fn get_input(&self) -> HashMap<Key, bool> {
+        self.input.clone()
     }
 }
 

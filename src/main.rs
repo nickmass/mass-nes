@@ -8,10 +8,10 @@ extern crate blip_buf;
 use blip_buf::BlipBuf;
 
 mod nes;
-use nes::{Controller, Machine, Cartridge, Region};
+use nes::{UserInput, Controller, Machine, Cartridge, Region};
 
 mod ui;
-use ui::gfx::Renderer;
+use ui::gfx::{Key, Renderer};
 use ui::audio::Audio;
 use ui::sync::FrameSync;
 
@@ -58,16 +58,30 @@ fn main() {
         window.borrow().is_closed()
     }, || {
         let input = window.borrow().get_input();
-        Controller {
-            a: input[0],
-            b: input[1],
-            select: input[2],
-            start: input[3],
-            up: input[4],
-            down: input[5],
-            left: input[6],
-            right: input[7],
+        let mut r = Vec::new();
+        
+        let p1 = Controller {
+            a: *input.get(&Key::Z).unwrap_or(&false),
+            b: *input.get(&Key::X).unwrap_or(&false),
+            select: *input.get(&Key::RShift).unwrap_or(&false),
+            start: *input.get(&Key::Return).unwrap_or(&false),
+            up: *input.get(&Key::Up).unwrap_or(&false),
+            down: *input.get(&Key::Down).unwrap_or(&false),
+            left: *input.get(&Key::Left).unwrap_or(&false),
+            right: *input.get(&Key::Right).unwrap_or(&false),
+        };
+
+
+        if *input.get(&Key::Delete).unwrap_or(&false) {
+            r.push(UserInput::Power);
         }
+
+        if *input.get(&Key::Back).unwrap_or(&false) {
+            r.push(UserInput::Reset);
+        }
+
+        r.push(UserInput::PlayerOne(p1));
+        r
     }, |sys, state| {});
 
     machine.run();

@@ -153,6 +153,12 @@ impl Cpu {
         state.cpu.reg_sp = 0xfd;
     }
 
+    pub fn reset(&self, system: &System, state: &mut SystemState) {
+        state.cpu.reg_pc = self.bus.read_word(system, state, 0xfffc) as u32;
+        state.cpu.reg_sp = state.cpu.reg_sp.wrapping_sub(3);
+        state.cpu.flag_i = 1;
+    }
+
     pub fn register_read<T>(&mut self, state: &mut SystemState, device: DeviceKind, addr: T)
         where T: AddressValidator {
         self.bus.register_read(state, device, addr);

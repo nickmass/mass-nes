@@ -16,8 +16,8 @@ pub trait Channel {
     fn read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8;
     fn write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8);
     fn tick(&self, system: &System, state: &mut SystemState) -> u8;
-    fn enable(&self, system: &System, state: &mut SystemState);
-    fn disable(&self, system: &System, state: &mut SystemState);
-    fn get_state(&self, system: &System, state: &mut SystemState) -> bool; 
+    fn enable(&self);
+    fn disable(&self);
+    fn get_state(&self) -> bool; 
 }
 

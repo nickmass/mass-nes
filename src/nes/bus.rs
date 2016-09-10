@@ -141,7 +141,7 @@ impl AddressBus {
             Some(h) => {
                 match h.1 {
                     DeviceKind::CpuRam => system.cpu.mem.peek(state, h.0),
-                    DeviceKind::Ppu => system.ppu.peek(self.kind, system, state, h.0),
+                    DeviceKind::Ppu => system.ppu.peek(system, state, h.0),
                     DeviceKind::Nametables => system.cartridge.mapper.nt_peek(
                         system, state, h.0),
                     DeviceKind::Mapper => system.cartridge.mapper.peek(self.kind, system, state, h.0),
@@ -163,7 +163,7 @@ impl AddressBus {
             Some(h) => {
                 match h.1 {
                     DeviceKind::CpuRam => system.cpu.mem.read(state, h.0),
-                    DeviceKind::Ppu => system.ppu.read(self.kind, system, state, h.0),
+                    DeviceKind::Ppu => system.ppu.read(system, state, h.0),
                     DeviceKind::Mapper => system.cartridge.mapper.read(self.kind, system, state, h.0),
                     DeviceKind::Nametables => system.cartridge.mapper.nt_read(
                         system, state, h.0),
@@ -185,7 +185,7 @@ impl AddressBus {
             Some(h) => {
                 match h.1  {
                     DeviceKind::CpuRam => system.cpu.mem.write(state, h.0, value),
-                    DeviceKind::Ppu => system.ppu.write(self.kind, system, state, h.0, value),
+                    DeviceKind::Ppu => system.ppu.write(system, state, h.0, value),
                     DeviceKind::Mapper => system.cartridge.mapper.write(self.kind, system, state, h.0, value),
                     DeviceKind::Nametables => system.cartridge.mapper.nt_write(
                          system, state, h.0, value),

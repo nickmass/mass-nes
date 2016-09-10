@@ -32,7 +32,6 @@ impl FrameSync {
     }
 }
 
-
 pub struct Frame {
     handle: JoinHandle<()>,
 }

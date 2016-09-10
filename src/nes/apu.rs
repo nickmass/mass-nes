@@ -31,6 +31,7 @@ pub struct ApuState {
     irq: bool,
     samples: [i16; 33248], //Max cycles for the longer pal frame
     sample_index: usize,
+    last_4017: u8,
 }
 
 impl Default for ApuState {
@@ -40,10 +41,11 @@ impl Default for ApuState {
             reset_delay: 0,
             frame_counter: 6,
             sequence_mode: SequenceMode::FourStep,
-            irq_inhibit: true, //TODO - This should be false, but SMB3 wont boot if it is
+            irq_inhibit: false,
             irq: false,
             samples: [0; 33248],
             sample_index: 0,
+            last_4017: 0,
         }
     }
 }
@@ -119,19 +121,51 @@ impl Apu {
         }
     }
 
+    pub fn power(&self, system: &System, state: &mut SystemState) { 
+        for a in 0..4 {
+            self.pulse_one.write(system, state, a, 0);
+            self.pulse_two.write(system, state, a, 0);
+            self.noise.write(system, state, a, 0);
+            self.triangle.write(system, state, a, 0);
+        }
+        self.write(system, state, 0x4015, 0);
+        self.write(system, state, 0x4017, 0);
+        state.apu.reset_delay = 6;
+    }
+
+    pub fn reset(&self, system: &System, state: &mut SystemState) {
+        self.write(system, state, 0x4015, 0);
+        let val = state.apu.last_4017;
+        self.write(system, state, 0x4017, val);
+        state.apu.reset_delay = 6;
+    }
+
     pub fn peek(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
-        0
+        match addr {
+            0x4015 => {
+                let mut val = 0;
+                if self.pulse_one.get_state() { val |= 0x01; }
+                if self.pulse_two.get_state() { val |= 0x02; }
+                if self.triangle.get_state() { val |= 0x04; }
+                if self.noise.get_state() { val |= 0x08; }
+                if self.dmc.get_state() { val |= 0x10; }
+                if state.apu.irq { val |= 0x40; }
+                if self.dmc.get_irq() { val |= 0x80; }
+                val
+            },
+            _ => unreachable!()
+        }
     }
 
     pub fn read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
         match addr {
             0x4015 => {
                 let mut val = 0;
-                if self.pulse_one.get_state(system, state) { val |= 0x01; }
-                if self.pulse_two.get_state(system, state) { val |= 0x02; }
-                if self.triangle.get_state(system, state) { val |= 0x04; }
-                if self.noise.get_state(system, state) { val |= 0x08; }
-                if self.dmc.get_state(system, state) { val |= 0x10; }
+                if self.pulse_one.get_state() { val |= 0x01; }
+                if self.pulse_two.get_state() { val |= 0x02; }
+                if self.triangle.get_state() { val |= 0x04; }
+                if self.noise.get_state() { val |= 0x08; }
+                if self.dmc.get_state() { val |= 0x10; }
                 if state.apu.irq { val |= 0x40; }
                 if self.dmc.get_irq() { val |= 0x80; }
                 state.apu.irq = false;
@@ -146,32 +180,33 @@ impl Apu {
         match addr {
             0x4015 => {
                 if value & 1 != 0 {
-                    self.pulse_one.enable(system, state);
+                    self.pulse_one.enable();
                 } else {
-                    self.pulse_one.disable(system, state);
+                    self.pulse_one.disable();
                 }
                 if value & 0x2 != 0 {
-                    self.pulse_two.enable(system, state);
+                    self.pulse_two.enable();
                 } else {
-                    self.pulse_two.disable(system, state);
+                    self.pulse_two.disable();
                 }
                 if value & 0x4 != 0 {
-                    self.triangle.enable(system, state);
+                    self.triangle.enable();
                 } else {
-                    self.triangle.disable(system, state);
+                    self.triangle.disable();
                 }
                 if value & 0x8 != 0 {
-                    self.noise.enable(system, state);
+                    self.noise.enable();
                 } else {
-                    self.noise.disable(system, state);
+                    self.noise.disable();
                 }
                 if value & 0x10 != 0 {
-                    self.dmc.enable(system, state);
+                    self.dmc.enable();
                 } else {
-                    self.dmc.disable(system, state);
+                    self.dmc.disable();
                 }
             },
             0x4017 => {
+                state.apu.last_4017 = value;
                 state.apu.sequence_mode = match value & 0x80 {
                     0 => SequenceMode::FourStep,
                     _ => SequenceMode::FiveStep,
