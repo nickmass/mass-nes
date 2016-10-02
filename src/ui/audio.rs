@@ -2,10 +2,20 @@ extern crate cpal;
 extern crate futures;
 
 use self::futures::stream::Stream;
-use self::futures::Future;
+use self::futures::task;
+use self::futures::task::{Run, Executor};
 
 use std::thread;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::Arc;
+
+struct AudioExecutor;
+
+impl Executor for AudioExecutor {
+    fn execute(&self, r: Run) {
+        r.run();
+    }
+}
 
 pub struct Audio {
     endpoint: cpal::Endpoint,
@@ -18,14 +28,14 @@ impl Audio {
     pub fn new() -> Audio {
         let allowed_sample_rates = vec![cpal::SamplesRate(48000), cpal::SamplesRate(44100), cpal::SamplesRate(96000)];
         let endpoint = cpal::get_default_endpoint().unwrap();
-        
+
         struct Match {
             sr: usize,
             chan: usize,
             data_type: cpal::SampleFormat,
             format: cpal::Format,
         }
- 
+
         let mut best_match = None;
         let formats = endpoint.get_supported_formats_list().expect("No audio formats found");
         for f in formats {
@@ -62,6 +72,7 @@ impl Audio {
         let format = best_match.format;
         let channels = format.channels.len();
 
+        let executor = Arc::new(AudioExecutor);
         let event_loop = cpal::EventLoop::new();
 
         let (mut voice, stream) = cpal::Voice::new(&endpoint, &format, &event_loop).unwrap();
@@ -69,7 +80,7 @@ impl Audio {
         let (tx, rx) = channel();
         let mut samples = SamplesIterator::new(rx);
 
-        stream.for_each(move |buffer| -> Result<_, ()> {
+        task::spawn(stream.for_each(move |buffer| -> Result<_, ()> {
             match buffer {
                 cpal::UnknownTypeBuffer::U16(mut buffer) => {
                     for (sample, value) in buffer.chunks_mut(channels).
@@ -96,7 +107,7 @@ impl Audio {
             }
 
             Ok(())
-        }).forget();
+        })).execute(executor);
 
         voice.play();
 
@@ -109,7 +120,7 @@ impl Audio {
             tx: tx,
         }
     }
-    
+
     pub fn sample_rate(&self) -> u32 {
         let cpal::SamplesRate(rate) = self.format.samples_rate;
         rate

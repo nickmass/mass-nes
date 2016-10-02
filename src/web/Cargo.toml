@@ -1,0 +1,7 @@
+[package]
+name = "web"
+version = "0.1.0"
+authors = ["Nick Massey <nickmass@nickmass.com>"]
+
+[dependencies]
+"mass_nes" = { path = '../..' }
