@@ -1,5 +1,5 @@
 extern crate mass_nes;
-use self::mass_nes::nes::{Machine, Region, Cartridge, Controller};
+use self::mass_nes::nes::{UserInput, Machine, Region, Cartridge, Controller};
 
 use std::fs::File;
 use std::path::Path;
@@ -25,10 +25,9 @@ pub fn run<T>(rom: T, frames: u32, condition: Condition) where T: AsRef<str> {
     |_| {
     },
     || {
-        *closed.lock().unwrap()
-    },
-    || {
-        Controller {
+        let mut r = Vec::new();
+
+        let p1 = Controller {
             a: false,
             b: false,
             select: false,
@@ -37,7 +36,16 @@ pub fn run<T>(rom: T, frames: u32, condition: Condition) where T: AsRef<str> {
             down: false,
             left: false,
             right: false,
+        };
+
+        let closed = closed.lock().unwrap();
+        if *closed {
+            r.push(UserInput::Close);
         }
+
+        r.push(UserInput::PlayerOne(p1));
+
+        r
     },
     |system, state| {
         let mut closed = closed.lock().unwrap();

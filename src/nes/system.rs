@@ -13,6 +13,7 @@ pub enum UserInput {
     PlayerOne(Controller),
     Power,
     Reset,
+    Close,
 }
 
 pub enum Region {
@@ -118,32 +119,30 @@ pub enum EmphMode {
     Brg,
 }
 
-pub struct Machine<FR, FA, FC, FI, FD> where 
-    FR: FnMut(&[u16;256*240]), 
-    FA: FnMut(&[i16]), 
-    FC: FnMut() -> bool, 
+pub struct Machine<FR, FA, FI, FD> where 
+    FR: FnMut(&[u16;256*240]),
+    FA: FnMut(&[i16]),
     FI: FnMut() -> Vec<UserInput>,
     FD: FnMut(&System, &mut SystemState) {
-    
+
     pub state: Box<SystemState>,
     pub system: System,
     on_render: FR,
     on_audio: FA,
-    on_closed: FC,
     on_input: FI,
     on_debug: FD,
+    close: bool
 }
 
-impl<FR, FA, FC, FI, FD> Machine<FR, FA, FC, FI, FD> where 
+impl<FR, FA, FI, FD> Machine<FR, FA, FI, FD> where 
     FR: FnMut(&[u16;256*240]),
     FA: FnMut(&[i16]),
-    FC: FnMut() -> bool,
     FI: FnMut() -> Vec<UserInput>,
     FD: FnMut(&System, &mut SystemState) {
 
     pub fn new(region: Region, cartridge: Cartridge, render: FR, audio: FA,
-               closed: FC, input: FI, debug: FD) -> Machine<FR, FA, FC, FI, FD> {
-        
+               input: FI, debug: FD) -> Machine<FR, FA, FI, FD> {
+
         let mut state = Box::new(SystemState::default());
         let system = System::new(region, cartridge, &mut state);
         Machine {
@@ -151,9 +150,9 @@ impl<FR, FA, FC, FI, FD> Machine<FR, FA, FC, FI, FD> where
             system: system,
             on_render: render,
             on_audio: audio,
-            on_closed: closed,
             on_input: input,
             on_debug: debug,
+            close: false,
         }
     }
 
@@ -161,7 +160,7 @@ impl<FR, FA, FC, FI, FD> Machine<FR, FA, FC, FI, FD> where
         self.system.cpu.power(&self.system, &mut self.state);
         let mut last_vblank = false;
         let mut cycle: u64 = 0;
-        loop {
+        while !self.close {
             self.system.cpu.tick(&self.system, &mut self.state);
             self.system.apu.tick(&self.system, &mut self.state);
             self.system.cartridge.mapper.tick(&self.system, &mut self.state);
@@ -181,9 +180,6 @@ impl<FR, FA, FC, FI, FD> Machine<FR, FA, FC, FI, FD> where
                 (self.on_debug)(&self.system, &mut self.state);
             }
             last_vblank = self.state.ppu.in_vblank;
-            if (self.on_closed)() {
-                break;
-            }
         }
     }
 
@@ -192,6 +188,7 @@ impl<FR, FA, FC, FI, FD> Machine<FR, FA, FC, FI, FD> where
             UserInput::PlayerOne(c) => self.state.input.input = c.to_byte(),
             UserInput::Power => self.system.power(&mut self.state),
             UserInput::Reset => self.system.reset(&mut self.state),
+            UserInput::Close => self.close = true,
         }
     }
 }

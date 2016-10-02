@@ -63,8 +63,6 @@ fn main() {
             audio.add_samples(buf[0..count].to_vec());
         }
     }, || {
-        window.borrow().is_closed()
-    }, || {
         let input = window.borrow().get_input();
         let mut r = Vec::new();
 
@@ -88,6 +86,10 @@ fn main() {
             r.push(UserInput::Reset);
         }
 
+        if window.borrow().is_closed() {
+            r.push(UserInput::Close);
+        }
+
         r.push(UserInput::PlayerOne(p1));
         r
     }, |sys, state| {});
@@ -97,7 +99,7 @@ fn main() {
 
 #[cfg(target_arch = "asmjs")]
 fn main() {
-    let rom = include_bytes!("/home/nickmass/smb.nes");
+    let rom = include_bytes!("/home/nickmass/kirby.nes");
     let region = Region::Ntsc;
     let pal = region.default_palette();
     let cart = Cartridge::load(&mut (rom as &[u8])).unwrap();
@@ -115,8 +117,6 @@ fn main() {
         string.push_str("0]");
         println!("{}", string);
     }, |samples| {
-    }, || {
-        false
     }, || {
         let mut r = Vec::new();
 
