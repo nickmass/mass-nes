@@ -19,10 +19,10 @@ function draw(screen) {
 	context.putImageData(imgd,0,0);
 }
 
-var worker = new Worker('worker.js');
+var worker = new Worker('main.js');
 worker.onmessage = function(e) {
 	draw(e.data);
-	console.log('Frame');
+  console.log("Frame");
 }
 
 </script>

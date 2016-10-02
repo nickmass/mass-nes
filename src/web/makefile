@@ -11,7 +11,6 @@ export EMSCRIPTEN = $(EMSCRIPTEN_ENV)/emscripten/incoming
 all: $(MAIN)
 	$(EMSCRIPTEN_RUSTC) -O --target=asmjs-unknown-emscripten src/main.rs --extern mass_nes=target/debug/deps/libmass_nes.rlib --out-dir target/debug
 	cp src/index.html target/debug
-	cp src/worker.js target/debug
 
 mass_nes:
 	mkdir -p target/debug/deps
