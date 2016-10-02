@@ -1,18 +1,25 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
+#[cfg(not(target_arch = "asmjs"))]
 #[macro_use]
 extern crate glium;
+#[cfg(not(target_arch = "asmjs"))]
 extern crate blip_buf;
 
+#[cfg(not(target_arch = "asmjs"))]
 use blip_buf::BlipBuf;
 
 mod nes;
 use nes::{UserInput, Controller, Machine, Cartridge, Region};
 
+#[cfg(not(target_arch = "asmjs"))]
 mod ui;
+#[cfg(not(target_arch = "asmjs"))]
 use ui::gfx::{Key, Renderer};
+#[cfg(not(target_arch = "asmjs"))]
 use ui::audio::Audio;
+#[cfg(not(target_arch = "asmjs"))]
 use ui::sync::FrameSync;
 
 use std::cell::RefCell;
@@ -20,30 +27,31 @@ use std::rc::Rc;
 use std::fs;
 use std::env;
 
+#[cfg(not(target_arch = "asmjs"))]
 fn main() {
     let mut file = fs::File::open(env::args().nth(1).unwrap_or("/home/nickmass/smb.nes".to_string())).unwrap();
     let region = Region::Ntsc;
     let pal = region.default_palette();
     let cart = Cartridge::load(&mut file).unwrap();
-    
+
     let window = Rc::new(RefCell::new(Renderer::new(pal)));
     let mut audio = Audio::new();
-    
+
     let sample_rate = audio.sample_rate();
     let mut delta = 0;
     let mut blip = BlipBuf::new(sample_rate / 30);
     blip.set_rates(region.frame_ticks() * region.refresh_rate(), sample_rate as f64);
-    
+
     let mut frame_sync = FrameSync::new(region.refresh_rate());
     frame_sync.begin_frame();
-    
+
     let mut machine = Machine::new(region, cart, |screen| {
         window.borrow_mut().add_frame(screen);
         frame_sync.end_frame();
         frame_sync.begin_frame();
     }, |samples| {
         let count = samples.len();
-        
+
         for (i, v) in samples.iter().enumerate() {
             blip.add_delta(i as u32, *v as i32 - delta);
             delta = *v as i32;
@@ -59,7 +67,7 @@ fn main() {
     }, || {
         let input = window.borrow().get_input();
         let mut r = Vec::new();
-        
+
         let p1 = Controller {
             a: *input.get(&Key::Z).unwrap_or(&false),
             b: *input.get(&Key::X).unwrap_or(&false),
@@ -79,6 +87,49 @@ fn main() {
         if *input.get(&Key::Back).unwrap_or(&false) {
             r.push(UserInput::Reset);
         }
+
+        r.push(UserInput::PlayerOne(p1));
+        r
+    }, |sys, state| {});
+
+    machine.run();
+}
+
+#[cfg(target_arch = "asmjs")]
+fn main() {
+    let rom = include_bytes!("/home/nickmass/smb.nes");
+    let region = Region::Ntsc;
+    let pal = region.default_palette();
+    let cart = Cartridge::load(&mut (rom as &[u8])).unwrap();
+
+    let mut machine = Machine::new(region, cart, |screen| {
+        let mut string = String::new();
+        string.push('[');
+        for i in screen.iter() {
+            let mut color: u32 = 0;
+            color |= pal[(i*3) as usize] as u32;
+            color |= (pal[((i*3) + 1) as usize] as u32) << 8;
+            color |= (pal[((i*3) + 2) as usize] as u32) << 16;
+            string.push_str(&format!("{},", color));
+        }
+        string.push_str("0]");
+        println!("{}", string);
+    }, |samples| {
+    }, || {
+        false
+    }, || {
+        let mut r = Vec::new();
+
+        let p1 = Controller {
+            a: false,
+            b: false,
+            select: false,
+            start: false,
+            up: false,
+            down: false,
+            left: false,
+            right: false,
+        };
 
         r.push(UserInput::PlayerOne(p1));
         r

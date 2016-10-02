@@ -27,7 +27,7 @@ impl FrameSync {
     }
 
     pub fn end_frame(&mut self) {
-        let frame = ::std::mem::replace(&mut self.frame, None);
+        let frame = self.frame.take();
         frame.unwrap().end_frame();
     }
 }

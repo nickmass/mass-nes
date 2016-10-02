@@ -146,7 +146,7 @@ impl Cpu {
             ops: Op::load(),
         }
     }
-    
+ 
     pub fn power(&self, system: &System, state: &mut SystemState) {
         state.cpu.reg_pc = self.bus.read_word(system, state, 0xfffc) as u32;
         state.cpu.set_reg_p(0x34);
