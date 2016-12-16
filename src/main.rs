@@ -12,7 +12,7 @@ use nes::{UserInput, Controller, Machine, Cartridge, Region};
 
 mod ui;
 use ui::gfx::{Key, Renderer};
-use ui::audio::Audio;
+use ui::audio::{Audio, RodioAudio};
 use ui::sync::FrameSync;
 
 use std::cell::RefCell;
@@ -27,7 +27,7 @@ fn main() {
     let cart = Cartridge::load(&mut file).unwrap();
 
     let window = Rc::new(RefCell::new(Renderer::new(pal)));
-    let mut audio = Audio::new();
+    let mut audio = RodioAudio::new(48000);
 
     let sample_rate = audio.sample_rate();
     let mut delta = 0;

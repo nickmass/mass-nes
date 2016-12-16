@@ -9,6 +9,11 @@ use std::thread;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::Arc;
 
+pub trait Audio {
+    fn sample_rate(&self) -> u32;
+    fn add_samples(&mut self, samples: Vec<i16>);
+}
+
 struct AudioExecutor;
 
 impl Executor for AudioExecutor {
@@ -17,15 +22,15 @@ impl Executor for AudioExecutor {
     }
 }
 
-pub struct Audio {
+pub struct CpalAudio {
     endpoint: cpal::Endpoint,
     format: cpal::Format,
     voice: cpal::Voice,
     tx: Sender<Vec<i16>>,
 }
 
-impl Audio {
-    pub fn new() -> Audio {
+impl CpalAudio {
+    pub fn new() -> CpalAudio {
         let allowed_sample_rates = vec![cpal::SamplesRate(48000), cpal::SamplesRate(44100), cpal::SamplesRate(96000)];
         let endpoint = cpal::get_default_endpoint().unwrap();
 
@@ -113,7 +118,7 @@ impl Audio {
 
         thread::spawn(move || { event_loop.run() });
 
-        Audio {
+        CpalAudio {
             endpoint: endpoint,
             format: format,
             voice: voice,
@@ -121,12 +126,15 @@ impl Audio {
         }
     }
 
-    pub fn sample_rate(&self) -> u32 {
+}
+
+impl Audio for CpalAudio {
+    fn sample_rate(&self) -> u32 {
         let cpal::SamplesRate(rate) = self.format.samples_rate;
         rate
     }
 
-    pub fn add_samples(&mut self, samples: Vec<i16>) {
+    fn add_samples(&mut self, samples: Vec<i16>) {
         let _ = self.tx.send(samples).unwrap();
     }
 }
@@ -163,5 +171,69 @@ impl<T> Iterator for SamplesIterator<T> {
         } else {
             self.buf.pop_front() 
         }
+    }
+}
+
+extern crate rodio;
+
+pub struct RodioAudio {
+    sample_rate: u32,
+    endpoint: rodio::Endpoint,
+    sink: rodio::Sink,
+}
+
+impl RodioAudio {
+    pub fn new(sample_rate: u32) -> RodioAudio {
+        let endpoint = rodio::get_default_endpoint().unwrap();
+        let sink = rodio::Sink::new(&endpoint);
+        RodioAudio {
+            sample_rate: sample_rate,
+            endpoint: endpoint,
+            sink: sink,
+        }
+    }
+}
+
+impl Audio for RodioAudio {
+    fn sample_rate(&self) -> u32 { self.sample_rate }
+
+    fn add_samples(&mut self, samples: Vec<i16>) {
+        let source = RodioSamples {
+            sample_rate: self.sample_rate,
+            samples: samples,
+            position: 0,
+        };
+        self.sink.append(source);
+    }
+}
+
+struct RodioSamples {
+    sample_rate: u32,
+    samples: Vec<i16>,
+    position: usize,
+}
+
+impl Iterator for RodioSamples {
+    type Item = i16;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let val = self.samples.get(self.position);
+        self.position += 1;
+        val.map(|x| *x)
+    }
+}
+
+impl rodio::Source for RodioSamples {
+    fn get_current_frame_len(&self) -> Option<usize> {
+        Some(self.samples.len() - self.position)
+    }
+
+    fn get_channels(&self) -> u16 { 1 }
+
+    fn get_samples_rate(&self) -> u32 { self.sample_rate }
+
+    fn get_total_duration(&self) -> Option<::std::time::Duration> {
+        let ms = (self.samples.len() as f64 / self.sample_rate as f64) * 1000.0;
+        Some(::std::time::Duration::from_millis(ms as u64))
     }
 }
