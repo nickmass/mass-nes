@@ -112,15 +112,13 @@ const DMC_RATES_PAL: &'static [u16] = &[398, 354, 316, 298, 276, 236, 210, 198,
                                         176, 148, 132, 118, 98, 78, 66, 50];
 
 
-
-
 pub enum EmphMode {
     Bgr,
     Brg,
 }
 
 pub struct Machine<FR, FA, FI, FD> where 
-    FR: FnMut(&[u16;256*240]),
+    FR: FnMut(&[u16]),
     FA: FnMut(&[i16]),
     FI: FnMut() -> Vec<UserInput>,
     FD: FnMut(&System, &mut SystemState) {
@@ -135,7 +133,7 @@ pub struct Machine<FR, FA, FI, FD> where
 }
 
 impl<FR, FA, FI, FD> Machine<FR, FA, FI, FD> where 
-    FR: FnMut(&[u16;256*240]),
+    FR: FnMut(&[u16]),
     FA: FnMut(&[i16]),
     FI: FnMut() -> Vec<UserInput>,
     FD: FnMut(&System, &mut SystemState) {

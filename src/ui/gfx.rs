@@ -114,7 +114,7 @@ impl GliumRenderer {
         }
     }
 
-    pub fn render(&self, screen: &[u16; 256*240]) {
+    pub fn render(&self, screen: &[u16]) {
         {
             let img = RawImage2d {
                 data: ::std::borrow::Cow::Borrowed(screen),
@@ -152,15 +152,15 @@ impl GliumRenderer {
 use std::sync::mpsc::{Sender, Receiver, channel, TryRecvError};
 
 enum RendererMessage {
-    Frame(Box<[u16; 256* 240]>),
+    Frame(Vec<u16>),
     Close,
 }
 
 pub struct Renderer {
     tx: Sender<RendererMessage>,
     input_rx: Receiver<(bool, HashMap<Key, bool>)>,
-    closed: bool,
-    input: HashMap<Key, bool>,
+    closed: Cell<bool>,
+    input: RefCell<HashMap<Key, bool>>,
 }
 
 impl Renderer {
@@ -175,7 +175,7 @@ impl Renderer {
 
             loop {
                 //Drop frames until we get to the most recent
-                let mut frame: Option<Box<_>> = None;
+                let mut frame = None;
                 let mut empty = false;
                 while !empty {
                     match rx.try_recv() {
@@ -186,7 +186,7 @@ impl Renderer {
                 }
 
                 if frame.is_some() {
-                    gl.render(&*frame.as_ref().unwrap());
+                    gl.render(&frame.unwrap());
                     let _ = input_tx.send((gl.is_closed(), gl.get_input()));
                 }
             }
@@ -195,12 +195,12 @@ impl Renderer {
         Renderer {
             tx: tx,
             input_rx: input_rx,
-            closed: false,
-            input: HashMap::new(),
+            closed: Cell::new(false),
+            input: RefCell::new(HashMap::new()),
         }
     }
 
-    fn process_input(&mut self) { 
+    fn process_input(&self) {
         let mut input = None;
         let mut empty = false;
         while !empty {
@@ -213,26 +213,25 @@ impl Renderer {
 
         if input.is_none() { return; }
         let input = input.unwrap();
-        self.closed = input.0;
-        self.input = input.1;
+        self.closed.set(input.0);
+        *self.input.borrow_mut() = input.1;
     }
 
-    pub fn add_frame(&mut self, frame: &[u16; 256*240]) {
-        let frame = Box::new(*frame);
-        let _ = self.tx.send(RendererMessage::Frame(frame)).unwrap();
+    pub fn add_frame(&self, frame: &[u16]) {
+        let _ = self.tx.send(RendererMessage::Frame(frame.to_vec())).unwrap();
         self.process_input();
     }
 
     pub fn is_closed(&self) -> bool {
-        self.closed
+        self.closed.get()
     }
 
     pub fn get_input(&self) -> HashMap<Key, bool> {
-        self.input.clone()
+        self.input.clone().into_inner()
     }
 
     pub fn close(mut self) {
-        self.closed = true;
+        self.closed = Cell::new(true);
         let _ = self.tx.send(RendererMessage::Close).unwrap();
     }
 }

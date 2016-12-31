@@ -15,7 +15,7 @@ pub struct PpuState {
     last_write: u8,
 
     write_latch: bool,
-    
+
     data_read_buffer: u8,
 
     pub vram_addr: u16,
@@ -46,7 +46,7 @@ pub struct PpuState {
     low_attr_shift: u16,
     high_attr_shift: u16,
 
-    pub screen: Box<[u16;256*240]>,
+    pub screen: Vec<u16>,
 
     in_sprite_render: bool,
     next_sprite_byte: u8,
@@ -59,7 +59,7 @@ pub struct PpuState {
     line_oam_index: usize,
     sprite_zero_on_line: bool,
     sprite_zero_on_next_line: bool,
-    
+
     sprite_active: [u8; 8],
     sprite_x: [u8; 8],
     sprite_attr: [u8; 8],
@@ -117,7 +117,7 @@ impl Default for PpuState {
             low_attr_shift: 0,
             high_attr_shift: 0,
 
-            screen: Box::new([0;256*240]),
+            screen: vec![0;256*240],
 
             in_sprite_render: false,
             next_sprite_byte: 0,
@@ -192,7 +192,7 @@ impl PpuState {
     fn is_rendering(&self) -> bool { 
         self.is_sprites_enabled() || self.is_background_enabled() 
     }
-    
+
     fn ppu_status(&self) -> u8 {
         let mut value = self.last_write & 0x1f;
         if self.sprite_overflow { value |= 0x20; }

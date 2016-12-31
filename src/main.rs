@@ -19,8 +19,6 @@ use ui::sync::FrameSync;
 use clap::{App, Arg, SubCommand};
 
 use std::sync::Mutex;
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::fs::File;
 
 fn main() {
@@ -83,7 +81,7 @@ fn run(mut file: File, region: Region) {
     let pal = region.default_palette();
     let cart = Cartridge::load(&mut file).unwrap();
 
-    let window = Rc::new(RefCell::new(Renderer::new(pal)));
+    let window = Renderer::new(pal);
     let mut audio = RodioAudio::new(48000);
 
     let sample_rate = audio.sample_rate();
@@ -94,7 +92,7 @@ fn run(mut file: File, region: Region) {
     let mut frame_sync = FrameSync::new(region.refresh_rate());
     {
         let mut machine = Machine::new(region, cart, |screen| {
-            window.borrow_mut().add_frame(screen);
+            window.add_frame(screen);
             frame_sync.sync_frame();
         }, |samples| {
             let count = samples.len();
@@ -112,7 +110,7 @@ fn run(mut file: File, region: Region) {
 
         }, || {
             let mut r = Vec::new();
-            let input = window.borrow().get_input();
+            let input = window.get_input();
 
             let p1 = Controller {
                 a: *input.get(&Key::Z).unwrap_or(&false),
@@ -133,7 +131,7 @@ fn run(mut file: File, region: Region) {
                 r.push(UserInput::Reset);
             }
 
-            if window.borrow().is_closed() {
+            if window.is_closed() {
                 r.push(UserInput::Close);
             }
 
@@ -146,9 +144,7 @@ fn run(mut file: File, region: Region) {
     }
 
     audio.close();
-    if let Ok(window) = Rc::try_unwrap(window) {
-        window.into_inner().close();
-    }
+    window.close();
 }
 
 fn bench(mut file: File, region: Region, frames: u32) {
