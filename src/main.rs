@@ -4,6 +4,7 @@
 #[macro_use]
 extern crate glium;
 extern crate blip_buf;
+extern crate clap;
 
 use blip_buf::BlipBuf;
 
@@ -15,14 +16,70 @@ use ui::gfx::{Key, Renderer};
 use ui::audio::{Audio, RodioAudio};
 use ui::sync::FrameSync;
 
+use clap::{App, Arg, SubCommand};
+
+use std::sync::Mutex;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::fs;
-use std::env;
+use std::fs::File;
 
 fn main() {
-    let mut file = fs::File::open(env::args().nth(1).unwrap_or("/home/nickmass/smb.nes".to_string())).unwrap();
-    let region = Region::Ntsc;
+    let matches = App::new("Mass Nes")
+        .author("Nick Massey, nickmass@nickmass.com")
+        .about("Nintendo Entertainment System Emulator")
+        .arg(Arg::with_name("file")
+             .takes_value(true)
+             .default_value("/home/nickmass/smb.nes")
+             .index(1)
+             .validator(|f| {
+                 if ::std::path::Path::new(&f).exists() {
+                     Ok(())
+                 } else {
+                     Err("File does not exist".to_string())
+                 }
+             })
+             .global(true)
+        )
+        .arg(Arg::with_name("region")
+             .short("r")
+             .long("region")
+             .default_value("ntsc")
+             .possible_values(&["ntsc", "pal"])
+             .global(true)
+        )
+        .subcommand(SubCommand::with_name("bench")
+                    .about("Benchmark core performance")
+                    .arg(Arg::with_name("frames")
+                         .short("f")
+                         .long("frames")
+                         .default_value("0")
+                         .validator(|f| {
+                             let frames: Result<u32,_> = f.parse();
+                             frames.map(|v| ()).map_err(|e| "Invalid frames value".to_string())
+                         })
+                    )
+        )
+        .get_matches();
+
+    let path = matches.value_of("file").unwrap();
+    let file = File::open(path.to_string()).unwrap();
+
+    let region = if matches.value_of("region").unwrap() == "pal" {
+        Region::Pal
+    } else {
+        Region::Ntsc
+    };
+
+    match matches.subcommand() {
+        ("bench", Some(sub_matches)) => {
+            let frames = sub_matches.value_of("frames").unwrap().parse().unwrap();
+            bench(file, region, frames)
+        },
+        _ => run(file, region)
+    };
+}
+
+fn run(mut file: File, region: Region) {
     let pal = region.default_palette();
     let cart = Cartridge::load(&mut file).unwrap();
 
@@ -92,6 +149,31 @@ fn main() {
     if let Ok(window) = Rc::try_unwrap(window) {
         window.into_inner().close();
     }
+}
+
+fn bench(mut file: File, region: Region, frames: u32) {
+    let cart = Cartridge::load(&mut file).unwrap();
+    let closed = Mutex::new(false);
+    let mut machine = Machine::new(region, cart,
+                                  |screen| {},
+                                  |samples| {},
+                                  || {
+                                      let mut r = Vec::new();
+
+                                      let closed = closed.lock().unwrap();
+                                      if *closed {
+                                          r.push(UserInput::Close);
+                                      }
+
+                                      r
+                                  },
+                                  |system, state| {
+                                      let mut closed = closed.lock().unwrap();
+                                      let nes_frame = system.debug.frame(state);
+                                      *closed = frames != 0 && nes_frame > frames;
+                                  });
+
+    machine.run();
 }
 
 fn generate_pal() {
