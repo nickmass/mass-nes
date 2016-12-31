@@ -22,59 +22,11 @@ use std::sync::Mutex;
 use std::fs::File;
 
 fn main() {
-    let matches = App::new("Mass Nes")
-        .author("Nick Massey, nickmass@nickmass.com")
-        .about("Nintendo Entertainment System Emulator")
-        .arg(Arg::with_name("file")
-             .takes_value(true)
-             .default_value("/home/nickmass/smb.nes")
-             .index(1)
-             .validator(|f| {
-                 if ::std::path::Path::new(&f).exists() {
-                     Ok(())
-                 } else {
-                     Err("File does not exist".to_string())
-                 }
-             })
-             .global(true)
-        )
-        .arg(Arg::with_name("region")
-             .short("r")
-             .long("region")
-             .default_value("ntsc")
-             .possible_values(&["ntsc", "pal"])
-             .global(true)
-        )
-        .subcommand(SubCommand::with_name("bench")
-                    .about("Benchmark core performance")
-                    .arg(Arg::with_name("frames")
-                         .short("f")
-                         .long("frames")
-                         .default_value("0")
-                         .validator(|f| {
-                             let frames: Result<u32,_> = f.parse();
-                             frames.map(|v| ()).map_err(|e| "Invalid frames value".to_string())
-                         })
-                    )
-        )
-        .get_matches();
-
-    let path = matches.value_of("file").unwrap();
-    let file = File::open(path.to_string()).unwrap();
-
-    let region = if matches.value_of("region").unwrap() == "pal" {
-        Region::Pal
-    } else {
-        Region::Ntsc
-    };
-
-    match matches.subcommand() {
-        ("bench", Some(sub_matches)) => {
-            let frames = sub_matches.value_of("frames").unwrap().parse().unwrap();
-            bench(file, region, frames)
-        },
-        _ => run(file, region)
-    };
+    let args = Args::parse();
+    match args.mode {
+        Mode::Run => run(args.file, args.region),
+        Mode::Bench(frames) => bench(args.file, args.region, frames)
+    }
 }
 
 fn run(mut file: File, region: Region) {
@@ -170,6 +122,94 @@ fn bench(mut file: File, region: Region, frames: u32) {
                                   });
 
     machine.run();
+}
+
+enum Mode {
+    Run,
+    Bench(u32),
+}
+
+struct Args {
+    mode: Mode,
+    file: File,
+    region: Region,
+}
+
+impl Args {
+    fn parse() -> Args {
+        let arg_file = Arg::with_name("file")
+            .help("Provides a rom file to emulate")
+            .takes_value(true)
+            .default_value("/home/nickmass/smb.nes")
+            .index(1)
+            .validator(|f| {
+                if ::std::path::Path::new(&f).exists() {
+                    Ok(())
+                } else {
+                    Err("File does not exist".to_string())
+                }
+            });
+
+        let arg_region = Arg::with_name("region")
+            .help("Selects which console version to emulate")
+            .short("r")
+            .long("region")
+            .default_value("ntsc")
+            .possible_values(&["ntsc", "pal"]);
+
+        let arg_frames = Arg::with_name("frames")
+            .help("Number of frames to emulate, 0 = infinite")
+            .short("f")
+            .long("frames")
+            .default_value("0")
+            .validator(|f| {
+                let frames: Result<u32,_> = f.parse();
+                frames.map(|v| ()).map_err(|e| "Invalid frames value".to_string())
+            });
+
+        let matches = App::new("mass-nes")
+            .author("Nick Massey, nickmass@nickmass.com")
+            .about("Nintendo Entertainment System Emulator")
+            .arg(&arg_file)
+            .arg(&arg_region)
+            .subcommand(SubCommand::with_name("bench")
+                        .about("Benchmark core performance")
+                        .arg(&arg_file)
+                        .arg(&arg_region)
+                        .arg(&arg_frames)
+            )
+            .get_matches();
+
+        fn get_file(arg: Option<&str>) -> File {
+            let path = arg.unwrap();
+            File::open(path.to_string()).unwrap()
+        }
+
+        fn get_region(arg: Option<&str>) -> Region {
+            if arg.unwrap() == "pal" {
+                Region::Pal
+            } else {
+                Region::Ntsc
+            }
+        }
+
+        fn get_frames(arg: Option<&str>) -> u32 {
+            arg.unwrap().parse().unwrap()
+        }
+
+        match matches.subcommand() {
+            ("bench", Some(matches)) => Args {
+                mode: Mode::Bench(get_frames(matches.value_of("frames"))),
+                file: get_file(matches.value_of("file")),
+                region: get_region(matches.value_of("region"))
+            },
+            _ => Args {
+                mode: Mode::Run,
+                file: get_file(matches.value_of("file")),
+                region: get_region(matches.value_of("region"))
+            }
+        }
+    }
 }
 
 fn generate_pal() {
