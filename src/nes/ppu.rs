@@ -46,7 +46,7 @@ pub struct PpuState {
     low_attr_shift: u16,
     high_attr_shift: u16,
 
-    pub screen: [u16;256*240],
+    pub screen: Box<[u16;256*240]>,
 
     in_sprite_render: bool,
     next_sprite_byte: u8,
@@ -117,7 +117,7 @@ impl Default for PpuState {
             low_attr_shift: 0,
             high_attr_shift: 0,
 
-            screen: [0;256*240],
+            screen: Box::new([0;256*240]),
 
             in_sprite_render: false,
             next_sprite_byte: 0,

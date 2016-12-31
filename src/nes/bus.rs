@@ -35,7 +35,7 @@ enum BusMapping {
     Unmapped,
 }
 
-type Mapping = Vec<Box<[BusMapping; 0x10000]>>;
+type Mapping = Vec<Vec<BusMapping>>;
 
 pub struct DeviceMappings {
     read_mappings: Mapping,
@@ -66,8 +66,8 @@ impl DeviceMappings {
         let bus = Bus(self.next_bus);
         self.next_bus += 1;
 
-        self.read_mappings.push(Box::new([BusMapping::Unmapped; 0x10000]));
-        self.write_mappings.push(Box::new([BusMapping::Unmapped; 0x10000]));
+        self.read_mappings.push(vec![BusMapping::Unmapped; 0x10000]);
+        self.write_mappings.push(vec![BusMapping::Unmapped; 0x10000]);
 
         bus
     }
