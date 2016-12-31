@@ -77,7 +77,7 @@ impl ApuState {
             SequenceMode::FiveStep => false,
         }
     }
-    
+
     fn increment_frame_counter(&mut self, system: &System) {
         self.frame_counter += 1;
         if self.frame_counter == self.sequence_mode.steps(system)[4] {
@@ -260,14 +260,14 @@ impl Apu {
         state.apu.samples[state.apu.sample_index] = pulse_out + tnd_out;
         state.apu.sample_index += 1;
     }
-    
+
     pub fn get_samples<'a>(&'a self, system: &'a System,
                            state: &'a mut SystemState) -> &[i16] {
         let index = state.apu.sample_index;
         state.apu.sample_index = 0;
         &state.apu.samples[0..index]
     }
-    
+
     pub fn register(&self, state: &mut SystemState, cpu: &mut Cpu) {
         self.pulse_one.register(state, cpu);
         self.pulse_two.register(state, cpu);

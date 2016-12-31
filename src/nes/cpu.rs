@@ -3,7 +3,7 @@ use nes::system::{System, SystemState};
 use nes::ops::*;
 use nes::memory::MemoryBlock;
 
-use std::collections::{VecDeque, HashMap};
+use std::collections::VecDeque;
 
 #[derive(Default)]
 pub struct CpuState {
@@ -135,7 +135,7 @@ impl Default for Stage {
 pub struct Cpu {
     pub bus: AddressBus,
     pub mem: MemoryBlock,
-    ops: HashMap<u8, Op>,
+    ops: Box<[Op; 0x100]>,
 }
 
 impl Cpu {
@@ -143,10 +143,10 @@ impl Cpu {
         Cpu {
             bus: AddressBus::new(BusKind::Cpu, state, 0),
             mem: MemoryBlock::new(2, &mut state.mem),
-            ops: Op::load(),
+            ops: Box::new(Op::load()),
         }
     }
- 
+
     pub fn power(&self, system: &System, state: &mut SystemState) {
         state.cpu.reg_pc = self.bus.read_word(system, state, 0xfffc) as u32;
         state.cpu.set_reg_p(0x34);
@@ -201,7 +201,7 @@ impl Cpu {
             },
         }
     }
-    
+
     fn read_pc(&self, system: &System, state: &mut SystemState) -> u8 {
         let pc = state.cpu.reg_pc as u16;
         let value = self.bus.read(system, state, pc);
@@ -351,7 +351,7 @@ impl Cpu {
         let pc = state.cpu.reg_pc;
         let value = self.read_pc(system, state);
         system.debug.trace(system, state, pc as u16);
-        state.cpu.op = self.ops[&value];
+        state.cpu.op = self.ops[value as usize];
         state.cpu.stage = Stage::Address(0)
     }
 

@@ -1,43 +1,37 @@
-use std::time::Duration;
-use std::thread::{spawn, sleep, JoinHandle};
+use std::time::Instant;
+
 pub struct FrameSync {
-    refresh_rate: f64,
-    frame: Option<Frame>,
+    frame_ns: u32,
+    offset_ns: i64,
+    compute_start: Instant,
 }
 
 impl FrameSync {
     pub fn new(refresh_rate: f64) -> FrameSync {
+        let frame_ns = ((1.0 / refresh_rate) * 1000000000.0) as u32;
         FrameSync {
-            refresh_rate: refresh_rate,
-            frame: None,
+            frame_ns: frame_ns,
+            offset_ns: 0,
+            compute_start: Instant::now(),
         }
     }
 
-    pub fn begin_frame(&mut self) {
-        let sleep_time = Duration::new(0, ((1.0 / self.refresh_rate) * 1000000000.0) as u32);
-        let t = spawn(move || {
-            sleep(sleep_time);
-        });
-
-        let frame = Frame {
-            handle: t
-        };
-
-        self.frame = Some(frame);
-    }
-
-    pub fn end_frame(&mut self) {
-        let frame = self.frame.take();
-        frame.unwrap().end_frame();
-    }
-}
-
-pub struct Frame {
-    handle: JoinHandle<()>,
-}
-
-impl Frame {
-    fn end_frame(self) {
-        let _ = self.handle.join();
+    pub fn sync_frame(&mut self) {
+        let dur = self.compute_start.elapsed();
+        let delay = self.frame_ns as i64 + self.offset_ns;
+        let delay = if delay < 0 { 0 }
+        else if delay > u32::max_value() as i64 { u32::max_value() }
+        else { delay as u32 };
+        if dur.as_secs() == 0 && delay >= dur.subsec_nanos() {
+            while delay > self.compute_start.elapsed().subsec_nanos() {}
+            //::std::thread::sleep(::std::trime::Duration::new(0, delay - dur.subsec_nanos()));
+        }
+        let dur = self.compute_start.elapsed();
+        if dur.as_secs() > 0 {
+            self.offset_ns = -1000000000;
+        } else {
+            self.offset_ns = delay as i64 - dur.subsec_nanos() as i64;
+        }
+        self.compute_start = Instant::now();
     }
 }

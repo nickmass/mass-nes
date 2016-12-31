@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use nes::system::SystemState;
 use nes::system::System;
 use nes::channel::Channel;
@@ -30,8 +29,13 @@ pub enum DeviceKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Bus (u32);
 
+#[derive(Clone, Copy, Debug)]
+enum BusMapping {
+    Mapped(u16, DeviceKind),
+    Unmapped,
+}
 
-type Mapping = HashMap<Bus, HashMap<u16, (u16, DeviceKind)>>;
+type Mapping = Vec<Box<[BusMapping; 0x10000]>>;
 
 pub struct DeviceMappings {
     read_mappings: Mapping,
@@ -42,8 +46,8 @@ pub struct DeviceMappings {
 impl Default for DeviceMappings {
     fn default() -> DeviceMappings {
         DeviceMappings {
-            read_mappings: HashMap::new(),
-            write_mappings: HashMap::new(),
+            read_mappings: Vec::new(),
+            write_mappings: Vec::new(),
             next_bus: 0,
         }
     }
@@ -52,8 +56,8 @@ impl Default for DeviceMappings {
 impl DeviceMappings {
     pub fn new() -> DeviceMappings {
         DeviceMappings {
-            read_mappings: HashMap::new(),
-            write_mappings: HashMap::new(),
+            read_mappings: Vec::new(),
+            write_mappings: Vec::new(),
             next_bus: 0,
         }
     }
@@ -62,30 +66,35 @@ impl DeviceMappings {
         let bus = Bus(self.next_bus);
         self.next_bus += 1;
 
-        self.read_mappings.insert(bus, HashMap::new());
-        self.write_mappings.insert(bus, HashMap::new());
+        self.read_mappings.push(Box::new([BusMapping::Unmapped; 0x10000]));
+        self.write_mappings.push(Box::new([BusMapping::Unmapped; 0x10000]));
 
         bus
     }
 
     fn insert_read_mapping(&mut self,
                            bus: &Bus, addr: u16, base_addr: u16, device: DeviceKind) {
-        self.read_mappings.get_mut(bus).unwrap().insert(addr, (base_addr, device));
+        self.read_mappings.get_mut(bus.0 as usize).unwrap()[addr as usize] = BusMapping::Mapped(base_addr, device);
     }
-    
+
     fn insert_write_mapping(&mut self,
                            bus: &Bus, addr: u16, base_addr: u16, device: DeviceKind) {
-        self.write_mappings.get_mut(bus).unwrap().insert(addr, (base_addr, device));
+        self.write_mappings.get_mut(bus.0 as usize).unwrap()[addr as usize] = BusMapping::Mapped(base_addr, device);
     }
-    
+
     fn get_read_mapping(&self, bus: &Bus, addr: &u16) -> Option<(u16, DeviceKind)> {
-        self.read_mappings[bus].get(addr).map(|x| (x.0, x.1))
+        match self.read_mappings[bus.0 as usize][*addr as usize] {
+            BusMapping::Mapped(x, y) => Some((x, y)),
+            BusMapping::Unmapped => None,
+        }
     }
 
     fn get_write_mapping(&self, bus: &Bus, addr: &u16) -> Option<(u16, DeviceKind)> {
-        self.write_mappings[bus].get(addr).map(|x| (x.0, x.1))
+        match self.write_mappings[bus.0 as usize][*addr as usize] {
+            BusMapping::Mapped(x, y) => Some((x, y)),
+            BusMapping::Unmapped => None,
+        }
     }
-    
 }
 
 
@@ -133,7 +142,7 @@ impl AddressBus {
             addr += self.block_size as u32;
         }
     }
-    
+
     pub fn peek(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
         let addr = addr & !(self.block_size - 1);
         let mapping = state.mappings.get_read_mapping(&self.bus, &addr);
@@ -155,7 +164,7 @@ impl AddressBus {
             }
         }
     }
-    
+
     pub fn read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
         let addr = addr & !(self.block_size - 1);
         let mapping = state.mappings.get_read_mapping(&self.bus, &addr);

@@ -7,6 +7,7 @@ use glium::texture;
 pub use glium::glutin::VirtualKeyCode as Key;
 
 use std::collections::HashMap;
+use std::cell::{Cell, RefCell};
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -17,13 +18,13 @@ struct Vertex {
 implement_vertex!(Vertex, position, tex_coords);
 
 pub struct GliumRenderer {
-    display: glium::Display,
+    display: RefCell<glium::Display>,
     indicies: glium::index::NoIndices,
     program: glium::Program,
     vertex_buffer: glium::VertexBuffer<Vertex>,
-    closed: bool,
+    closed: Cell<bool>,
     palette: Texture2d,
-    input: HashMap<Key, bool>,
+    input: RefCell<HashMap<Key, bool>>,
 }
 
 impl GliumRenderer {
@@ -33,7 +34,7 @@ impl GliumRenderer {
             .with_title(format!("Mass NES"))
             .build_glium()
             .unwrap();
-        
+
         let top_right = Vertex { position: [1.0, 1.0], tex_coords: [1.0, 0.0] };
         let top_left = Vertex { position: [-1.0, 1.0], tex_coords: [0.0, 0.0] };
         let bottom_left = Vertex { position: [-1.0, -1.0],  tex_coords: [0.0, 1.0] };
@@ -86,34 +87,34 @@ impl GliumRenderer {
                                         texture::MipmapsOption::NoMipmap).unwrap();
 
         GliumRenderer {
-            display: display,
+            display: RefCell::new(display),
             indicies: indicies,
             program: program,
             vertex_buffer: vertex_buffer,
-            closed: false,
+            closed: Cell::new(false),
             palette: pal_tex,
-            input: HashMap::new(),
+            input: RefCell::new(HashMap::new()),
         }
     }
 
-    fn process_events(&mut self) {
-        for ev in self.display.poll_events() {
+    fn process_events(&self) {
+        for ev in self.display.borrow_mut().poll_events() {
             match ev {
                 glium::glutin::Event::Closed => {
-                    self.closed = true;
+                    self.closed.set(true);
                 },
                 glium::glutin::Event::KeyboardInput(state, _, key_opt) => {
                     let pressed = state == glium::glutin::ElementState::Pressed;
                     if let Some(key) = key_opt {
-                        self.input.insert(key, pressed);
+                        self.input.borrow_mut().insert(key, pressed);
                     }
-                }, 
+                },
                 _ => {}
             }
         }
     }
 
-    pub fn render(&mut self, screen: &[u16; 256*240]) {
+    pub fn render(&self, screen: &[u16; 256*240]) {
         {
             let img = RawImage2d {
                 data: ::std::borrow::Cow::Borrowed(screen),
@@ -124,34 +125,39 @@ impl GliumRenderer {
 
             use glium::{uniforms, texture};
             let tex = IntegralTexture2d::with_mipmaps(
-                &self.display, img, texture::MipmapsOption::NoMipmap).unwrap();
+                &*self.display.borrow(), img, texture::MipmapsOption::NoMipmap).unwrap();
 
             let uniforms = uniform! {
                 tex: tex.sampled().magnify_filter(uniforms::MagnifySamplerFilter::Nearest).minify_filter(uniforms::MinifySamplerFilter::Nearest),
                 palette: self.palette.sampled().magnify_filter(uniforms::MagnifySamplerFilter::Nearest).minify_filter(uniforms::MinifySamplerFilter::Nearest),
             };
 
-            let mut target = self.display.draw(); 
+            let mut target = self.display.borrow_mut().draw(); 
             target.clear_color(0.0, 0.0, 0.0, 1.0);
             target.draw(&self.vertex_buffer, &self.indicies, &self.program, &uniforms, &Default::default()).unwrap();
             target.finish().unwrap();
         }
-        self.process_events();
     }
-   
+
     pub fn get_input(&self) -> HashMap<Key, bool> {
-        self.input.clone()
+        self.process_events();
+        self.input.borrow().clone()
     }
 
     pub fn is_closed(&self) -> bool {
-        self.closed
+        self.closed.get()
     }
 }
 
 use std::sync::mpsc::{Sender, Receiver, channel, TryRecvError};
 
+enum RendererMessage {
+    Frame(Box<[u16; 256* 240]>),
+    Close,
+}
+
 pub struct Renderer {
-    tx: Sender<Box<[u16; 256*240]>>,
+    tx: Sender<RendererMessage>,
     input_rx: Receiver<(bool, HashMap<Key, bool>)>,
     closed: bool,
     input: HashMap<Key, bool>,
@@ -163,25 +169,25 @@ impl Renderer {
         let (tx, rx) = channel();
 
         let (input_tx, input_rx) = channel();
-        
+
         ::std::thread::spawn(move || {
-            let mut gl = GliumRenderer::new(&pal);
-            
+            let gl = GliumRenderer::new(&pal);
+
             loop {
                 //Drop frames until we get to the most recent
                 let mut frame: Option<Box<_>> = None;
                 let mut empty = false;
                 while !empty {
                     match rx.try_recv() {
-                        Ok(f) => frame = Some(f),
+                        Ok(RendererMessage::Frame(f)) => frame = Some(f),
                         Err(TryRecvError::Empty) => empty = true,
-                        Err(TryRecvError::Disconnected) => return,
+                        Err(TryRecvError::Disconnected) | Ok(RendererMessage::Close) => return,
                     }
                 }
 
                 if frame.is_some() {
                     gl.render(&*frame.as_ref().unwrap());
-                    let _ = input_tx.send((gl.is_closed(), gl.get_input())).unwrap();
+                    let _ = input_tx.send((gl.is_closed(), gl.get_input()));
                 }
             }
         });
@@ -211,10 +217,9 @@ impl Renderer {
         self.input = input.1;
     }
 
-
     pub fn add_frame(&mut self, frame: &[u16; 256*240]) {
         let frame = Box::new(*frame);
-        let _ = self.tx.send(frame).unwrap();
+        let _ = self.tx.send(RendererMessage::Frame(frame)).unwrap();
         self.process_input();
     }
 
@@ -225,5 +230,9 @@ impl Renderer {
     pub fn get_input(&self) -> HashMap<Key, bool> {
         self.input.clone()
     }
-}
 
+    pub fn close(mut self) {
+        self.closed = true;
+        let _ = self.tx.send(RendererMessage::Close).unwrap();
+    }
+}

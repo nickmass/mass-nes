@@ -35,58 +35,63 @@ fn main() {
     blip.set_rates(region.frame_ticks() * region.refresh_rate(), sample_rate as f64);
 
     let mut frame_sync = FrameSync::new(region.refresh_rate());
-    frame_sync.begin_frame();
+    {
+        let mut machine = Machine::new(region, cart, |screen| {
+            window.borrow_mut().add_frame(screen);
+            frame_sync.sync_frame();
+        }, |samples| {
+            let count = samples.len();
 
-    let mut machine = Machine::new(region, cart, |screen| {
-        window.borrow_mut().add_frame(screen);
-        frame_sync.end_frame();
-        frame_sync.begin_frame();
-    }, |samples| {
-        let count = samples.len();
+            for (i, v) in samples.iter().enumerate() {
+                blip.add_delta(i as u32, *v as i32 - delta);
+                delta = *v as i32;
+            }
+            blip.end_frame(count as u32);
+            while blip.samples_avail() > 0 {
+                let mut buf = &mut [0i16; 1024];
+                let count = blip.read_samples(buf, false);
+                audio.add_samples(buf[0..count].to_vec());
+            }
 
-        for (i, v) in samples.iter().enumerate() {
-            blip.add_delta(i as u32, *v as i32 - delta);
-            delta = *v as i32;
-        }
-        blip.end_frame(count as u32);
-        while blip.samples_avail() > 0 {
-            let mut buf = &mut [0i16; 1024];
-            let count = blip.read_samples(buf, false);
-            audio.add_samples(buf[0..count].to_vec());
-        }
-    }, || {
-        let input = window.borrow().get_input();
-        let mut r = Vec::new();
+        }, || {
+            let mut r = Vec::new();
+            let input = window.borrow().get_input();
 
-        let p1 = Controller {
-            a: *input.get(&Key::Z).unwrap_or(&false),
-            b: *input.get(&Key::X).unwrap_or(&false),
-            select: *input.get(&Key::RShift).unwrap_or(&false),
-            start: *input.get(&Key::Return).unwrap_or(&false),
-            up: *input.get(&Key::Up).unwrap_or(&false),
-            down: *input.get(&Key::Down).unwrap_or(&false),
-            left: *input.get(&Key::Left).unwrap_or(&false),
-            right: *input.get(&Key::Right).unwrap_or(&false),
-        };
+            let p1 = Controller {
+                a: *input.get(&Key::Z).unwrap_or(&false),
+                b: *input.get(&Key::X).unwrap_or(&false),
+                select: *input.get(&Key::RShift).unwrap_or(&false),
+                start: *input.get(&Key::Return).unwrap_or(&false),
+                up: *input.get(&Key::Up).unwrap_or(&false),
+                down: *input.get(&Key::Down).unwrap_or(&false),
+                left: *input.get(&Key::Left).unwrap_or(&false),
+                right: *input.get(&Key::Right).unwrap_or(&false),
+            };
 
+            if *input.get(&Key::Delete).unwrap_or(&false) {
+                r.push(UserInput::Power);
+            }
 
-        if *input.get(&Key::Delete).unwrap_or(&false) {
-            r.push(UserInput::Power);
-        }
+            if *input.get(&Key::Back).unwrap_or(&false) {
+                r.push(UserInput::Reset);
+            }
 
-        if *input.get(&Key::Back).unwrap_or(&false) {
-            r.push(UserInput::Reset);
-        }
+            if window.borrow().is_closed() {
+                r.push(UserInput::Close);
+            }
 
-        if window.borrow().is_closed() {
-            r.push(UserInput::Close);
-        }
+            r.push(UserInput::PlayerOne(p1));
+            r
 
-        r.push(UserInput::PlayerOne(p1));
-        r
-    }, |sys, state| {});
+        }, |sys, state| {});
 
-    machine.run();
+        machine.run();
+    }
+
+    audio.close();
+    if let Ok(window) = Rc::try_unwrap(window) {
+        window.into_inner().close();
+    }
 }
 
 fn generate_pal() {

@@ -10,7 +10,7 @@ pub struct DebugState {
 }
 
 pub struct Debug {
-    ops: HashMap<u8, Op>,
+    ops: Box<[Op; 0x100]>,
     op_names: HashMap<Instruction, &'static str>,
     op_lengths: HashMap<Addressing, u32>,
 }
@@ -18,7 +18,7 @@ pub struct Debug {
 impl Debug {
     pub fn new() -> Debug {
         Debug {
-            ops: Op::load(),
+            ops: Box::new(Op::load()),
             op_names: Debug::load_op_names(),
             op_lengths: Debug::load_op_lengths(),
         }
@@ -65,8 +65,8 @@ impl Debug {
 
     pub fn trace_instruction(&self, system: &System, state: &mut SystemState, addr: u16) -> String {
         let instr = system.cpu.bus.peek(system, state, addr);
-       
-        let op = self.ops[&instr];
+
+        let op = self.ops[instr as usize];
         let name = self.op_names[&op.instruction];
         let len = self.op_lengths[&op.addressing] as u16;
 

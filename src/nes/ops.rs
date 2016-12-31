@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Instruction {
+    Dummy,
+
     Adc,
     And,
     Asl,
@@ -119,12 +119,12 @@ impl Default for Op {
 }
 
 impl Op {
-    pub fn load() -> HashMap<u8, Op> {
+    pub fn load() -> [Op; 0x100] {
         use self::Instruction as I;
         use self::Addressing as A;
-        let mut h = HashMap::new();
+        let mut h = [Op { instruction: I::Dummy, addressing: A::None }; 0x100];
         {
-            let mut o = |o,i,a| h.insert(o, Op { instruction: i, addressing: a });
+            let mut o = |o,i,a| {h[o] = Op { instruction: i, addressing: a }};
 
             o(0xa8, I::Tay, A::None);
             o(0xaa, I::Tax, A::None);
@@ -141,7 +141,7 @@ impl Op {
             o(0xb9, I::Lda, A::AbsoluteY(DummyRead::OnCarry));
             o(0xa1, I::Lda, A::IndirectX);
             o(0xb1, I::Lda, A::IndirectY(DummyRead::OnCarry));
-            
+
             o(0xa2, I::Ldx, A::Immediate);
             o(0xa6, I::Ldx, A::ZeroPage);
             o(0xb6, I::Ldx, A::ZeroPageY);
@@ -153,7 +153,7 @@ impl Op {
             o(0xb4, I::Ldy, A::ZeroPageX);
             o(0xac, I::Ldy, A::Absolute);
             o(0xbc, I::Ldy, A::AbsoluteX(DummyRead::OnCarry));
-            
+
             o(0x85, I::Sta, A::ZeroPage);
             o(0x95, I::Sta, A::ZeroPageX);
             o(0x8d, I::Sta, A::Absolute);
@@ -161,15 +161,15 @@ impl Op {
             o(0x99, I::Sta, A::AbsoluteY(DummyRead::Always));
             o(0x81, I::Sta, A::IndirectX);
             o(0x91, I::Sta, A::IndirectY(DummyRead::Always));
-            
+
             o(0x86, I::Stx, A::ZeroPage);
             o(0x96, I::Stx, A::ZeroPageY);
             o(0x8e, I::Stx, A::Absolute);
-            
+
             o(0x84, I::Sty, A::ZeroPage);
             o(0x94, I::Sty, A::ZeroPageX);
             o(0x8c, I::Sty, A::Absolute);
-            
+
             o(0x48, I::Pha, A::None);
             o(0x08, I::Php, A::None);
             o(0x68, I::Pla, A::None);
@@ -183,7 +183,7 @@ impl Op {
             o(0x79, I::Adc, A::AbsoluteY(DummyRead::OnCarry));
             o(0x61, I::Adc, A::IndirectX);
             o(0x71, I::Adc, A::IndirectY(DummyRead::OnCarry));
-            
+
             o(0xe9, I::Sbc, A::Immediate);
             o(0xe5, I::Sbc, A::ZeroPage);
             o(0xf5, I::Sbc, A::ZeroPageX);
@@ -192,7 +192,7 @@ impl Op {
             o(0xf9, I::Sbc, A::AbsoluteY(DummyRead::OnCarry));
             o(0xe1, I::Sbc, A::IndirectX);
             o(0xf1, I::Sbc, A::IndirectY(DummyRead::OnCarry));
-            
+
             o(0x29, I::And, A::Immediate);
             o(0x25, I::And, A::ZeroPage);
             o(0x35, I::And, A::ZeroPageX);
@@ -201,7 +201,7 @@ impl Op {
             o(0x39, I::And, A::AbsoluteY(DummyRead::OnCarry));
             o(0x21, I::And, A::IndirectX);
             o(0x31, I::And, A::IndirectY(DummyRead::OnCarry));
-            
+
             o(0x49, I::Eor, A::Immediate);
             o(0x45, I::Eor, A::ZeroPage);
             o(0x55, I::Eor, A::ZeroPageX);
@@ -210,7 +210,7 @@ impl Op {
             o(0x59, I::Eor, A::AbsoluteY(DummyRead::OnCarry));
             o(0x41, I::Eor, A::IndirectX);
             o(0x51, I::Eor, A::IndirectY(DummyRead::OnCarry));
-            
+
             o(0x09, I::Ora, A::Immediate);
             o(0x05, I::Ora, A::ZeroPage);
             o(0x15, I::Ora, A::ZeroPageX);
@@ -219,7 +219,7 @@ impl Op {
             o(0x19, I::Ora, A::AbsoluteY(DummyRead::OnCarry));
             o(0x01, I::Ora, A::IndirectX);
             o(0x11, I::Ora, A::IndirectY(DummyRead::OnCarry));
-            
+
             o(0xc9, I::Cmp, A::Immediate);
             o(0xc5, I::Cmp, A::ZeroPage);
             o(0xd5, I::Cmp, A::ZeroPageX);
@@ -228,15 +228,15 @@ impl Op {
             o(0xd9, I::Cmp, A::AbsoluteY(DummyRead::OnCarry));
             o(0xc1, I::Cmp, A::IndirectX);
             o(0xd1, I::Cmp, A::IndirectY(DummyRead::OnCarry));
-            
+
             o(0xe0, I::Cpx, A::Immediate);
             o(0xe4, I::Cpx, A::ZeroPage);
             o(0xec, I::Cpx, A::Absolute);
-            
+
             o(0xc0, I::Cpy, A::Immediate);
             o(0xc4, I::Cpy, A::ZeroPage);
             o(0xcc, I::Cpy, A::Absolute);
-            
+
             o(0x24, I::Bit, A::ZeroPage);
             o(0x2c, I::Bit, A::Absolute);
 
@@ -244,7 +244,7 @@ impl Op {
             o(0xf6, I::Inc, A::ZeroPageX);
             o(0xee, I::Inc, A::Absolute);
             o(0xfe, I::Inc, A::AbsoluteX(DummyRead::Always));
-            
+
             o(0xe8, I::Inx, A::None);
             o(0xc8, I::Iny, A::None);
 
@@ -252,7 +252,7 @@ impl Op {
             o(0xd6, I::Dec, A::ZeroPageX);
             o(0xce, I::Dec, A::Absolute);
             o(0xde, I::Dec, A::AbsoluteX(DummyRead::Always));
-            
+
             o(0xca, I::Dex, A::None);
             o(0x88, I::Dey, A::None);
 
@@ -261,25 +261,25 @@ impl Op {
             o(0x16, I::Asl, A::ZeroPageX);
             o(0x0e, I::Asl, A::Absolute);
             o(0x1e, I::Asl, A::AbsoluteX(DummyRead::Always));
-            
+
             o(0x4a, I::Lsr, A::Accumulator);
             o(0x46, I::Lsr, A::ZeroPage);
             o(0x56, I::Lsr, A::ZeroPageX);
             o(0x4e, I::Lsr, A::Absolute);
             o(0x5e, I::Lsr, A::AbsoluteX(DummyRead::Always));
-            
+
             o(0x2a, I::Rol, A::Accumulator);
             o(0x26, I::Rol, A::ZeroPage);
             o(0x36, I::Rol, A::ZeroPageX);
             o(0x2e, I::Rol, A::Absolute);
             o(0x3e, I::Rol, A::AbsoluteX(DummyRead::Always));
-            
+
             o(0x6a, I::Ror, A::Accumulator);
             o(0x66, I::Ror, A::ZeroPage);
             o(0x76, I::Ror, A::ZeroPageX);
             o(0x6e, I::Ror, A::Absolute);
             o(0x7e, I::Ror, A::AbsoluteX(DummyRead::Always));
-            
+
             o(0x4c, I::Jmp, A::Absolute);
             o(0x6c, I::Jmp, A::IndirectAbsolute);
             o(0x20, I::Jsr, A::Absolute);
@@ -294,7 +294,7 @@ impl Op {
             o(0xb0, I::Bcs, A::Relative);
             o(0xd0, I::Bne, A::Relative);
             o(0xf0, I::Beq, A::Relative);
-            
+
             o(0x00, I::Brk, A::Immediate);
 
             o(0x18, I::Clc, A::None);
@@ -304,7 +304,7 @@ impl Op {
             o(0x38, I::Sec, A::None);
             o(0x78, I::Sei, A::None);
             o(0xf8, I::Sed, A::None);
-            
+
             o(0xea, I::Nop, A::None);
 
 
@@ -336,7 +336,7 @@ impl Op {
             o(0x3b, I::IllRla, A::AbsoluteY(DummyRead::Always));
             o(0x23, I::IllRla, A::IndirectX);
             o(0x33, I::IllRla, A::IndirectY(DummyRead::Always));
-            
+
             o(0x47, I::IllSre, A::ZeroPage);
             o(0x57, I::IllSre, A::ZeroPageX);
             o(0x4f, I::IllSre, A::Absolute);
@@ -344,7 +344,7 @@ impl Op {
             o(0x5b, I::IllSre, A::AbsoluteY(DummyRead::Always));
             o(0x43, I::IllSre, A::IndirectX);
             o(0x53, I::IllSre, A::IndirectY(DummyRead::Always));
-            
+
             o(0x67, I::IllRra, A::ZeroPage);
             o(0x77, I::IllRra, A::ZeroPageX);
             o(0x6f, I::IllRra, A::Absolute);
@@ -352,7 +352,7 @@ impl Op {
             o(0x7b, I::IllRra, A::AbsoluteY(DummyRead::Always));
             o(0x63, I::IllRra, A::IndirectX);
             o(0x73, I::IllRra, A::IndirectY(DummyRead::Always));
-            
+
             o(0xc7, I::IllDcp, A::ZeroPage);
             o(0xd7, I::IllDcp, A::ZeroPageX);
             o(0xcf, I::IllDcp, A::Absolute);
@@ -360,7 +360,7 @@ impl Op {
             o(0xdb, I::IllDcp, A::AbsoluteY(DummyRead::Always));
             o(0xc3, I::IllDcp, A::IndirectX);
             o(0xd3, I::IllDcp, A::IndirectY(DummyRead::Always));
-            
+
             o(0xe7, I::IllIsc, A::ZeroPage);
             o(0xf7, I::IllIsc, A::ZeroPageX);
             o(0xef, I::IllIsc, A::Absolute);
@@ -368,7 +368,7 @@ impl Op {
             o(0xfb, I::IllIsc, A::AbsoluteY(DummyRead::Always));
             o(0xe3, I::IllIsc, A::IndirectX);
             o(0xf3, I::IllIsc, A::IndirectY(DummyRead::Always));
-            
+
             o(0x0b, I::IllAnc, A::Immediate);
             o(0x2b, I::IllAnc, A::Immediate);
             o(0x4b, I::IllAlr, A::Immediate);
@@ -383,7 +383,7 @@ impl Op {
             o(0x9e, I::IllShx, A::AbsoluteY(DummyRead::Always));
             o(0x9b, I::IllTas, A::AbsoluteY(DummyRead::Always));
             o(0xbb, I::IllLas, A::AbsoluteY(DummyRead::OnCarry));
-            
+
             o(0x1a, I::IllNop, A::None);
             o(0x3a, I::IllNop, A::None);
             o(0x5a, I::IllNop, A::None);
@@ -432,7 +432,7 @@ impl Op {
         }
 
         for i in 0..255 { 
-            assert!(h.contains_key(&i), format!("Missing Op: {:x}", i));
+            assert!(h[i].instruction != I::Dummy, format!("Missing Op: {:x}", i));
         }
 
         h

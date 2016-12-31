@@ -12,6 +12,7 @@ use std::sync::Arc;
 pub trait Audio {
     fn sample_rate(&self) -> u32;
     fn add_samples(&mut self, samples: Vec<i16>);
+    fn close(self);
 }
 
 struct AudioExecutor;
@@ -137,6 +138,10 @@ impl Audio for CpalAudio {
     fn add_samples(&mut self, samples: Vec<i16>) {
         let _ = self.tx.send(samples).unwrap();
     }
+
+    fn close(self) {
+
+    }
 }
 
 use std::collections::VecDeque;
@@ -204,6 +209,9 @@ impl Audio for RodioAudio {
             position: 0,
         };
         self.sink.append(source);
+    }
+
+    fn close(self) {
     }
 }
 
