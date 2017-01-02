@@ -83,10 +83,13 @@ enum StageResult {
     Continue,
     Done,
     Next,
+    JumpNext(Stage),
+    JumpDone(Stage),
 }
 
 #[derive(Copy, Clone)]
 enum Stage {
+    Interrupt,
     Fetch,
     Address(u32),
     Execute(u32),
@@ -96,39 +99,31 @@ enum Stage {
 }
 
 impl Stage {
-    fn increment(self) -> Stage {
+    fn step(self) -> Stage {
         match self {
-            Stage::Fetch => unreachable!(),
+            Stage::Interrupt => Stage::Fetch,
+            Stage::Fetch => Stage::Address(0),
             Stage::Address(n) => Stage::Address(n + 1),
             Stage::Execute(n) => Stage::Execute(n + 1),
-            Stage::OamDma(n) => {
-                if n == 511 {
-                    Stage::Fetch
-                }  else {
-                    Stage::OamDma(n + 1)
-                }
-            },
-            Stage::Irq(n) => {
-                if n == 6 {
-                    Stage::Fetch
-                } else {
-                    Stage::Irq(n + 1)
-                }
-            },
-            Stage::Nmi(n) => {
-                if n == 6 {
-                    Stage::Fetch
-                } else {
-                    Stage::Nmi(n + 1)
-                }
-            }
+            Stage::OamDma(n) => Stage::OamDma(n + 1),
+            Stage::Irq(n) => Stage::Irq(n + 1),
+            Stage::Nmi(n) => Stage::Nmi(n + 1),
+        }
+    }
+
+    fn next(self) -> Stage {
+        match self {
+            Stage::Interrupt => Stage::Fetch,
+            Stage::Fetch => Stage::Address(0),
+            Stage::Address(_) => Stage::Execute(0),
+            _ => Stage::Interrupt,
         }
     }
 }
 
 impl Default for Stage {
     fn default() -> Stage {
-        Stage::Fetch
+        Stage::Interrupt
     }
 }
 
@@ -180,26 +175,40 @@ impl Cpu {
                 return;
             }
         }
-        match state.cpu.stage {
-            Stage::Fetch => {
-                self.decode(system, state);
-            },
-            Stage::Address(_) => {
-                self.addressing(system, state);
-            },
-            Stage::Execute(_) => {
-                self.operation(system, state);
-            },
-            Stage::OamDma(_) => {
-                self.oam_dma(system, state);
-            },
-            Stage::Irq(_) => {
-                self.irq(system, state);
-            },
-            Stage::Nmi(_) => {
-                self.nmi(system, state);
-            },
-        }
+        while {
+            let stage_result = match state.cpu.stage {
+                Stage::Interrupt => self.interrupt(system, state),
+                Stage::Fetch => self.fetch(system, state),
+                Stage::Address(_) => self.addressing(system, state),
+                Stage::Execute(_) => self.execute(system, state),
+                Stage::OamDma(_) => self.oam_dma(system, state),
+                Stage::Irq(_) => self.irq(system, state),
+                Stage::Nmi(_) => self.nmi(system, state),
+            };
+
+            match stage_result {
+                StageResult::Continue => {
+                    state.cpu.stage = state.cpu.stage.step();
+                    false
+                },
+                StageResult::Done => {
+                    state.cpu.stage = state.cpu.stage.next();
+                    false
+                },
+                StageResult::Next => {
+                    state.cpu.stage = state.cpu.stage.next();
+                    true
+                },
+                StageResult::JumpDone(stage) => {
+                    state.cpu.stage = stage;
+                    false
+                },
+                StageResult::JumpNext(stage) => {
+                    state.cpu.stage = stage;
+                    true
+                },
+            }
+        }{}
     }
 
     fn read_pc(&self, system: &System, state: &mut SystemState) -> u8 {
@@ -223,24 +232,28 @@ impl Cpu {
         self.bus.read(system, state, addr)
     }
 
-    fn oam_dma(&self, system: &System, state: &mut SystemState) {
+    fn oam_dma(&self, system: &System, state: &mut SystemState) -> StageResult {
         match state.cpu.stage {
             Stage::OamDma(c) if c % 2 == 0 => {
                 let high_addr = state.cpu.oam_dma_addr;
-                state.cpu.oam_dma_buffer = 
+                state.cpu.oam_dma_buffer =
                     self.bus.read(system, state, ((c / 2) as u16) | high_addr);
-                state.cpu.stage = state.cpu.stage.increment();
+                StageResult::Continue
             },
             Stage::OamDma(c) if c % 2 == 1 => {
                 let value = state.cpu.oam_dma_buffer;
                 self.bus.write(system, state, 0x2004, value);
-                state.cpu.stage = state.cpu.stage.increment();
+                if c == 511 {
+                    StageResult::Done
+                }  else {
+                    StageResult::Continue
+                }
             },
             _ => unreachable!(),
         }
     }
 
-    fn irq(&self, system: &System, state: &mut SystemState) {
+    fn irq(&self, system: &System, state: &mut SystemState) -> StageResult {
         match state.cpu.stage {
             Stage::Irq(0) => {
                 let addr = state.cpu.reg_pc as u16;
@@ -263,7 +276,7 @@ impl Cpu {
                 self.push_stack(system, state, val);
                 if state.cpu.pending_nmi.is_some() {
                     state.cpu.pending_nmi = None;
-                    state.cpu.stage = Stage::Nmi(4);
+                    return StageResult::JumpDone(Stage::Nmi(4))
                 }
             },
             Stage::Irq(5) => {
@@ -276,13 +289,14 @@ impl Cpu {
                 let val = self.bus.read(system, state, 0xffff) as u16;
                 state.cpu.reg_pc &= 0x00ff;
                 state.cpu.reg_pc |= (val << 8) as u32;
+                return StageResult::Done;
             }
             _ => unreachable!(),
         }
-        state.cpu.stage = state.cpu.stage.increment();
+        StageResult::Continue
     }
 
-    fn nmi(&self, system: &System, state: &mut SystemState) {
+    fn nmi(&self, system: &System, state: &mut SystemState) -> StageResult {
         match state.cpu.stage {
             Stage::Nmi(0) => {
                 let addr = state.cpu.reg_pc as u16;
@@ -314,54 +328,53 @@ impl Cpu {
                 let val = self.bus.read(system, state, 0xfffb) as u16;
                 state.cpu.reg_pc &= 0x00ff;
                 state.cpu.reg_pc |= (val << 8) as u32;
+                return StageResult::Done
             }
             _ => unreachable!(),
         }
-        state.cpu.stage = state.cpu.stage.increment();
+        StageResult::Continue
     }
 
-    fn decode(&self, system: &System, state: &mut SystemState) {
+    fn interrupt(&self, system: &System, state: &mut SystemState) -> StageResult {
         if state.cpu.pending_nmi == Some(0) {
-            state.cpu.stage = Stage::Nmi(0);
             state.cpu.pending_nmi = None;
-            self.nmi(system, state);
-            return;
+            return StageResult::JumpNext(Stage::Nmi(0));
         } else if state.cpu.pending_nmi.is_some() {
             let val = state.cpu.pending_nmi.unwrap();
             state.cpu.pending_nmi = Some(val - 1);
         }
         if state.cpu.pending_irq &&
-           (state.cpu.flag_i == 0 || state.cpu.irq_set_delay != 0) &&
-           state.cpu.irq_delay == 0 {
-            if state.cpu.irq_set_delay != 0 { state.cpu.irq_set_delay -= 1; }
-            state.cpu.stage = Stage::Irq(0);
-            state.cpu.pending_irq = false;
-            self.irq(system, state);
-            return;
+            (state.cpu.flag_i == 0 || state.cpu.irq_set_delay != 0) &&
+            state.cpu.irq_delay == 0 {
+                if state.cpu.irq_set_delay != 0 { state.cpu.irq_set_delay -= 1; }
+                state.cpu.pending_irq = false;
+                return StageResult::JumpNext(Stage::Irq(0));
         }
         if state.cpu.irq_set_delay != 0 { state.cpu.irq_set_delay -= 1; }
         if state.cpu.irq_delay != 0 { state.cpu.irq_delay -= 1; }
         if state.cpu.pending_oam_dma.is_some() {
             state.cpu.oam_dma_addr = (state.cpu.pending_oam_dma.unwrap() as u16) << 8;
             state.cpu.pending_oam_dma = None;
-            state.cpu.stage = Stage::OamDma(0);
-            self.oam_dma(system, state);
-            return;
-        };
+            return StageResult::JumpNext(Stage::OamDma(0));
+        }
+        StageResult::Next
+    }
+
+    fn fetch(&self, system: &System, state: &mut SystemState) -> StageResult {
         let pc = state.cpu.reg_pc;
         let value = self.read_pc(system, state);
         system.debug.trace(system, state, pc as u16);
         state.cpu.op = self.ops[value as usize];
-        state.cpu.stage = Stage::Address(0)
+        StageResult::Continue
     }
 
-    fn addressing(&self, system: &System, state: &mut SystemState) {
+    fn addressing(&self, system: &System, state: &mut SystemState) -> StageResult {
         if let Stage::Address(stage) = state.cpu.stage {
-            let res = match state.cpu.op.addressing {
+            match state.cpu.op.addressing {
                 Addressing::None => self.addr_none(system, state),
                 Addressing::Accumulator => self.addr_accumulator(system, state),
                 Addressing::Immediate => self.addr_immediate(system, state),
-                Addressing::ZeroPage => self.addr_zero_page(system, state), 
+                Addressing::ZeroPage => self.addr_zero_page(system, state),
                 Addressing::ZeroPageX => {
                     let reg = state.cpu.reg_x;
                     self.addr_zero_page_offset(system, state, reg, stage)
@@ -385,22 +398,9 @@ impl Cpu {
                 Addressing::IndirectX => self.addr_indirect_x(system, state, stage),
                 Addressing::IndirectY(d) =>
                     self.addr_indirect_y(system, state, stage, d),
-            };
-            
-            match res {
-                StageResult::Continue => {
-                    state.cpu.stage = state.cpu.stage.increment();
-                },
-                StageResult::Done => {
-                    state.cpu.stage = Stage::Execute(0);
-                },
-                StageResult::Next => {
-                    state.cpu.stage = Stage::Execute(0);
-                    self.operation(system, state);
-                }
             }
         } else {
-            unreachable!();
+            unreachable!()
         }
     }
 
@@ -411,10 +411,10 @@ impl Cpu {
     }
 
     fn addr_accumulator(&self, system: &System, state: &mut SystemState)
-    -> StageResult { 
+    -> StageResult {
         let r = (state.cpu.reg_pc as u16).wrapping_add(1);
         let _ = self.bus.read(system, state, r);
-        state.cpu.op_addr = state.cpu.reg_a as u16;      
+        state.cpu.op_addr = state.cpu.reg_a as u16;
         StageResult::Done
     }
 
@@ -616,10 +616,10 @@ impl Cpu {
         }
     }
 
-    fn operation(&self, system: &System, state: &mut SystemState) {
+    fn execute(&self, system: &System, state: &mut SystemState) -> StageResult {
         let addr = state.cpu.op_addr;
         if let Stage::Execute(stage) = state.cpu.stage {
-            let res = match state.cpu.op.instruction {
+            match state.cpu.op.instruction {
                 Instruction::Adc => self.inst_adc(system, state, addr),
                 Instruction::And => self.inst_and(system, state, addr),
                 Instruction::Asl => self.inst_asl(system, state, addr, stage),
@@ -660,44 +660,44 @@ impl Cpu {
                 Instruction::Clc => self.inst_clc(system, state),
                 Instruction::Cld => self.inst_cld(system, state),
                 Instruction::Cli => self.inst_cli(system, state),
-                Instruction::Clv => self.inst_clv(system, state), 
+                Instruction::Clv => self.inst_clv(system, state),
                 Instruction::Cmp => self.inst_cmp(system, state, addr),
                 Instruction::Cpx => self.inst_cpx(system, state, addr),
-                Instruction::Cpy => self.inst_cpy(system, state, addr), 
-                Instruction::Dec => self.inst_dec(system, state, addr, stage), 
+                Instruction::Cpy => self.inst_cpy(system, state, addr),
+                Instruction::Dec => self.inst_dec(system, state, addr, stage),
                 Instruction::Dex => self.inst_dex(system, state),
-                Instruction::Dey => self.inst_dey(system, state), 
+                Instruction::Dey => self.inst_dey(system, state),
                 Instruction::Eor => self.inst_eor(system, state, addr),
-                Instruction::Inc => self.inst_inc(system, state, addr, stage), 
+                Instruction::Inc => self.inst_inc(system, state, addr, stage),
                 Instruction::Inx => self.inst_inx(system, state),
-                Instruction::Iny => self.inst_iny(system, state), 
-                Instruction::Jmp => self.inst_jmp(system, state, addr), 
+                Instruction::Iny => self.inst_iny(system, state),
+                Instruction::Jmp => self.inst_jmp(system, state, addr),
                 Instruction::Jsr => self.inst_jsr(system, state, addr, stage),
-                Instruction::Lda => self.inst_lda(system, state, addr), 
-                Instruction::Ldx => self.inst_ldx(system, state, addr), 
-                Instruction::Ldy => self.inst_ldy(system, state, addr), 
-                Instruction::Lsr => self.inst_lsr(system, state, addr, stage),  
+                Instruction::Lda => self.inst_lda(system, state, addr),
+                Instruction::Ldx => self.inst_ldx(system, state, addr),
+                Instruction::Ldy => self.inst_ldy(system, state, addr),
+                Instruction::Lsr => self.inst_lsr(system, state, addr, stage),
                 Instruction::Nop => self.inst_nop(system, state),
-                Instruction::Ora => self.inst_ora(system, state, addr), 
-                Instruction::Pha => self.inst_pha(system, state), 
-                Instruction::Php => self.inst_php(system, state), 
-                Instruction::Pla => self.inst_pla(system, state, stage), 
-                Instruction::Plp => self.inst_plp(system, state, stage), 
-                Instruction::Rol => self.inst_rol(system, state, addr, stage), 
-                Instruction::Ror => self.inst_ror(system, state, addr, stage), 
-                Instruction::Rti => self.inst_rti(system, state, stage), 
-                Instruction::Rts => self.inst_rts(system, state, stage), 
-                Instruction::Sbc => self.inst_sbc(system, state, addr), 
+                Instruction::Ora => self.inst_ora(system, state, addr),
+                Instruction::Pha => self.inst_pha(system, state),
+                Instruction::Php => self.inst_php(system, state),
+                Instruction::Pla => self.inst_pla(system, state, stage),
+                Instruction::Plp => self.inst_plp(system, state, stage),
+                Instruction::Rol => self.inst_rol(system, state, addr, stage),
+                Instruction::Ror => self.inst_ror(system, state, addr, stage),
+                Instruction::Rti => self.inst_rti(system, state, stage),
+                Instruction::Rts => self.inst_rts(system, state, stage),
+                Instruction::Sbc => self.inst_sbc(system, state, addr),
                 Instruction::Sec => self.inst_sec(system, state),
                 Instruction::Sed => self.inst_sed(system, state),
-                Instruction::Sei => self.inst_sei(system, state), 
+                Instruction::Sei => self.inst_sei(system, state),
                 Instruction::Sta => self.inst_sta(system, state, addr),
-                Instruction::Stx => self.inst_stx(system, state, addr), 
-                Instruction::Sty => self.inst_sty(system, state, addr), 
+                Instruction::Stx => self.inst_stx(system, state, addr),
+                Instruction::Sty => self.inst_sty(system, state, addr),
                 Instruction::Tax => self.inst_tax(system, state),
                 Instruction::Tay => self.inst_tay(system, state),
-                Instruction::Tsx => self.inst_tsx(system, state), 
-                Instruction::Txa => self.inst_txa(system, state), 
+                Instruction::Tsx => self.inst_tsx(system, state),
+                Instruction::Txa => self.inst_txa(system, state),
                 Instruction::Txs => self.inst_txs(system, state),
                 Instruction::Tya => self.inst_tya(system, state),
                 i => {
@@ -733,22 +733,9 @@ impl Cpu {
                         _ => unreachable!(),
                     }
                 }
-            };
-
-            match res {
-                StageResult::Continue => {
-                    state.cpu.stage = state.cpu.stage.increment();
-                },
-                StageResult::Done => {
-                    state.cpu.stage = Stage::Fetch;
-                },
-                StageResult::Next => {
-                    state.cpu.stage = Stage::Fetch;
-                    self.decode(system, state);
-                }
             }
         } else {
-            unreachable!();
+            unreachable!()
         }
     }
 
@@ -774,7 +761,7 @@ impl Cpu {
         state.cpu.flag_z = value;
         StageResult::Done
     }
-    
+
     fn inst_asl(&self, system: &System, state: &mut SystemState, addr: u16, stage: u32)
     -> StageResult {
         match stage {
@@ -888,9 +875,10 @@ impl Cpu {
                 state.cpu.flag_i = 1;
                 if state.cpu.pending_nmi.is_some() {
                     state.cpu.pending_nmi = None;
-                    state.cpu.stage = Stage::Nmi(4);
+                    StageResult::JumpDone(Stage::Nmi(4))
+                } else {
+                    StageResult::Continue
                 }
-                StageResult::Continue
             },
             4 => {
                 let value = self.bus.read(system, state, 0xfffe);
@@ -994,7 +982,7 @@ impl Cpu {
         state.cpu.flag_z = state.cpu.reg_x;
         StageResult::Next
     }
-    
+
     fn inst_dey(&self, system: &System, state: &mut SystemState)
     -> StageResult {
         state.cpu.reg_y = state.cpu.reg_y.wrapping_sub(1) & 0xff;
@@ -1519,7 +1507,7 @@ impl Cpu {
         state.cpu.flag_z = state.cpu.reg_x;
         StageResult::Done
     }
-    
+
     fn ill_inst_dcp(&self, system: &System, state: &mut SystemState, addr: u16,
                     stage: u32) -> StageResult {
         match stage {
@@ -1548,7 +1536,7 @@ impl Cpu {
             _ => unreachable!()
         }
     }
-    
+
     fn ill_inst_isc(&self, system: &System, state: &mut SystemState, addr: u16,
                     stage: u32) -> StageResult {
         match stage {
@@ -1593,7 +1581,7 @@ impl Cpu {
         let _ = self.bus.read(system, state, addr);
         StageResult::Done
     }
-    
+
     fn ill_inst_lax(&self, system: &System, state: &mut SystemState, addr: u16) -> StageResult {
         let val = self.bus.read(system, state, addr);
         state.cpu.reg_a = val as u32;
@@ -1602,7 +1590,7 @@ impl Cpu {
         state.cpu.flag_z = state.cpu.reg_a;
         StageResult::Done
     }
-    
+
     fn ill_inst_nop(&self, system: &System, state: &mut SystemState, addr: u16) -> StageResult {
         match state.cpu.op.addressing {
             Addressing::Immediate | Addressing::ZeroPage  |
@@ -1616,7 +1604,7 @@ impl Cpu {
             }
         }
     }
-    
+
     fn ill_inst_rla(&self, system: &System, state: &mut SystemState, addr: u16,
                     stage: u32) -> StageResult {
         match stage {
@@ -1681,7 +1669,7 @@ impl Cpu {
             _ => unreachable!()
         }
     }
-    
+
     fn ill_inst_sax(&self, system: &System, state: &mut SystemState, addr: u16) -> StageResult {
         let val = (state.cpu.reg_a & state.cpu.reg_x) & 0xff;
         self.bus.write(system, state, addr, val as u8);
@@ -1702,7 +1690,7 @@ impl Cpu {
         state.cpu.flag_z = state.cpu.reg_a;
         StageResult::Done
     }
-    
+
     fn ill_inst_shx(&self, system: &System, state: &mut SystemState,
                     addr: u16) -> StageResult {
         let temp_addr = addr as u32;
@@ -1758,7 +1746,7 @@ impl Cpu {
             _ => unreachable!()
         }
     }
-    
+
     fn ill_inst_sre(&self, system: &System, state: &mut SystemState, addr: u16,
                     stage: u32) -> StageResult {
         match stage {
@@ -1804,7 +1792,7 @@ impl Cpu {
         state.cpu.flag_z = state.cpu.reg_a;
         StageResult::Done
     }
-    
+
     fn will_wrap(addr: u16, add: u16) -> bool {
         addr & 0xff00 != addr.wrapping_add(add) & 0xff00
     }
