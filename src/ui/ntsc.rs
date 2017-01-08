@@ -20,7 +20,7 @@ impl NtscFilter {
         NtscFilter {
             ntsc: Box::new(RefCell::new(NesNtsc::new(setup))),
             width: NesNtsc::out_width(256),
-            height: 480,
+            height: 240,
             phase: Cell::new(0),
         }
     }
@@ -28,7 +28,7 @@ impl NtscFilter {
 
 impl Filter for NtscFilter {
     fn get_dimensions(&self) -> (u32, u32) {
-        (self.width * 2, self.height * 2)
+        (self.width * 2, self.height * 4)
     }
 
     fn get_fragment_shader(&self) -> String {
@@ -41,7 +41,9 @@ impl Filter for NtscFilter {
             uniform sampler2D tex;
 
             void main() {
-                color = texture(tex, v_tex_coords).zyxw;
+                float line_intensity = mod(v_tex_coords.y * 480.0, 2.0) * 0.1;
+                vec4 col = texture(tex, v_tex_coords).zyxw;
+                color = col - (col * line_intensity);
             }
         "#.to_string()
     }
@@ -66,7 +68,7 @@ impl Filter for NtscFilter {
         let mut unis = FilterUniforms::new();
         let mut out = vec![0; (self.height * self.width) as usize];
         self.phase.set(self.phase.get() ^ 1);
-        self.ntsc.borrow_mut().blit(256, screen, self.phase.get(), &mut *out, self.width * 2 * 4);
+        self.ntsc.borrow_mut().blit(256, screen, self.phase.get(), &mut *out, self.width * 4);
 
         let img = RawImage2d {
             data: ::std::borrow::Cow::Borrowed(&*out),
