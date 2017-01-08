@@ -1,4 +1,5 @@
 EMSCRIPTEN_RUSTC = ../../../emscrip/rust/build/x86_64-unknown-linux-gnu/stage2/bin/rustc
+EMSCRIPTEN_RUSTC = rustc
 EMSCRIPTEN_ENV = ../../../emscrip/emsdk_portable
 
 MAIN = mass_nes

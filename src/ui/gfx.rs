@@ -9,6 +9,163 @@ pub use glium::glutin::VirtualKeyCode as Key;
 use std::collections::HashMap;
 use std::cell::{Cell, RefCell};
 
+pub enum FilterScaling {
+    Nearest,
+    Linear,
+}
+
+enum FilterTexture {
+    Texture2d(Texture2d),
+    IntegralTexture2d(IntegralTexture2d),
+}
+
+pub struct FilterUniform {
+    name: String,
+    texture: FilterTexture,
+    scaling: FilterScaling,
+}
+
+pub struct FilterUniforms {
+    uniforms: Vec<FilterUniform>,
+}
+
+impl FilterUniforms {
+    pub fn new() -> FilterUniforms {
+        FilterUniforms {
+            uniforms: Vec::new(),
+        }
+    }
+
+    pub fn add_2d_uniform(&mut self, name: String, tex: Texture2d, scale: FilterScaling) {
+        let uni = FilterUniform {
+            name: name,
+            texture: FilterTexture::Texture2d(tex),
+            scaling: scale,
+        };
+
+        self.uniforms.push(uni);
+    }
+
+    pub fn add_i2d_uniform(&mut self, name: String, tex: IntegralTexture2d, scale: FilterScaling) {
+        let uni = FilterUniform {
+            name: name,
+            texture: FilterTexture::IntegralTexture2d(tex),
+            scaling: scale,
+        };
+
+        self.uniforms.push(uni);
+    }
+}
+
+impl glium::uniforms::Uniforms for FilterUniforms {
+    fn visit_values<'b, F: FnMut(&str, glium::uniforms::UniformValue<'b>)>(&'b self, mut visit: F) {
+        use glium::uniforms::{UniformValue, MagnifySamplerFilter, MinifySamplerFilter};
+        for uni in self.uniforms.iter() {
+            let (mag_scale, min_scale) = match uni.scaling {
+                FilterScaling::Nearest => (MagnifySamplerFilter::Nearest,
+                                         MinifySamplerFilter::Nearest),
+                FilterScaling::Linear => (MagnifySamplerFilter::Linear,
+                                        MinifySamplerFilter::Linear),
+            };
+
+            let mut sampler = glium::uniforms::SamplerBehavior::default();
+            sampler.magnify_filter = mag_scale;
+            sampler.minify_filter = min_scale;
+
+            match uni.texture {
+                FilterTexture::Texture2d(ref tex) => {
+                    visit(&*uni.name, UniformValue::Texture2d(&tex, Some(sampler)));
+                },
+                FilterTexture::IntegralTexture2d(ref tex) => {
+                    visit(&*uni.name, UniformValue::IntegralTexture2d(&tex, Some(sampler)));
+                }
+            }
+        }
+    }
+}
+
+pub trait Filter {
+    fn get_dimensions(&self) -> (u32, u32);
+    fn get_fragment_shader(&self) -> String;
+    fn get_vertex_shader(&self) -> String;
+    fn process(&self, &glium::Display, &[u16]) -> FilterUniforms;
+}
+
+pub struct PalettedFilter {
+    palette: [u8; 1536],
+}
+
+impl PalettedFilter {
+    pub fn new(pal: [u8; 1536]) -> PalettedFilter {
+        PalettedFilter {
+            palette: pal,
+        }
+    }
+}
+
+impl Filter for PalettedFilter {
+    fn get_dimensions(&self) -> (u32, u32) { (256 * 3, 240 * 3) }
+
+    fn get_fragment_shader(&self) -> String {
+        r#"
+            #version 140
+
+            in vec2 v_tex_coords;
+            out vec4 color;
+
+            uniform isampler2D tex;
+            uniform sampler2D palette;
+
+            void main() {
+                ivec4 index = texture(tex, v_tex_coords);
+                color = texelFetch(palette, ivec2(index.x % 64, index.x / 64), 0);
+            }
+        "#.to_string()
+    }
+
+    fn get_vertex_shader(&self) -> String {
+        r#"
+            #version 140
+
+            in vec2 position;
+            in vec2 tex_coords;
+
+            out vec2 v_tex_coords;
+
+            void main() {
+                v_tex_coords = tex_coords;
+                gl_Position = vec4(position, 0.0, 1.0);
+            }
+        "#.to_string()
+    }
+
+    fn process(&self, display: &glium::Display, screen: &[u16]) -> FilterUniforms {
+        let mut unis = FilterUniforms::new();
+        let img = RawImage2d {
+            data: ::std::borrow::Cow::Borrowed(screen),
+            width: 256,
+            height: 240,
+            format: ClientFormat::U16,
+        };
+
+        let tex = IntegralTexture2d::with_mipmaps(
+            &*display, img, texture::MipmapsOption::NoMipmap).unwrap();
+        unis.add_i2d_uniform("tex".to_string(), tex, FilterScaling::Nearest);
+
+        let palette = RawImage2d {
+            data: ::std::borrow::Cow::Borrowed(&self.palette[..]),
+            width: 64,
+            height: 8,
+            format: ClientFormat::U8U8U8,
+        };
+
+        let pal_tex = Texture2d::with_mipmaps(&*display, palette, 
+                                             texture::MipmapsOption::NoMipmap).unwrap();
+        unis.add_2d_uniform("palette".to_string(), pal_tex, FilterScaling::Nearest);
+        unis
+    }
+}
+
 #[derive(Copy, Clone)]
 struct Vertex {
     position: [f32; 2],
@@ -17,20 +174,21 @@ struct Vertex {
 
 implement_vertex!(Vertex, position, tex_coords);
 
-pub struct GliumRenderer {
+pub struct GliumRenderer<T: Filter> {
+    filter: T,
     display: RefCell<glium::Display>,
     indicies: glium::index::NoIndices,
     program: glium::Program,
     vertex_buffer: glium::VertexBuffer<Vertex>,
     closed: Cell<bool>,
-    palette: Texture2d,
     input: RefCell<HashMap<Key, bool>>,
 }
 
-impl GliumRenderer {
-    pub fn new(pal: &[u8; 1536]) -> GliumRenderer {
+impl<T: Filter> GliumRenderer<T> {
+    pub fn new(filter: T) -> GliumRenderer<T> {
+        let dims = filter.get_dimensions();
         let display = glium::glutin::WindowBuilder::new()
-            .with_dimensions(256 * 3, 240 * 3)
+            .with_dimensions(dims.0, dims.1)
             .with_title(format!("Mass NES"))
             .build_glium()
             .unwrap();
@@ -45,54 +203,15 @@ impl GliumRenderer {
         let vertex_buffer = glium::VertexBuffer::new(&display, &shape).unwrap();
         let indicies = glium::index::NoIndices(glium::index::PrimitiveType::TriangleFan);
 
-        let vertex_shader_src = r#"
-            #version 140
-
-            in vec2 position;
-            in vec2 tex_coords;
-
-            out vec2 v_tex_coords;
-
-            void main() {
-                v_tex_coords = tex_coords;
-                gl_Position = vec4(position, 0.0, 1.0);
-            }
-        "#;
-
-        let fragment_shader_src = r#"
-            #version 140
-
-            in vec2 v_tex_coords;
-            out vec4 color;
-
-            uniform isampler2D tex;
-            uniform sampler2D palette;
-
-            void main() {
-                ivec4 index = texture(tex, v_tex_coords);
-                color = texelFetch(palette, ivec2(index.x % 64, index.x / 64), 0);
-            }
-        "#;
-
-        let program = glium::Program::from_source(&display, vertex_shader_src, fragment_shader_src, None).unwrap();
-
-        let palette = RawImage2d {
-            data: ::std::borrow::Cow::Borrowed(&pal[..]),
-            width: 64,
-            height: 8,
-            format: ClientFormat::U8U8U8,
-        };
-
-        let pal_tex = Texture2d::with_mipmaps(&display, palette, 
-                                        texture::MipmapsOption::NoMipmap).unwrap();
+        let program = glium::Program::from_source(&display, &*filter.get_vertex_shader(), &*filter.get_fragment_shader(), None).unwrap();
 
         GliumRenderer {
+            filter: filter,
             display: RefCell::new(display),
             indicies: indicies,
             program: program,
             vertex_buffer: vertex_buffer,
             closed: Cell::new(false),
-            palette: pal_tex,
             input: RefCell::new(HashMap::new()),
         }
     }
@@ -115,28 +234,11 @@ impl GliumRenderer {
     }
 
     pub fn render(&self, screen: &[u16]) {
-        {
-            let img = RawImage2d {
-                data: ::std::borrow::Cow::Borrowed(screen),
-                width: 256,
-                height: 240,
-                format: ClientFormat::U16,
-            };
-
-            use glium::{uniforms, texture};
-            let tex = IntegralTexture2d::with_mipmaps(
-                &*self.display.borrow(), img, texture::MipmapsOption::NoMipmap).unwrap();
-
-            let uniforms = uniform! {
-                tex: tex.sampled().magnify_filter(uniforms::MagnifySamplerFilter::Nearest).minify_filter(uniforms::MinifySamplerFilter::Nearest),
-                palette: self.palette.sampled().magnify_filter(uniforms::MagnifySamplerFilter::Nearest).minify_filter(uniforms::MinifySamplerFilter::Nearest),
-            };
-
-            let mut target = self.display.borrow_mut().draw(); 
-            target.clear_color(0.0, 0.0, 0.0, 1.0);
-            target.draw(&self.vertex_buffer, &self.indicies, &self.program, &uniforms, &Default::default()).unwrap();
-            target.finish().unwrap();
-        }
+        let uniforms = self.filter.process(&*self.display.borrow(), screen);
+        let mut target = self.display.borrow_mut().draw(); 
+        target.clear_color(0.0, 0.0, 0.0, 1.0);
+        target.draw(&self.vertex_buffer, &self.indicies, &self.program, &uniforms, &Default::default()).unwrap();
+        target.finish().unwrap();
     }
 
     pub fn get_input(&self) -> HashMap<Key, bool> {
@@ -164,14 +266,13 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn new(pal: &[u8; 1536]) -> Renderer {
-        let pal = *pal;
+    pub fn new<T: 'static + Filter + Send>(filter: T) -> Renderer {
         let (tx, rx) = channel();
 
         let (input_tx, input_rx) = channel();
 
         ::std::thread::spawn(move || {
-            let gl = GliumRenderer::new(&pal);
+            let gl = GliumRenderer::new(filter);
 
             loop {
                 //Drop frames until we get to the most recent

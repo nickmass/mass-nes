@@ -1,5 +1,5 @@
 use nes::bus::{AddressValidator, AddressBus, BusKind, DeviceKind};
-use nes::system::{Region, SystemState, System};
+use nes::system::{SystemState, System};
 use nes::nametables::{NametablesState, Nametables};
 
 pub struct PpuState {
@@ -271,15 +271,13 @@ impl Default for Stage {
 
 
 pub struct Ppu {
-    region: Region,
     bus: AddressBus,
     pub nametables: Nametables,
 }
 
 impl Ppu {
-    pub fn new(region: Region, state: &mut SystemState) -> Ppu {
+    pub fn new(state: &mut SystemState) -> Ppu {
         let ppu = Ppu {
-            region: region,
             bus: AddressBus::new(BusKind::Ppu, state, 0),
             nametables: Nametables::new(state),
         };

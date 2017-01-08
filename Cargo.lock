@@ -7,6 +7,7 @@ dependencies = [
  "cpal 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures 0.1.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "glium 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "nes_ntsc 0.1.0",
  "rodio 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -398,6 +399,20 @@ dependencies = [
  "kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.18 (registry+https://github.com/rust-lang/crates.io-index)",
  "winapi 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "nes_ntsc"
+version = "0.1.0"
+dependencies = [
+ "nes_ntsc-sys 0.1.0",
+]
+
+[[package]]
+name = "nes_ntsc-sys"
+version = "0.1.0"
+dependencies = [
+ "gcc 0.3.41 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]

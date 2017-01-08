@@ -216,7 +216,7 @@ impl System {
     pub fn new(region: Region, mut cartridge: Cartridge,
                state: &mut SystemState) -> System {
         let cpu = Cpu::new(state);
-        let ppu = Ppu::new(Region::Ntsc, state);
+        let ppu = Ppu::new(state);
         let apu = Apu::new(state);
         cartridge.init(state, &cpu, &ppu);
 

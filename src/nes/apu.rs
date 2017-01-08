@@ -29,7 +29,7 @@ pub struct ApuState {
     sequence_mode: SequenceMode,
     irq_inhibit: bool,
     irq: bool,
-    samples: [i16; 33248], //Max cycles for the longer pal frame
+    samples: Vec<i16>,
     sample_index: usize,
     last_4017: u8,
 }
@@ -43,7 +43,7 @@ impl Default for ApuState {
             sequence_mode: SequenceMode::FourStep,
             irq_inhibit: false,
             irq: false,
-            samples: [0; 33248],
+            samples: vec![0; 33248], //Max cycles for the longer pal frame
             sample_index: 0,
             last_4017: 0,
         }

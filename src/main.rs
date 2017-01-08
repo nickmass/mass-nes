@@ -5,6 +5,7 @@
 extern crate glium;
 extern crate blip_buf;
 extern crate clap;
+extern crate nes_ntsc;
 
 use blip_buf::BlipBuf;
 
@@ -15,6 +16,8 @@ mod ui;
 use ui::gfx::{Key, Renderer};
 use ui::audio::{Audio, RodioAudio};
 use ui::sync::FrameSync;
+
+use nes_ntsc::NesNtscSetup;
 
 use clap::{App, Arg, SubCommand};
 
@@ -33,7 +36,10 @@ fn run(mut file: File, region: Region) {
     let pal = region.default_palette();
     let cart = Cartridge::load(&mut file).unwrap();
 
-    let window = Renderer::new(pal);
+    //let filter = ui::ntsc::NtscFilter::new(NesNtscSetup::composite());
+    let filter = ui::gfx::PalettedFilter::new(NesNtscSetup::composite().generate_palette());
+
+    let window = Renderer::new(filter);
     let mut audio = RodioAudio::new(48000);
 
     let sample_rate = audio.sample_rate();
