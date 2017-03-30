@@ -1,13 +1,13 @@
-use nes::bus::{DeviceMappings, RangeAndMask, NotAndMask, Address, DeviceKind};
-use nes::cpu::{Cpu, CpuState};
-use nes::ppu::{Ppu, PpuState};
-use nes::apu::{Apu, ApuState};
-use nes::cartridge::Cartridge;
-use nes::memory::Pages;
-use nes::debug::{Debug, DebugState};
-use nes::input::{Input, InputState};
+use bus::{DeviceMappings, RangeAndMask, NotAndMask, Address, DeviceKind};
+use cpu::{Cpu, CpuState};
+use ppu::{Ppu, PpuState};
+use apu::{Apu, ApuState};
+use cartridge::Cartridge;
+use memory::Pages;
+use debug::{Debug, DebugState};
+use input::{Input, InputState};
 
-pub use nes::input::{Controller, InputDevice};
+pub use input::{Controller, InputDevice};
 
 pub enum UserInput {
     PlayerOne(Controller),

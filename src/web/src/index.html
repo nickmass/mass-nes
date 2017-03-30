@@ -1,31 +1,45 @@
-<canvas id="screen" width="256" height="240"></canvas>
+<canvas id="screen" width="256" height="240" style="width:512px;height:480px;"></canvas>
+<br/>
+<input type="checkbox" id="enable-audio" /><label for="enable-audio">Enabe Audio</label>
 <script>
-var canvas = document.getElementById('screen');
+ (function(canvas, enable_audio) {
+     var gfx_ctx = canvas.getContext('2d');
+     function draw(screen) {
+         var imgd = gfx_ctx.getImageData(0,0,256,240);
+         var pix = imgd.data;
+         for (var i = 0; i < pix.length; i++) {
+             pix[i] = screen[i];
+         }
+         gfx_ctx.putImageData(imgd,0,0);
+     }
 
-function draw(screen) {
-	var context = canvas.getContext('2d');
-	var imgd = context.getImageData(0,0,256,240);
-	var pix = imgd.data;
-	for (var i = 0; i < 256*240; i++) {
-		var red = (screen[i] >> 16) & 0xff;
-		var green = (screen[i] >> 8) & 0xff;
-		var blue = (screen[i] >> 0) & 0xff;
+     var audio_ctx = new (window.AudioContext || window.webkitAudioContext)();
+     function play(samples) {
+         var buf = audio_ctx.createBuffer(1, samples.length, samples.length * 60);
+         var data = buf.getChannelData(0);
+         for (var i = 0; i < samples.length; i++) {
+             data[i] = samples[i];
+         }
 
-		pix[(i * 4) + 3] = 0xff;
-		pix[(i * 4) + 2] = red;
-		pix[(i * 4) + 1] = green;
-		pix[(i * 4) + 0] = blue;
-	}
-	context.putImageData(imgd,0,0);
-}
+         var source = audio_ctx.createBufferSource();
+         source.buffer = buf;
+         source.connect(audio_ctx.destination);
 
-var worker = new Worker('main.js');
-worker.onmessage = function(e) {
-	draw(e.data);
-  console.log("Frame");
-}
+         source.start();
+     }
 
+     var worker = new Worker('main.js');
+     worker.onmessage = function(e) {
+         if(e.data.screen) {
+             draw(e.data.screen);
+         }
+         if(e.data.audio && enable_audio.checked) {
+             play(e.data.audio);
+         }
+     }
+ })(document.getElementById('screen'), document.getElementById('enable-audio'));
 </script>
 <p>
-This will run VERY slow (0.5 frames per second). There is no input controls, and it is written in a VERY hacky way. <a href="https://github.com/nickmass/mass-nes/tree/master/src/web">Code</a>
+    This will run VERY slow. There is no input controls, and it is written in a VERY hacky way.
+    <a href="https://github.com/nickmass/mass-nes/tree/master/src/web">Code</a>
 </p>

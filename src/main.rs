@@ -6,10 +6,10 @@ extern crate glium;
 extern crate blip_buf;
 extern crate clap;
 extern crate nes_ntsc;
+extern crate nes;
 
 use blip_buf::BlipBuf;
 
-mod nes;
 use nes::{UserInput, Controller, Machine, Cartridge, Region};
 
 mod ui;

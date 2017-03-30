@@ -1,5 +1,5 @@
-use nes::system::{System, SystemState};
-use nes::bus::BusKind;
+use system::{System, SystemState};
+use bus::BusKind;
 
 #[derive(Default)]
 pub struct InputState {
@@ -13,6 +13,7 @@ pub trait InputDevice {
     fn to_byte(&self) -> u8;
 }
 
+#[derive(Copy, Clone, Debug)]
 pub struct Controller {
     pub a: bool,
     pub b: bool,

@@ -1,6 +1,6 @@
-use nes::system::SystemState;
-use nes::system::System;
-use nes::channel::Channel;
+use system::SystemState;
+use system::System;
+use channel::Channel;
 
 #[derive(Clone, Copy)]
 pub enum BusKind {

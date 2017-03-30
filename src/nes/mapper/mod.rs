@@ -6,11 +6,11 @@ mod axrom;
 mod txrom;
 mod fme7;
 
-use nes::system::{System, SystemState};
-use nes::bus::BusKind;
-use nes::cpu::Cpu;
-use nes::ppu::Ppu;
-use nes::cartridge::Cartridge;
+use system::{System, SystemState};
+use bus::BusKind;
+use cpu::Cpu;
+use ppu::Ppu;
+use cartridge::Cartridge;
 
 pub trait Mapper { 
     fn register(&self, state: &mut SystemState, cpu: &mut Cpu, ppu: &mut Ppu,

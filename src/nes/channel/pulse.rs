@@ -1,8 +1,8 @@
-use nes::bus::{DeviceKind, AndEqualsAndMask};
-use nes::system::{System, SystemState};
-use nes::cpu::Cpu;
-use nes::channel::Channel;
-use nes::apu;
+use bus::{DeviceKind, AndEqualsAndMask};
+use system::{System, SystemState};
+use cpu::Cpu;
+use channel::Channel;
+use apu;
 
 use std::cell::RefCell;
 

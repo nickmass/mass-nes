@@ -1,5 +1,5 @@
-use nes::system::{System, SystemState};
-use nes::ops::*;
+use system::{System, SystemState};
+use ops::*;
 use std::collections::HashMap;
 
 #[derive(Default)]

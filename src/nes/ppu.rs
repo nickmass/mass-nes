@@ -1,6 +1,6 @@
-use nes::bus::{AddressValidator, AddressBus, BusKind, DeviceKind};
-use nes::system::{SystemState, System};
-use nes::nametables::{NametablesState, Nametables};
+use bus::{AddressValidator, AddressBus, BusKind, DeviceKind};
+use system::{SystemState, System, EmphMode};
+use nametables::{NametablesState, Nametables};
 
 pub struct PpuState {
     current_tick: u64,
@@ -168,12 +168,12 @@ impl PpuState {
     fn emph_bits(&self, system: &System) -> u16 {
         let mut val = 0;
         match system.region.emph_bits() {
-            ::nes::system::EmphMode::Bgr => {
+            EmphMode::Bgr => {
                 if self.is_red_emph() { val |= 0x40; }
                 if self.is_green_emph() { val |= 0x80; }
                 if self.is_blue_emph() { val |= 0x100; }
             },
-            ::nes::system::EmphMode::Brg => {
+            EmphMode::Brg => {
                 if self.is_green_emph() { val |= 0x40; }
                 if self.is_red_emph() { val |= 0x80; }
                 if self.is_blue_emph() { val |= 0x100; }

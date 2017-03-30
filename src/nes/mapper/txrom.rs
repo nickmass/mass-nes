@@ -1,10 +1,10 @@
-use nes::system::{System, SystemState};
-use nes::memory::{BankKind, MappedMemory, MemKind};
-use nes::bus::{DeviceKind, BusKind, AndAndMask, NotAndMask, AndEqualsAndMask};
-use nes::cartridge::Cartridge;
-use nes::cpu::Cpu;
-use nes::ppu::Ppu;
-use nes::mapper::Mapper;
+use system::{System, SystemState};
+use memory::{BankKind, MappedMemory, MemKind};
+use bus::{DeviceKind, BusKind, AndAndMask, NotAndMask, AndEqualsAndMask};
+use cartridge::Cartridge;
+use cpu::Cpu;
+use ppu::Ppu;
+use mapper::Mapper;
 
 use std::cell::RefCell;
 

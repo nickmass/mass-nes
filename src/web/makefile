@@ -1,5 +1,3 @@
-EMSCRIPTEN_RUSTC = ../../../emscrip/rust/build/x86_64-unknown-linux-gnu/stage2/bin/rustc
-EMSCRIPTEN_RUSTC = rustc
 EMSCRIPTEN_ENV = ../../../emscrip/emsdk_portable
 
 MAIN = mass_nes
@@ -10,9 +8,9 @@ export EM_CONFIG = /home/nickmass/.emscripten
 export EMSCRIPTEN = $(EMSCRIPTEN_ENV)/emscripten/incoming
 
 all: $(MAIN)
-	$(EMSCRIPTEN_RUSTC) -O --target=asmjs-unknown-emscripten src/main.rs --extern mass_nes=target/debug/deps/libmass_nes.rlib --out-dir target/debug
-	cp src/index.html target/debug
+	rustc -O --target=wasm32-unknown-emscripten src/main.rs --extern nes=target/release/deps/libnes.rlib --out-dir target/release
+	cp src/index.html target/release
 
 mass_nes:
-	mkdir -p target/debug/deps
-	$(EMSCRIPTEN_RUSTC) -O --target=asmjs-unknown-emscripten ../lib.rs --crate-name mass_nes --crate-type lib -g --out-dir target/debug/deps --emit=dep-info,link
+	mkdir -p target/release/deps
+	rustc -O --target=wasm32-unknown-emscripten ../nes/lib.rs --crate-name nes --crate-type lib -g --out-dir target/release/deps --emit=dep-info,link

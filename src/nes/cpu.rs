@@ -1,7 +1,7 @@
-use nes::bus::{BusKind, DeviceKind, AddressBus, AddressValidator};
-use nes::system::{System, SystemState};
-use nes::ops::*;
-use nes::memory::MemoryBlock;
+use bus::{BusKind, DeviceKind, AddressBus, AddressValidator};
+use system::{System, SystemState};
+use ops::*;
+use memory::MemoryBlock;
 
 use std::collections::VecDeque;
 

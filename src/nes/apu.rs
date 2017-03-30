@@ -1,6 +1,6 @@
-use nes::system::{System, SystemState};
-use nes::channel::{Channel, Pulse, PulseChannel, Triangle, Noise, Dmc};
-use nes::cpu::Cpu;
+use system::{System, SystemState};
+use channel::{Channel, Pulse, PulseChannel, Triangle, Noise, Dmc};
+use cpu::Cpu;
 
 //TODO - Is this table the same for both PAL and NTSC?
 pub const LENGTH_TABLE: [u8; 0x20] = [10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14,

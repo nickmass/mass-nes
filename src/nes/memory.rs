@@ -1,5 +1,5 @@
-use nes::system::{System, SystemState};
-use nes::cartridge::Cartridge;
+use system::{System, SystemState};
+use cartridge::Cartridge;
 
 #[derive(Copy, Clone)]
 pub struct Page {

@@ -2,11 +2,11 @@ use std::io;
 use std::convert::From;
 use std::error;
 use std::fmt;
-use nes::system::SystemState;
-use nes::cpu::Cpu;
-use nes::ppu::Ppu;
-use nes::mapper;
-use nes::mapper::Mapper;
+use system::SystemState;
+use cpu::Cpu;
+use ppu::Ppu;
+use mapper;
+use mapper::Mapper;
 
 #[derive(Debug)]
 pub enum CartridgeError {

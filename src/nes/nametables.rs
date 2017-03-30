@@ -1,5 +1,5 @@
-use nes::memory::Page;
-use nes::system::SystemState;
+use memory::Page;
+use system::SystemState;
 
 pub struct NametablesState {
     mappings: [Nametable; 4],

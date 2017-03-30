@@ -1,5 +1,5 @@
-extern crate mass_nes;
-use self::mass_nes::nes::{UserInput, Machine, Region, Cartridge, Controller};
+extern crate nes;
+use self::nes::{UserInput, Machine, Region, Cartridge, Controller};
 
 use std::fs::File;
 use std::path::Path;

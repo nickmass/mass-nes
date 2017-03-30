@@ -1,38 +1,28 @@
-#![feature(libc)]
-extern crate libc;
-extern "C" {
-    fn emscripten_asm_const_int(script: *const libc::c_char, ...) -> libc::c_int;
+use std::os::raw::{c_char, c_int};
+
+extern {
+    fn emscripten_asm_const_int(script: *const c_char, ...) -> c_int;
 }
 
 macro_rules! c_str {
     ($s:expr) => {
-        concat!($s, "\0").as_ptr() as *const _
+        {
+            concat!($s, "\0").as_ptr() as *const _
+        }
     }
 }
 
 macro_rules! js {
-    (($($name:ident = $expr:expr),*) {$($tt:tt)*}) => {
-        unsafe { emscripten_asm_const_int(c_str!(concat!(
-            $(
-                "var ", stringify!($name), " = $0; ",
-            )*
-             stringify!($($tt)*))), $($expr),*) }
+    (($($expr:expr),*) {$code:expr}) => {
+        unsafe {
+            emscripten_asm_const_int(c_str!($code), $($expr),*)
+        }
     };
 }
 
-macro_rules! js_raw {
-    (($($name:ident = $expr:expr),*) {$code:expr}) => {
-        unsafe { emscripten_asm_const_int(c_str!(concat!(
-            $(
-                "var ", stringify!($name), " = $0; ",
-            )*
-             $code)), $($expr),*) }
-    };
-}
+extern crate nes;
 
-extern crate mass_nes;
-
-use mass_nes::nes::{UserInput, Controller, Machine, Cartridge, Region};
+use nes::{UserInput, Controller, Machine, Cartridge, Region};
 
 fn main() {
     let rom = include_bytes!("/home/nickmass/kirby.nes");
@@ -41,32 +31,28 @@ fn main() {
     let cart = Cartridge::load(&mut (rom as &[u8])).unwrap();
 
     let mut machine = Machine::new(region, cart, |screen| {
-        let screen: Vec<u32> = screen.iter().map(|i| {
-            let mut color: u32 = 0;
-            color |= pal[(i*3) as usize] as u32;
-            color |= (pal[((i*3) + 1) as usize] as u32) << 8;
-            color |= (pal[((i*3) + 2) as usize] as u32) << 16;
-            color
-        }).collect();
-        js_raw!{(js_screen = &*screen){r#"var screen = Module.HEAPU32.subarray(js_screen >> 2, (js_screen >> 2)+(256*240));postMessage(screen);"#}};
+        let screen: Vec<u8> = screen.iter().fold( Vec::new(), |mut screen, i| {
+            let red = pal[(i*3) as usize];
+            let green = pal[((i*3) + 1) as usize];
+            let blue = pal[((i*3) + 2) as usize];
+            screen.push(red);
+            screen.push(green);
+            screen.push(blue);
+            screen.push(255);
+
+            screen
+        });
+        js!{(&*screen){ r#"var screen = Module.HEAPU8.subarray($0, $0+(256*240*4));postMessage({screen: screen});"#}};
     }, |samples| {
+        let rate = (samples.len() as f32 / (48000.0 / 60.0)) as usize;
+        let audio: Vec<_> = samples
+            .chunks(rate)
+            .map(|c| c.iter().map(|s| *s as f32).sum::<f32>() / (c.len() as f32 * i16::max_value() as f32))
+            .collect();
+        js!{(&*audio, audio.len()){ r#"var audio = Module.HEAPF32.subarray($0 >> 2, ($0 >> 2) + $1);postMessage({audio: audio});"#}};
     }, || {
-        let mut r = Vec::new();
-
-        let p1 = Controller {
-            a: false,
-            b: false,
-            select: false,
-            start: false,
-            up: false,
-            down: false,
-            left: false,
-            right: false,
-        };
-
-        r.push(UserInput::PlayerOne(p1));
-        r
-    }, |sys, state| {});
+        vec![UserInput::PlayerOne(Controller::new())]
+    }, |_sys, _state| {});
 
     machine.run();
 }

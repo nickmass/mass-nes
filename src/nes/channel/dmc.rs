@@ -1,7 +1,7 @@
-use nes::bus::{DeviceKind, AndEqualsAndMask};
-use nes::system::{System, SystemState};
-use nes::cpu::Cpu;
-use nes::channel::Channel;
+use bus::{DeviceKind, AndEqualsAndMask};
+use system::{System, SystemState};
+use cpu::Cpu;
+use channel::Channel;
 
 use std::cell::RefCell;
 

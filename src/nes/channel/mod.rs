@@ -8,8 +8,8 @@ pub use self::noise::Noise;
 pub use self::triangle::Triangle;
 pub use self::dmc::Dmc;
 
-use nes::system::{System, SystemState};
-use nes::cpu::Cpu;
+use system::{System, SystemState};
+use cpu::Cpu;
 
 pub trait Channel {
     fn register(&self, state: &mut SystemState, cpu: &mut Cpu);
