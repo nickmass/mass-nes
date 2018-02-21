@@ -1,7 +1,10 @@
 [package]
+authors = ["Nick Massey <nickmass@nickmass.com>"]
 name = "web"
 version = "0.1.0"
-authors = ["Nick Massey <nickmass@nickmass.com>"]
 
 [dependencies]
-"nes" = { path = '../nes' }
+stdweb = "0.3.0"
+
+[dependencies.nes]
+path = "../nes"

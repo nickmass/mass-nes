@@ -40,16 +40,15 @@ impl Txrom {
             BankKind::Rom
         };
         let chr = match chr_type {
-            BankKind::Rom => 
+            BankKind::Rom =>
                 MappedMemory::new(state, cartridge, 0x0000, 0, 8, MemKind::Chr),
             BankKind::Ram => {
                 let mut mem = MappedMemory::new(state, cartridge, 0x0000, 8, 8, MemKind::Chr);
                 mem.map(0x0000, 8, 0, BankKind::Ram);
                 mem
-            },  
+            },
         };
 
-        
         let mut prg = MappedMemory::new(state, cartridge, 0x6000, 16, 48, MemKind::Prg);
         prg.map(0x6000, 16, 0, BankKind::Ram);
 
@@ -107,7 +106,8 @@ impl Txrom {
                 self.sync(&mut rom);
             },
             0x8001 => {
-                rom.bank_data[(rom.bank_select & 0x7) as usize] = value;
+                let bank_index = rom.bank_select & 0x7;
+                rom.bank_data[bank_index as usize] = value;
                 self.sync(&mut rom);
             },
             0xa000 => {

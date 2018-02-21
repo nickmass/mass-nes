@@ -257,7 +257,10 @@ impl Apu {
         let pulse_out = self.pulse_table[(pulse1 + pulse2) as usize];
         let tnd_out = self.tnd_table[((3 * triangle) + (2 * noise) + dmc) as usize];
 
-        state.apu.samples[state.apu.sample_index] = pulse_out + tnd_out;
+        if let Some(v) = state.apu.samples.get_mut(state.apu.sample_index) {
+            *v = pulse_out + tnd_out;
+        }
+
         state.apu.sample_index += 1;
     }
 

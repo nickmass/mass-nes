@@ -21,7 +21,6 @@ use nes_ntsc::NesNtscSetup;
 
 use clap::{App, Arg, SubCommand};
 
-use std::sync::Mutex;
 use std::fs::File;
 
 fn main() {
@@ -48,11 +47,15 @@ fn run(mut file: File, region: Region) {
     blip.set_rates(region.frame_ticks() * region.refresh_rate(), sample_rate as f64);
 
     let mut frame_sync = FrameSync::new(region.refresh_rate());
-    {
-        let mut machine = Machine::new(region, cart, |screen| {
-            window.add_frame(screen);
-            frame_sync.sync_frame();
-        }, |samples| {
+    let mut close = false;
+    let mut machine = Machine::new(region, cart);
+
+    while !close {
+        machine.run();
+        frame_sync.sync_frame();
+        window.add_frame(machine.get_screen());
+        {
+            let samples = machine.get_audio();
             let count = samples.len();
 
             for (i, v) in samples.iter().enumerate() {
@@ -61,12 +64,12 @@ fn run(mut file: File, region: Region) {
             }
             blip.end_frame(count as u32);
             while blip.samples_avail() > 0 {
-                let mut buf = &mut [0i16; 1024];
-                let count = blip.read_samples(buf, false);
+                let mut buf = [0i16; 1024];
+                let count = blip.read_samples(&mut buf, false);
                 audio.add_samples(buf[0..count].to_vec());
             }
-
-        }, || {
+        }
+        {
             let mut r = Vec::new();
             let input = window.get_input();
 
@@ -90,44 +93,28 @@ fn run(mut file: File, region: Region) {
             }
 
             if window.is_closed() {
-                r.push(UserInput::Close);
+                close = true;
             }
 
             r.push(UserInput::PlayerOne(p1));
-            r
-
-        }, |sys, state| {});
-
-        machine.run();
+            machine.set_input(r);
+        }
     }
 
     audio.close();
     window.close();
 }
 
-fn bench(mut file: File, region: Region, frames: u32) {
+fn bench(mut file: File, region: Region, mut frames: u32) {
     let cart = Cartridge::load(&mut file).unwrap();
-    let closed = Mutex::new(false);
-    let mut machine = Machine::new(region, cart,
-                                  |screen| {},
-                                  |samples| {},
-                                  || {
-                                      let mut r = Vec::new();
-
-                                      let closed = closed.lock().unwrap();
-                                      if *closed {
-                                          r.push(UserInput::Close);
-                                      }
-
-                                      r
-                                  },
-                                  |system, state| {
-                                      let mut closed = closed.lock().unwrap();
-                                      let nes_frame = system.debug.frame(state);
-                                      *closed = frames != 0 && nes_frame > frames;
-                                  });
-
-    machine.run();
+    let mut machine = Machine::new(region, cart);
+    loop {
+        machine.run();
+        frames -= 1;
+        if frames == 0 {
+            break;
+        }
+    }
 }
 
 enum Mode {

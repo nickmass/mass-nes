@@ -13,7 +13,6 @@ pub enum UserInput {
     PlayerOne(Controller),
     Power,
     Reset,
-    Close,
 }
 
 pub enum Region {
@@ -117,67 +116,57 @@ pub enum EmphMode {
     Brg,
 }
 
-pub struct Machine<FR, FA, FI, FD> where 
-    FR: FnMut(&[u16]),
-    FA: FnMut(&[i16]),
-    FI: FnMut() -> Vec<UserInput>,
-    FD: FnMut(&System, &mut SystemState) {
-
+pub struct Machine {
     pub state: Box<SystemState>,
     pub system: System,
-    on_render: FR,
-    on_audio: FA,
-    on_input: FI,
-    on_debug: FD,
-    close: bool
+    cycle: u64,
 }
 
-impl<FR, FA, FI, FD> Machine<FR, FA, FI, FD> where 
-    FR: FnMut(&[u16]),
-    FA: FnMut(&[i16]),
-    FI: FnMut() -> Vec<UserInput>,
-    FD: FnMut(&System, &mut SystemState) {
-
-    pub fn new(region: Region, cartridge: Cartridge, render: FR, audio: FA,
-               input: FI, debug: FD) -> Machine<FR, FA, FI, FD> {
-
+impl Machine {
+    pub fn new(region: Region, cartridge: Cartridge) -> Machine {
         let mut state = Box::new(SystemState::default());
         let system = System::new(region, cartridge, &mut state);
+        system.cpu.power(&system, &mut state);
         Machine {
             state: state,
             system: system,
-            on_render: render,
-            on_audio: audio,
-            on_input: input,
-            on_debug: debug,
-            close: false,
+            cycle: 0,
         }
     }
 
     pub fn run(&mut self) {
-        self.system.cpu.power(&self.system, &mut self.state);
         let mut last_vblank = false;
-        let mut cycle: u64 = 0;
-        while !self.close {
+        while self.state.ppu.in_vblank || !last_vblank {
+            last_vblank = self.state.ppu.in_vblank;
             self.system.cpu.tick(&self.system, &mut self.state);
             self.system.apu.tick(&self.system, &mut self.state);
             self.system.cartridge.mapper.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
-            if self.system.region.extra_ppu_tick() && cycle % 5 == 0 {
+            if self.system.region.extra_ppu_tick() && self.cycle % 5 == 0 {
                 self.system.ppu.tick(&self.system, &mut self.state);
             }
-            cycle += 1;
-            if self.state.ppu.in_vblank && !last_vblank {
-                (self.on_audio)(self.system.apu.get_samples(&self.system, &mut self.state));
-                (self.on_render)(&self.state.ppu.screen);
-                for i in (self.on_input)() {
-                    self.handle_input(i);
-                }
-                (self.on_debug)(&self.system, &mut self.state);
-            }
-            last_vblank = self.state.ppu.in_vblank;
+            self.cycle += 1;
+        }
+    }
+
+    pub fn get_screen(&mut self) -> &[u16] {
+        &self.state.ppu.screen
+    }
+
+    pub fn get_audio(&mut self) -> &[i16] {
+        self.system.apu.get_samples(&self.system, &mut self.state)
+    }
+
+    pub fn get_debug(&mut self) -> (&System, &mut SystemState) {
+        (&self.system, &mut self.state)
+    }
+
+    pub fn set_input<T: IntoIterator<Item=UserInput>>(&mut self, input: T) {
+        let input = input.into_iter();
+        for i in input {
+            self.handle_input(i);
         }
     }
 
@@ -186,7 +175,6 @@ impl<FR, FA, FI, FD> Machine<FR, FA, FI, FD> where
             UserInput::PlayerOne(c) => self.state.input.input = c.to_byte(),
             UserInput::Power => self.system.power(&mut self.state),
             UserInput::Reset => self.system.reset(&mut self.state),
-            UserInput::Close => self.close = true,
         }
     }
 }
@@ -239,7 +227,7 @@ impl System {
         system.cpu.register_write(state, DeviceKind::Ppu,
                                   RangeAndMask(0x2000, 0x4000, 0x2007));
         system.cpu.register_write(state, DeviceKind::Ppu, Address(0x4014));
-        system.ppu.register_read(state, DeviceKind::Nametables, 
+        system.ppu.register_read(state, DeviceKind::Nametables,
                                  RangeAndMask(0x2000, 0x4000, 0xfff));
         system.ppu.register_write(state, DeviceKind::Nametables,
                                  RangeAndMask(0x2000, 0x4000, 0xfff));

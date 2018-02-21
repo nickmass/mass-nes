@@ -1,58 +1,99 @@
-use std::os::raw::{c_char, c_int};
+#![recursion_limit="1024"]
 
-extern {
-    fn emscripten_asm_const_int(script: *const c_char, ...) -> c_int;
-}
+#[macro_use]
+extern crate stdweb;
+extern crate nes;
 
-macro_rules! c_str {
-    ($s:expr) => {
-        {
-            concat!($s, "\0").as_ptr() as *const _
+use stdweb::UnsafeTypedArray;
+
+use nes::{UserInput, Controller, Machine, Cartridge, Region};
+use std::cell::RefCell;
+
+thread_local!(static MACHINE: RefCell<Option<Machine>> = RefCell::new(None));
+
+fn main() {
+    stdweb::initialize();
+
+    js! {
+        Module.exports.load_rom = @{load_rom};
+        Module.exports.run_frame = @{run_frame};
+    }
+
+    js! {
+        var listeners = [];
+        Module.exports.addEventListener = function(event, cb) {
+            listeners.push({event: event, cb: cb});
+        };
+
+        Module.triggerEvent = function(event, data) {
+            listeners.filter(e => e.event === event).forEach(e => e.cb(data));
         }
     }
 }
 
-macro_rules! js {
-    (($($expr:expr),*) {$code:expr}) => {
-        unsafe {
-            emscripten_asm_const_int(c_str!($code), $($expr),*)
-        }
-    };
+fn load_rom(rom: Vec<u8>) {
+    let region = Region::Ntsc;
+    let cart = Cartridge::load(&mut rom.as_slice()).unwrap();
+
+    MACHINE.with(|m| {
+        let mut m = m.borrow_mut();
+        *m = Some(Machine::new(region, cart));
+    });
 }
 
-extern crate nes;
+fn run_frame(input: Vec<String>) {
+    let input = input.iter().fold(Controller::new(), |mut c, i| {
+        match i.as_str() {
+            "Up" => c.up = true,
+            "Down" => c.down = true,
+            "Left" => c.left = true,
+            "Right" => c.right = true,
+            "A" => c.a = true,
+            "B" => c.b = true,
+            "Select" => c.select = true,
+            "Start" => c.start = true,
+            _ => (),
+        }
+        c
+    });
 
-use nes::{UserInput, Controller, Machine, Cartridge, Region};
+    MACHINE.with(|m| {
+        let mut m = m.borrow_mut();
 
-fn main() {
-    let rom = include_bytes!("/home/nickmass/kirby.nes");
-    let region = Region::Ntsc;
-    let pal = region.default_palette();
-    let cart = Cartridge::load(&mut (rom as &[u8])).unwrap();
+        if let Some(m) = (*m).as_mut() {
+            let pal = Region::Ntsc.default_palette();
+            m.set_input(vec![UserInput::PlayerOne(input)]);
+            m.run();
+            let screen: Vec<u8> = m.get_screen().iter().fold( Vec::new(), |mut screen, i| {
+                let red = pal[(i*3) as usize];
+                let green = pal[((i*3) + 1) as usize];
+                let blue = pal[((i*3) + 2) as usize];
+                screen.push(red);
+                screen.push(green);
+                screen.push(blue);
+                screen.push(255);
 
-    let mut machine = Machine::new(region, cart, |screen| {
-        let screen: Vec<u8> = screen.iter().fold( Vec::new(), |mut screen, i| {
-            let red = pal[(i*3) as usize];
-            let green = pal[((i*3) + 1) as usize];
-            let blue = pal[((i*3) + 2) as usize];
-            screen.push(red);
-            screen.push(green);
-            screen.push(blue);
-            screen.push(255);
+                screen
+            });
+            let screen_slice = unsafe { UnsafeTypedArray::new(&*screen) };
+            js! {
+                let screenSlice = @{screen_slice};
+                Module.triggerEvent("screen", screenSlice);
+            }
+            let audio: Vec<_> = {
+                let samples = m.get_audio();
+                let rate = (samples.len() as f32 / (48000.0 / 60.0)) as usize;
+                samples
+                    .chunks(rate)
+                    .map(|c| c.iter().map(|s| *s as f32).sum::<f32>() / (c.len() as f32 * i16::max_value() as f32))
+                    .collect()
+            };
 
-            screen
-        });
-        js!{(&*screen){ r#"var screen = Module.HEAPU8.subarray($0, $0+(256*240*4));postMessage({screen: screen});"#}};
-    }, |samples| {
-        let rate = (samples.len() as f32 / (48000.0 / 60.0)) as usize;
-        let audio: Vec<_> = samples
-            .chunks(rate)
-            .map(|c| c.iter().map(|s| *s as f32).sum::<f32>() / (c.len() as f32 * i16::max_value() as f32))
-            .collect();
-        js!{(&*audio, audio.len()){ r#"var audio = Module.HEAPF32.subarray($0 >> 2, ($0 >> 2) + $1);postMessage({audio: audio});"#}};
-    }, || {
-        vec![UserInput::PlayerOne(Controller::new())]
-    }, |_sys, _state| {});
-
-    machine.run();
+            let audio_slice = unsafe { UnsafeTypedArray::new(&*audio) };
+            js! {
+                let audioSlice = @{audio_slice};
+                Module.triggerEvent("audio", audioSlice);
+            }
+        }
+    });
 }

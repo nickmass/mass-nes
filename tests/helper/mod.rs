@@ -4,7 +4,6 @@ use self::nes::{UserInput, Machine, Region, Cartridge, Controller};
 use std::fs::File;
 use std::path::Path;
 use std::convert::AsRef;
-use std::sync::Mutex;
 
 #[derive(Debug, Copy, Clone)]
 pub enum Condition {
@@ -16,15 +15,9 @@ pub fn run<T>(rom: T, frames: u32, condition: Condition) where T: AsRef<str> {
     path.push(Path::new(rom.as_ref()));
     let mut file = File::open(path).unwrap();
     let cart = Cartridge::load(&mut file).unwrap();
-    
-    let closed = Mutex::new(false);
+    let mut machine = Machine::new(Region::Ntsc, cart);
 
-    let mut machine = Machine::new(Region::Ntsc, cart,
-    |_| {
-    },
-    |_| {
-    },
-    || {
+    loop {
         let mut r = Vec::new();
 
         let p1 = Controller {
@@ -38,30 +31,25 @@ pub fn run<T>(rom: T, frames: u32, condition: Condition) where T: AsRef<str> {
             right: false,
         };
 
-        let closed = closed.lock().unwrap();
-        if *closed {
-            r.push(UserInput::Close);
-        }
-
         r.push(UserInput::PlayerOne(p1));
+        machine.set_input(r);
 
-        r
-    },
-    |system, state| {
-        let mut closed = closed.lock().unwrap();
-        let nes_frame = system.debug.frame(state);
-        *closed = nes_frame > frames;
-        if nes_frame >= frames {
-            match condition {
-                Condition::Equals(a, v) => {
-                    let nes_val = system.debug.peek(system, state, a);
-                    assert!(v == nes_val, 
-                            "Expected '0x{:04X}' to be '0x{:02X}', found '0x{:02X}'.",
-                            a, v, nes_val);
+        {
+            let (system, state) = machine.get_debug();
+            let nes_frame = system.debug.frame(state);
+            if nes_frame >= frames {
+                match condition {
+                    Condition::Equals(a, v) => {
+                        let nes_val = system.debug.peek(system, state, a);
+                        assert!(v == nes_val,
+                                "Expected '0x{:04X}' to be '0x{:02X}', found '0x{:02X}'.",
+                                a, v, nes_val);
+                    }
                 }
+                break;
             }
         }
-    });
 
-    machine.run();
+        machine.run();
+    }
 }
