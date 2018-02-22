@@ -174,7 +174,7 @@ pub struct RodioAudio {
 
 impl RodioAudio {
     pub fn new(sample_rate: u32) -> RodioAudio {
-        let endpoint = rodio::get_default_endpoint().unwrap();
+        let endpoint = rodio::default_endpoint().expect("Could not get default audio endpoint");
         let sink = rodio::Sink::new(&endpoint);
         RodioAudio {
             sample_rate: sample_rate,
@@ -217,16 +217,15 @@ impl Iterator for RodioSamples {
 }
 
 impl rodio::Source for RodioSamples {
-    fn get_current_frame_len(&self) -> Option<usize> {
+    fn current_frame_len(&self) -> Option<usize> {
         Some(self.samples.len() - self.position)
     }
 
-    fn get_channels(&self) -> u16 { 1 }
+    fn channels(&self) -> u16 { 1 }
 
-    fn get_samples_rate(&self) -> u32 { self.sample_rate }
+    fn samples_rate(&self) -> u32 { self.sample_rate }
 
-    fn get_total_duration(&self) -> Option<::std::time::Duration> {
-        let ms = (self.samples.len() as f64 / self.sample_rate as f64) * 1000.0;
-        Some(::std::time::Duration::from_millis(ms as u64))
+    fn total_duration(&self) -> Option<::std::time::Duration> {
+        None
     }
 }

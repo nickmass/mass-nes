@@ -14,7 +14,7 @@ use nes::{UserInput, Controller, Machine, Cartridge, Region};
 
 mod ui;
 use ui::gfx::{Key, Renderer};
-use ui::audio::{Audio, RodioAudio};
+use ui::audio::{Audio, CpalAudio};
 use ui::sync::FrameSync;
 
 use nes_ntsc::NesNtscSetup;
@@ -40,8 +40,8 @@ fn run(mut file: File, region: Region) {
 
     let window = Renderer::new(filter);
 
-    //let mut audio = RodioAudio::new(48000);
-    let mut audio = ::ui::audio::CpalAudio::new();
+    //let mut audio = ui::audio::RodioAudio::new(48000);
+    let mut audio = CpalAudio::new();
 
     let sample_rate = audio.sample_rate();
     let mut delta = 0;
