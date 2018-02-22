@@ -39,7 +39,9 @@ fn run(mut file: File, region: Region) {
     //let filter = ui::gfx::PalettedFilter::new(NesNtscSetup::composite().generate_palette());
 
     let window = Renderer::new(filter);
-    let mut audio = RodioAudio::new(48000);
+
+    //let mut audio = RodioAudio::new(48000);
+    let mut audio = ::ui::audio::CpalAudio::new();
 
     let sample_rate = audio.sample_rate();
     let mut delta = 0;

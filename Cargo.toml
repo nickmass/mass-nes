@@ -5,8 +5,7 @@ authors = ["Nick Massey <nickmass@nickmass.com>"]
 
 [dependencies]
 glium = "0.15"
-cpal = "0.4"
-futures = "0.1.1"
+cpal = "0.8"
 blip_buf = "0.1"
 rodio = "0.4"
 clap = "2"
