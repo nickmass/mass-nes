@@ -1,5 +1,5 @@
 use glium;
-use glium::{DisplayBuild, Surface};
+use glium::{Surface};
 use glium::texture::{RawImage2d, ClientFormat};
 use glium::texture::integral_texture2d::IntegralTexture2d;
 use glium::texture::texture2d::Texture2d;
@@ -176,6 +176,7 @@ implement_vertex!(Vertex, position, tex_coords);
 
 pub struct GliumRenderer<T: Filter> {
     filter: T,
+    events_loop: RefCell<glium::glutin::EventsLoop>,
     display: RefCell<glium::Display>,
     indicies: glium::index::NoIndices,
     program: glium::Program,
@@ -187,11 +188,15 @@ pub struct GliumRenderer<T: Filter> {
 impl<T: Filter> GliumRenderer<T> {
     pub fn new(filter: T) -> GliumRenderer<T> {
         let dims = filter.get_dimensions();
-        let display = glium::glutin::WindowBuilder::new()
+        let events_loop = glium::glutin::EventsLoop::new();
+        let window = glium::glutin::WindowBuilder::new()
             .with_dimensions(dims.0, dims.1)
-            .with_title(format!("Mass NES"))
-            .build_glium()
-            .unwrap();
+            .with_title("Mass NES");
+
+        let context = glium::glutin::ContextBuilder::new();
+
+        let display = glium::Display::new(window, context, &events_loop)
+            .expect("Could not initialize display");
 
         let top_right = Vertex { position: [1.0, 1.0], tex_coords: [1.0, 0.0] };
         let top_left = Vertex { position: [-1.0, 1.0], tex_coords: [0.0, 0.0] };
@@ -207,6 +212,7 @@ impl<T: Filter> GliumRenderer<T> {
 
         GliumRenderer {
             filter: filter,
+            events_loop: RefCell::new(events_loop),
             display: RefCell::new(display),
             indicies: indicies,
             program: program,
@@ -217,20 +223,33 @@ impl<T: Filter> GliumRenderer<T> {
     }
 
     fn process_events(&self) {
-        for ev in self.display.borrow_mut().poll_events() {
-            match ev {
-                glium::glutin::Event::Closed => {
-                    self.closed.set(true);
-                },
-                glium::glutin::Event::KeyboardInput(state, _, key_opt) => {
-                    let pressed = state == glium::glutin::ElementState::Pressed;
-                    if let Some(key) = key_opt {
-                        self.input.borrow_mut().insert(key, pressed);
+        self.events_loop.borrow_mut().poll_events(|event| {
+            use glium::glutin::Event::*;
+            match event {
+                WindowEvent { event, .. } => {
+                    use glium::glutin::WindowEvent::*;
+                    match event {
+                        Closed => {
+                            self.closed.set(true);
+                        },
+                        _ => (),
                     }
                 },
-                _ => {}
+                DeviceEvent { event, .. } => {
+                    use glium::glutin::DeviceEvent::*;
+                    match event {
+                        Key(key) => {
+                            let pressed = key.state == glium::glutin::ElementState::Pressed;
+                            if let Some(key) = key.virtual_keycode {
+                                self.input.borrow_mut().insert(key, pressed);
+                            }
+                        },
+                        _ => (),
+                    }
+                },
+                _ => ()
             }
-        }
+        });
     }
 
     pub fn render(&self, screen: &[u16]) {
