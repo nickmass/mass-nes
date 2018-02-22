@@ -1,3 +1,6 @@
 target
 *.out
 **/roms/*.nes
+src/web/.cache
+src/web/node_modules
+src/web/dist

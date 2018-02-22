@@ -1,0 +1,14 @@
+{
+  "name": "web",
+  "version": "0.1.0",
+  "description": "Web interface to mass-nes",
+  "repository": "https://github.com/nickmass/mass-emu/",
+  "author": "Nick Massey <nickmass@nickmass.com>",
+  "license": "MIT",
+  "scripts" : {
+    "build": "parcel build static/index.html --public-url ./"
+  },
+  "dependencies": {
+    "parcel-plugin-cargo-web": "^0.1.0"
+  }
+}

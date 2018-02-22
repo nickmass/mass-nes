@@ -1,10 +1,11 @@
 #![recursion_limit="1024"]
+#![feature(proc_macro)]
 
 #[macro_use]
 extern crate stdweb;
 extern crate nes;
 
-use stdweb::UnsafeTypedArray;
+use stdweb::{UnsafeTypedArray, js_export};
 
 use nes::{UserInput, Controller, Machine, Cartridge, Region};
 use std::cell::RefCell;
@@ -12,25 +13,19 @@ use std::cell::RefCell;
 thread_local!(static MACHINE: RefCell<Option<Machine>> = RefCell::new(None));
 
 fn main() {
-    stdweb::initialize();
-
     js! {
-        Module.exports.load_rom = @{load_rom};
-        Module.exports.run_frame = @{run_frame};
-    }
-
-    js! {
-        var listeners = [];
-        Module.exports.addEventListener = function(event, cb) {
+        let listeners = [];
+        Module.exports.addEventListener = (event, cb) => {
             listeners.push({event: event, cb: cb});
         };
 
-        Module.triggerEvent = function(event, data) {
+        Module.exports.dispatchEvent = (event, data) => {
             listeners.filter(e => e.event === event).forEach(e => e.cb(data));
-        }
+        };
     }
 }
 
+#[js_export]
 fn load_rom(rom: Vec<u8>) {
     let region = Region::Ntsc;
     let cart = Cartridge::load(&mut rom.as_slice()).unwrap();
@@ -41,6 +36,7 @@ fn load_rom(rom: Vec<u8>) {
     });
 }
 
+#[js_export]
 fn run_frame(input: Vec<String>) {
     let input = input.iter().fold(Controller::new(), |mut c, i| {
         match i.as_str() {
@@ -78,7 +74,7 @@ fn run_frame(input: Vec<String>) {
             let screen_slice = unsafe { UnsafeTypedArray::new(&*screen) };
             js! {
                 let screenSlice = @{screen_slice};
-                Module.triggerEvent("screen", screenSlice);
+                Module.exports.dispatchEvent("screen", screenSlice);
             }
             let audio: Vec<_> = {
                 let samples = m.get_audio();
@@ -92,7 +88,7 @@ fn run_frame(input: Vec<String>) {
             let audio_slice = unsafe { UnsafeTypedArray::new(&*audio) };
             js! {
                 let audioSlice = @{audio_slice};
-                Module.triggerEvent("audio", audioSlice);
+                Module.exports.dispatchEvent("audio", audioSlice);
             }
         }
     });
