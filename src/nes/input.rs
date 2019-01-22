@@ -1,5 +1,5 @@
-use system::{System, SystemState};
-use bus::BusKind;
+use crate::system::{System, SystemState};
+use crate::bus::BusKind;
 
 #[derive(Default)]
 pub struct InputState {

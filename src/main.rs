@@ -5,16 +5,16 @@
 extern crate glium;
 extern crate blip_buf;
 extern crate clap;
-extern crate nes_ntsc;
 extern crate nes;
+extern crate nes_ntsc;
 
 use blip_buf::BlipBuf;
 
-use nes::{UserInput, Controller, Machine, Cartridge, Region};
+use nes::{Cartridge, Controller, Machine, Region, UserInput};
 
 mod ui;
-use ui::gfx::{Key, Renderer};
 use ui::audio::{Audio, CpalAudio};
+use ui::gfx::{Key, Renderer};
 use ui::sync::FrameSync;
 
 use nes_ntsc::NesNtscSetup;
@@ -27,7 +27,7 @@ fn main() {
     let args = Args::parse();
     match args.mode {
         Mode::Run => run(args.file, args.region),
-        Mode::Bench(frames) => bench(args.file, args.region, frames)
+        Mode::Bench(frames) => bench(args.file, args.region, frames),
     }
 }
 
@@ -35,18 +35,21 @@ fn run(mut file: File, region: Region) {
     let pal = region.default_palette();
     let cart = Cartridge::load(&mut file).unwrap();
 
-    let filter = ui::ntsc::NtscFilter::new(NesNtscSetup::composite());
-    //let filter = ui::gfx::PalettedFilter::new(NesNtscSetup::composite().generate_palette());
+    //let filter = ui::ntsc::NtscFilter::new(NesNtscSetup::composite());
+    let filter = ui::gfx::PalettedFilter::new(NesNtscSetup::composite().generate_palette());
 
     let window = Renderer::new(filter);
 
     //let mut audio = ui::audio::RodioAudio::new(48000);
-    let mut audio = CpalAudio::new();
+    //let mut audio = CpalAudio::new();
 
-    let sample_rate = audio.sample_rate();
+    let sample_rate = 48000; //audio.sample_rate();
     let mut delta = 0;
     let mut blip = BlipBuf::new(sample_rate / 30);
-    blip.set_rates(region.frame_ticks() * region.refresh_rate(), sample_rate as f64);
+    blip.set_rates(
+        region.frame_ticks() * region.refresh_rate(),
+        sample_rate as f64,
+    );
 
     let mut frame_sync = FrameSync::new(region.refresh_rate());
     let mut close = false;
@@ -68,7 +71,7 @@ fn run(mut file: File, region: Region) {
             while blip.samples_avail() > 0 {
                 let mut buf = [0i16; 1024];
                 let count = blip.read_samples(&mut buf, false);
-                audio.add_samples(buf[0..count].to_vec());
+                //audio.add_samples(buf[0..count].to_vec());
             }
         }
         {
@@ -103,7 +106,7 @@ fn run(mut file: File, region: Region) {
         }
     }
 
-    audio.close();
+    //audio.close();
     window.close();
 }
 
@@ -158,8 +161,10 @@ impl Args {
             .long("frames")
             .default_value("0")
             .validator(|f| {
-                let frames: Result<u32,_> = f.parse();
-                frames.map(|v| ()).map_err(|e| "Invalid frames value".to_string())
+                let frames: Result<u32, _> = f.parse();
+                frames
+                    .map(|v| ())
+                    .map_err(|e| "Invalid frames value".to_string())
             });
 
         let matches = App::new("mass-nes")
@@ -167,11 +172,12 @@ impl Args {
             .about("Nintendo Entertainment System Emulator")
             .arg(&arg_file)
             .arg(&arg_region)
-            .subcommand(SubCommand::with_name("bench")
-                        .about("Benchmark core performance")
-                        .arg(&arg_file)
-                        .arg(&arg_region)
-                        .arg(&arg_frames)
+            .subcommand(
+                SubCommand::with_name("bench")
+                    .about("Benchmark core performance")
+                    .arg(&arg_file)
+                    .arg(&arg_region)
+                    .arg(&arg_frames),
             )
             .get_matches();
 
@@ -196,13 +202,13 @@ impl Args {
             ("bench", Some(matches)) => Args {
                 mode: Mode::Bench(get_frames(matches.value_of("frames"))),
                 file: get_file(matches.value_of("file")),
-                region: get_region(matches.value_of("region"))
+                region: get_region(matches.value_of("region")),
             },
             _ => Args {
                 mode: Mode::Run,
                 file: get_file(matches.value_of("file")),
-                region: get_region(matches.value_of("region"))
-            }
+                region: get_region(matches.value_of("region")),
+            },
         }
     }
 }
@@ -239,13 +245,25 @@ fn generate_pal() {
         let green = if green < 0.0 { 0.0 } else { green };
         let blue = if blue < 0.0 { 0.0 } else { blue };
         for j in 0..0x40 {
-            let x = j*3;
+            let x = j * 3;
             let final_red = (c[x] as f64 * red).round();
-            let final_red = if final_red > 255.0 { 0xff } else { final_red as u8 };
+            let final_red = if final_red > 255.0 {
+                0xff
+            } else {
+                final_red as u8
+            };
             let final_green = (c[x + 1] as f64 * green).round();
-            let final_green = if final_green > 255.0 { 0xff } else { final_green as u8 };
+            let final_green = if final_green > 255.0 {
+                0xff
+            } else {
+                final_green as u8
+            };
             let final_blue = (c[x + 2] as f64 * blue).round();
-            let final_blue = if final_blue > 255.0 { 0xff } else { final_blue as u8 };
+            let final_blue = if final_blue > 255.0 {
+                0xff
+            } else {
+                final_blue as u8
+            };
 
             let index = (i * 192) + x;
             new_c[index as usize] = final_red;
@@ -254,6 +272,6 @@ fn generate_pal() {
         }
     }
     //use std::io::Write;
-    //let mut f = std::fs::File::create("emp_pal.pal").unwrap(); 
+    //let mut f = std::fs::File::create("emp_pal.pal").unwrap();
     //f.write_all(&new_c);
 }

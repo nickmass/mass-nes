@@ -1,8 +1,8 @@
-use bus::{DeviceKind, AndEqualsAndMask};
-use system::{System, SystemState};
-use cpu::Cpu;
-use channel::Channel;
-use apu;
+use crate::apu;
+use crate::bus::AddressBus;
+use crate::bus::{AndEqualsAndMask, DeviceKind};
+use crate::channel::Channel;
+use crate::system::{System, SystemState};
 
 use std::cell::RefCell;
 
@@ -13,7 +13,9 @@ pub enum PulseChannel {
 }
 
 impl Default for PulseChannel {
-    fn default() -> PulseChannel { PulseChannel::InternalOne }
+    fn default() -> PulseChannel {
+        PulseChannel::InternalOne
+    }
 }
 
 #[derive(Default)]
@@ -29,7 +31,7 @@ struct PulseState {
     decay_counter: u8,
     sweep_reload: bool,
     sweep_divider: u8,
-    regs: [u8;4],
+    regs: [u8; 4],
     current_tick: u64,
     forced_clock: bool,
     last_tick: u64,
@@ -53,7 +55,11 @@ impl PulseState {
     }
 
     fn envelope_output(&self) -> u8 {
-        if self.constant_volume() { self.envelope_volume() } else { self.decay_counter } 
+        if self.constant_volume() {
+            self.envelope_volume()
+        } else {
+            self.decay_counter
+        }
     }
 
     fn constant_volume(&self) -> bool {
@@ -104,8 +110,7 @@ impl PulseState {
 
     fn sweep_timer(&self) -> u16 {
         let target = self.sweep_target();
-        if self.period < 8 || target > 0x7ff || !self.sweep_enabled() || 
-                self.shift_count() == 0 {
+        if self.period < 8 || target > 0x7ff || !self.sweep_enabled() || self.shift_count() == 0 {
             self.period
         } else {
             target
@@ -114,7 +119,11 @@ impl PulseState {
 
     fn sweep_output(&self) -> u8 {
         let target = self.sweep_target();
-        if self.period < 8 || target > 0x7ff { 0 } else { self.envelope_output() }
+        if self.period < 8 || target > 0x7ff {
+            0
+        } else {
+            self.envelope_output()
+        }
     }
 
     fn duty_sequence(&self) -> [bool; 8] {
@@ -141,12 +150,12 @@ impl Pulse {
     pub fn new(chan: PulseChannel) -> Pulse {
         let state = PulseState {
             channel: chan,
-            .. Default::default()
+            ..Default::default()
         };
 
         Pulse {
             state: RefCell::new(state),
-            channel: chan
+            channel: chan,
         }
     }
 
@@ -157,16 +166,22 @@ impl Pulse {
 }
 
 impl Channel for Pulse {
-    fn register(&self, state: &mut SystemState, cpu: &mut Cpu) {
+    fn register(&self, state: &mut SystemState, cpu: &mut AddressBus) {
         match self.channel {
             PulseChannel::InternalOne => {
-                cpu.register_write(state, DeviceKind::PulseOne, AndEqualsAndMask(0xfffc,
-                                                                        0x4000, 0x3));
-            },
+                cpu.register_write(
+                    state,
+                    DeviceKind::PulseOne,
+                    AndEqualsAndMask(0xfffc, 0x4000, 0x3),
+                );
+            }
             PulseChannel::InternalTwo => {
-                cpu.register_write(state, DeviceKind::PulseTwo, AndEqualsAndMask(0xfffc,
-                                                                        0x4004, 0x3));
-            },
+                cpu.register_write(
+                    state,
+                    DeviceKind::PulseTwo,
+                    AndEqualsAndMask(0xfffc, 0x4004, 0x3),
+                );
+            }
         }
     }
 
@@ -178,20 +193,19 @@ impl Channel for Pulse {
         let mut channel = self.state.borrow_mut();
         channel.regs[addr as usize] = value;
         match addr {
-            0 => {
-            },
+            0 => {}
             1 => {
                 channel.sweep_reload = true;
-            },
+            }
             2 => {
                 channel.period = channel.timer_load();
-            },
+            }
             3 => {
                 channel.period = channel.timer_load();
                 channel.sequencer = 0;
                 channel.length_counter = channel.length_load();
                 channel.envelope_start = true;
-            },
+            }
             _ => unreachable!(),
         }
     }
@@ -213,12 +227,14 @@ impl Channel for Pulse {
             if channel.envelope_start {
                 channel.envelope_start = false;
                 channel.decay_counter = 0xf;
-                channel.envelope_divider = channel.envelope_volume();        
+                channel.envelope_divider = channel.envelope_volume();
             } else {
                 if channel.envelope_divider == 0 {
                     channel.envelope_divider = channel.envelope_volume();
                     if channel.decay_counter == 0 {
-                        if channel.halt() { channel.decay_counter = 0xf }
+                        if channel.halt() {
+                            channel.decay_counter = 0xf
+                        }
                     } else {
                         channel.decay_counter -= 1;
                     }
@@ -232,7 +248,6 @@ impl Channel for Pulse {
             if channel.length_counter != 0 && !channel.halt() {
                 channel.length_counter -= 1;
             }
-            
 
             if channel.sweep_reload {
                 if channel.sweep_divider == 0 {
@@ -251,7 +266,7 @@ impl Channel for Pulse {
         channel.forced_clock = false;
         if !channel.duty() || channel.length_counter == 0 || channel.timer_counter < 8 {
             0
-        } else  {
+        } else {
             channel.sweep_output()
         }
     }
@@ -259,7 +274,6 @@ impl Channel for Pulse {
     fn enable(&self) {
         let mut channel = self.state.borrow_mut();
         channel.enabled = true;
-        
     }
 
     fn disable(&self) {

@@ -1,5 +1,5 @@
-use system::{System, SystemState};
-use cartridge::Cartridge;
+use crate::system::{System, SystemState};
+use crate::cartridge::Cartridge;
 
 #[derive(Copy, Clone)]
 pub struct Page {

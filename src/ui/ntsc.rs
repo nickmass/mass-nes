@@ -1,12 +1,12 @@
 use nes_ntsc::{NesNtsc, NesNtscSetup};
 
 use glium;
-use glium::texture::{RawImage2d, ClientFormat};
 use glium::texture::texture2d::Texture2d;
+use glium::texture::{ClientFormat, RawImage2d};
 
 use std::cell::{Cell, RefCell};
 
-use ui::gfx::{Filter, FilterUniforms, FilterScaling};
+use crate::ui::gfx::{Filter, FilterScaling, FilterUniforms};
 
 pub struct NtscFilter {
     ntsc: Box<RefCell<NesNtsc>>,
@@ -45,7 +45,8 @@ impl Filter for NtscFilter {
                 vec4 col = texture(tex, v_tex_coords).zyxw;
                 color = col - (col * line_intensity);
             }
-        "#.to_string()
+        "#
+        .to_string()
     }
 
     fn get_vertex_shader(&self) -> String {
@@ -61,14 +62,17 @@ impl Filter for NtscFilter {
                 v_tex_coords = tex_coords;
                 gl_Position = vec4(position, 0.0, 1.0);
             }
-        "#.to_string()
+        "#
+        .to_string()
     }
 
     fn process(&self, display: &glium::Display, screen: &[u16]) -> FilterUniforms {
         let mut unis = FilterUniforms::new();
         let mut out = vec![0; (self.height * self.width) as usize];
         self.phase.set(self.phase.get() ^ 1);
-        self.ntsc.borrow_mut().blit(256, screen, self.phase.get(), &mut *out, self.width * 4);
+        self.ntsc
+            .borrow_mut()
+            .blit(256, screen, self.phase.get(), &mut *out, self.width * 4);
 
         let img = RawImage2d {
             data: ::std::borrow::Cow::Borrowed(&*out),
@@ -77,8 +81,8 @@ impl Filter for NtscFilter {
             format: ClientFormat::U8U8U8U8,
         };
 
-        let tex = Texture2d::with_mipmaps(
-            &*display, img, glium::texture::MipmapsOption::NoMipmap).unwrap();
+        let tex = Texture2d::with_mipmaps(&*display, img, glium::texture::MipmapsOption::NoMipmap)
+            .unwrap();
         unis.add_2d_uniform("tex".to_string(), tex, FilterScaling::Linear);
 
         unis

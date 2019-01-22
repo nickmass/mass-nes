@@ -1,7 +1,7 @@
-use bus::{DeviceKind, AndEqualsAndMask};
-use system::{System, SystemState};
-use cpu::Cpu;
-use channel::Channel;
+use crate::bus::AddressBus;
+use crate::bus::{AndEqualsAndMask, DeviceKind};
+use crate::channel::Channel;
+use crate::system::{System, SystemState};
 
 use std::cell::RefCell;
 
@@ -19,7 +19,7 @@ struct DmcState {
     read_pending: bool,
     irq: bool,
     silence: bool,
-    regs: [u8;4],
+    regs: [u8; 4],
 }
 
 impl DmcState {
@@ -56,7 +56,7 @@ pub struct Dmc {
 impl Dmc {
     pub fn new() -> Dmc {
         let state = DmcState {
-            .. Default::default()
+            ..Default::default()
         };
 
         Dmc {
@@ -69,7 +69,7 @@ impl Dmc {
         channel.read_pending = false;
         channel.sample_buffer = value;
         channel.sample_buffer_empty = false;
-        channel.address_counter  = channel.address_counter.wrapping_add(1);
+        channel.address_counter = channel.address_counter.wrapping_add(1);
         channel.address_counter |= 0x8000;
         channel.bytes_remaining -= 1;
         if channel.bytes_remaining == 0 {
@@ -89,9 +89,12 @@ impl Dmc {
 }
 
 impl Channel for Dmc {
-    fn register(&self, state: &mut SystemState, cpu: &mut Cpu) {
-        cpu.register_write(state, DeviceKind::Dmc, AndEqualsAndMask(0xfffc,
-                                                                         0x4010, 0x3));
+    fn register(&self, state: &mut SystemState, cpu: &mut AddressBus) {
+        cpu.register_write(
+            state,
+            DeviceKind::Dmc,
+            AndEqualsAndMask(0xfffc, 0x4010, 0x3),
+        );
     }
 
     fn read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
@@ -103,15 +106,15 @@ impl Channel for Dmc {
         channel.regs[addr as usize] = value;
         match addr {
             0 => {
-                if !channel.irq_enabled() { channel.irq = false; }
-            },
+                if !channel.irq_enabled() {
+                    channel.irq = false;
+                }
+            }
             1 => {
                 channel.output_value = channel.direct_load();
-            },
-            2 => {
-            },
-            3 => {
-            },
+            }
+            2 => {}
+            3 => {}
             _ => unreachable!(),
         }
     }
@@ -121,12 +124,11 @@ impl Channel for Dmc {
         channel.current_tick += 1;
 
         if channel.irq {
-            state.cpu.irq_req();
+            system.cpu.irq_req();
         }
 
-        if !channel.read_pending && channel.sample_buffer_empty && 
-            channel.bytes_remaining != 0 {
-            state.cpu.dmc_req(channel.address_counter);
+        if !channel.read_pending && channel.sample_buffer_empty && channel.bytes_remaining != 0 {
+            system.cpu.dmc_req(channel.address_counter);
             channel.read_pending = true;
         }
 
@@ -136,9 +138,17 @@ impl Channel for Dmc {
             channel.timer_counter = channel.rate(system) - 1;
             if !channel.silence {
                 let offset = if channel.output_shifter & 1 == 1 {
-                    if channel.output_value <= 125 { 2 } else { 0 }
+                    if channel.output_value <= 125 {
+                        2
+                    } else {
+                        0
+                    }
                 } else {
-                    if channel.output_value >= 2 { -2 } else { 0 }
+                    if channel.output_value >= 2 {
+                        -2
+                    } else {
+                        0
+                    }
                 };
                 channel.output_value = ((channel.output_value as i32) + offset) as u8;
 
@@ -159,7 +169,7 @@ impl Channel for Dmc {
             }
         }
 
-        channel.output_value 
+        channel.output_value
     }
 
     fn enable(&self) {
@@ -169,7 +179,6 @@ impl Channel for Dmc {
             channel.address_counter = channel.sample_address();
         }
         channel.irq = false;
-        
     }
 
     fn disable(&self) {

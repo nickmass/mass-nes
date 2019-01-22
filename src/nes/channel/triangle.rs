@@ -1,8 +1,8 @@
-use bus::{DeviceKind, AndEqualsAndMask};
-use system::{System, SystemState};
-use cpu::Cpu;
-use channel::Channel;
-use apu;
+use crate::apu;
+use crate::bus::AddressBus;
+use crate::bus::{AndEqualsAndMask, DeviceKind};
+use crate::channel::Channel;
+use crate::system::{System, SystemState};
 
 use std::cell::RefCell;
 
@@ -14,7 +14,7 @@ struct TriangleState {
     length_counter: u8,
     sequencer: u32,
     enabled: bool,
-    regs: [u8;4],
+    regs: [u8; 4],
     current_tick: u64,
     forced_clock: bool,
 }
@@ -41,8 +41,10 @@ impl TriangleState {
     }
 
     fn sequence(&self) -> u8 {
-        let table = [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
-                    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let table = [
+            15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+            11, 12, 13, 14, 15,
+        ];
 
         table[(self.sequencer % 32) as usize]
     }
@@ -55,7 +57,7 @@ pub struct Triangle {
 impl Triangle {
     pub fn new() -> Triangle {
         let state = TriangleState {
-            .. Default::default()
+            ..Default::default()
         };
 
         Triangle {
@@ -70,9 +72,12 @@ impl Triangle {
 }
 
 impl Channel for Triangle {
-    fn register(&self, state: &mut SystemState, cpu: &mut Cpu) {
-        cpu.register_write(state, DeviceKind::Triangle, AndEqualsAndMask(0xfffc,
-                                                                         0x4008, 0x3));
+    fn register(&self, state: &mut SystemState, cpu: &mut AddressBus) {
+        cpu.register_write(
+            state,
+            DeviceKind::Triangle,
+            AndEqualsAndMask(0xfffc, 0x4008, 0x3),
+        );
     }
 
     fn read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
@@ -83,16 +88,13 @@ impl Channel for Triangle {
         let mut channel = self.state.borrow_mut();
         channel.regs[addr as usize] = value;
         match addr {
-            0 => {
-            },
-            1 => {
-            },
-            2 => {
-            },
+            0 => {}
+            1 => {}
+            2 => {}
             3 => {
                 channel.length_counter = channel.length_load();
                 channel.linear_reload = true;
-            },
+            }
             _ => unreachable!(),
         }
     }
@@ -109,7 +111,7 @@ impl Channel for Triangle {
         } else {
             channel.timer_counter -= 1;
         }
-            
+
         if state.apu.is_quarter_frame(system) || channel.forced_clock {
             if channel.current_tick & 1 == 0 {
                 if channel.linear_reload {
@@ -121,14 +123,14 @@ impl Channel for Triangle {
                     channel.linear_reload = false;
                 }
             }
-        }            
+        }
 
         if state.apu.is_half_frame(system) || channel.forced_clock {
             if channel.length_counter != 0 && !channel.halt() {
                 channel.length_counter -= 1;
             }
         }
-        
+
         channel.forced_clock = false;
 
         channel.sequence()
@@ -137,7 +139,6 @@ impl Channel for Triangle {
     fn enable(&self) {
         let mut channel = self.state.borrow_mut();
         channel.enabled = true;
-        
     }
 
     fn disable(&self) {

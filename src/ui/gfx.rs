@@ -1,13 +1,13 @@
 use glium;
-use glium::{Surface};
-use glium::texture::{RawImage2d, ClientFormat};
+pub use glium::glutin::VirtualKeyCode as Key;
+use glium::texture;
 use glium::texture::integral_texture2d::IntegralTexture2d;
 use glium::texture::texture2d::Texture2d;
-use glium::texture;
-pub use glium::glutin::VirtualKeyCode as Key;
+use glium::texture::{ClientFormat, RawImage2d};
+use glium::Surface;
 
-use std::collections::HashMap;
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 
 pub enum FilterScaling {
     Nearest,
@@ -59,13 +59,15 @@ impl FilterUniforms {
 
 impl glium::uniforms::Uniforms for FilterUniforms {
     fn visit_values<'b, F: FnMut(&str, glium::uniforms::UniformValue<'b>)>(&'b self, mut visit: F) {
-        use glium::uniforms::{UniformValue, MagnifySamplerFilter, MinifySamplerFilter};
+        use glium::uniforms::{MagnifySamplerFilter, MinifySamplerFilter, UniformValue};
         for uni in self.uniforms.iter() {
             let (mag_scale, min_scale) = match uni.scaling {
-                FilterScaling::Nearest => (MagnifySamplerFilter::Nearest,
-                                         MinifySamplerFilter::Nearest),
-                FilterScaling::Linear => (MagnifySamplerFilter::Linear,
-                                        MinifySamplerFilter::Linear),
+                FilterScaling::Nearest => {
+                    (MagnifySamplerFilter::Nearest, MinifySamplerFilter::Nearest)
+                }
+                FilterScaling::Linear => {
+                    (MagnifySamplerFilter::Linear, MinifySamplerFilter::Linear)
+                }
             };
 
             let mut sampler = glium::uniforms::SamplerBehavior::default();
@@ -75,9 +77,12 @@ impl glium::uniforms::Uniforms for FilterUniforms {
             match uni.texture {
                 FilterTexture::Texture2d(ref tex) => {
                     visit(&*uni.name, UniformValue::Texture2d(&tex, Some(sampler)));
-                },
+                }
                 FilterTexture::IntegralTexture2d(ref tex) => {
-                    visit(&*uni.name, UniformValue::IntegralTexture2d(&tex, Some(sampler)));
+                    visit(
+                        &*uni.name,
+                        UniformValue::IntegralTexture2d(&tex, Some(sampler)),
+                    );
                 }
             }
         }
@@ -88,7 +93,7 @@ pub trait Filter {
     fn get_dimensions(&self) -> (u32, u32);
     fn get_fragment_shader(&self) -> String;
     fn get_vertex_shader(&self) -> String;
-    fn process(&self, &glium::Display, &[u16]) -> FilterUniforms;
+    fn process(&self, display: &glium::Display, screen: &[u16]) -> FilterUniforms;
 }
 
 pub struct PalettedFilter {
@@ -97,14 +102,14 @@ pub struct PalettedFilter {
 
 impl PalettedFilter {
     pub fn new(pal: [u8; 1536]) -> PalettedFilter {
-        PalettedFilter {
-            palette: pal,
-        }
+        PalettedFilter { palette: pal }
     }
 }
 
 impl Filter for PalettedFilter {
-    fn get_dimensions(&self) -> (u32, u32) { (256 * 3, 240 * 3) }
+    fn get_dimensions(&self) -> (u32, u32) {
+        (256 * 3, 240 * 3)
+    }
 
     fn get_fragment_shader(&self) -> String {
         r#"
@@ -120,7 +125,8 @@ impl Filter for PalettedFilter {
                 ivec4 index = texture(tex, v_tex_coords);
                 color = texelFetch(palette, ivec2(index.x % 64, index.x / 64), 0);
             }
-        "#.to_string()
+        "#
+        .to_string()
     }
 
     fn get_vertex_shader(&self) -> String {
@@ -136,7 +142,8 @@ impl Filter for PalettedFilter {
                 v_tex_coords = tex_coords;
                 gl_Position = vec4(position, 0.0, 1.0);
             }
-        "#.to_string()
+        "#
+        .to_string()
     }
 
     fn process(&self, display: &glium::Display, screen: &[u16]) -> FilterUniforms {
@@ -148,8 +155,8 @@ impl Filter for PalettedFilter {
             format: ClientFormat::U16,
         };
 
-        let tex = IntegralTexture2d::with_mipmaps(
-            &*display, img, texture::MipmapsOption::NoMipmap).unwrap();
+        let tex = IntegralTexture2d::with_mipmaps(&*display, img, texture::MipmapsOption::NoMipmap)
+            .unwrap();
         unis.add_i2d_uniform("tex".to_string(), tex, FilterScaling::Nearest);
 
         let palette = RawImage2d {
@@ -159,8 +166,8 @@ impl Filter for PalettedFilter {
             format: ClientFormat::U8U8U8,
         };
 
-        let pal_tex = Texture2d::with_mipmaps(&*display, palette, 
-                                             texture::MipmapsOption::NoMipmap).unwrap();
+        let pal_tex =
+            Texture2d::with_mipmaps(&*display, palette, texture::MipmapsOption::NoMipmap).unwrap();
         unis.add_2d_uniform("palette".to_string(), pal_tex, FilterScaling::Nearest);
         unis
     }
@@ -198,17 +205,35 @@ impl<T: Filter> GliumRenderer<T> {
         let display = glium::Display::new(window, context, &events_loop)
             .expect("Could not initialize display");
 
-        let top_right = Vertex { position: [1.0, 1.0], tex_coords: [1.0, 0.0] };
-        let top_left = Vertex { position: [-1.0, 1.0], tex_coords: [0.0, 0.0] };
-        let bottom_left = Vertex { position: [-1.0, -1.0],  tex_coords: [0.0, 1.0] };
-        let bottom_right = Vertex { position: [1.0, -1.0], tex_coords: [1.0, 1.0] };
+        let top_right = Vertex {
+            position: [1.0, 1.0],
+            tex_coords: [1.0, 0.0],
+        };
+        let top_left = Vertex {
+            position: [-1.0, 1.0],
+            tex_coords: [0.0, 0.0],
+        };
+        let bottom_left = Vertex {
+            position: [-1.0, -1.0],
+            tex_coords: [0.0, 1.0],
+        };
+        let bottom_right = Vertex {
+            position: [1.0, -1.0],
+            tex_coords: [1.0, 1.0],
+        };
 
         let shape = vec![top_right, top_left, bottom_left, bottom_right];
 
         let vertex_buffer = glium::VertexBuffer::new(&display, &shape).unwrap();
         let indicies = glium::index::NoIndices(glium::index::PrimitiveType::TriangleFan);
 
-        let program = glium::Program::from_source(&display, &*filter.get_vertex_shader(), &*filter.get_fragment_shader(), None).unwrap();
+        let program = glium::Program::from_source(
+            &display,
+            &*filter.get_vertex_shader(),
+            &*filter.get_fragment_shader(),
+            None,
+        )
+        .unwrap();
 
         GliumRenderer {
             filter: filter,
@@ -231,10 +256,10 @@ impl<T: Filter> GliumRenderer<T> {
                     match event {
                         Closed => {
                             self.closed.set(true);
-                        },
+                        }
                         _ => (),
                     }
-                },
+                }
                 DeviceEvent { event, .. } => {
                     use glium::glutin::DeviceEvent::*;
                     match event {
@@ -243,20 +268,28 @@ impl<T: Filter> GliumRenderer<T> {
                             if let Some(key) = key.virtual_keycode {
                                 self.input.borrow_mut().insert(key, pressed);
                             }
-                        },
+                        }
                         _ => (),
                     }
-                },
-                _ => ()
+                }
+                _ => (),
             }
         });
     }
 
     pub fn render(&self, screen: &[u16]) {
         let uniforms = self.filter.process(&*self.display.borrow(), screen);
-        let mut target = self.display.borrow_mut().draw(); 
+        let mut target = self.display.borrow_mut().draw();
         target.clear_color(0.0, 0.0, 0.0, 1.0);
-        target.draw(&self.vertex_buffer, &self.indicies, &self.program, &uniforms, &Default::default()).unwrap();
+        target
+            .draw(
+                &self.vertex_buffer,
+                &self.indicies,
+                &self.program,
+                &uniforms,
+                &Default::default(),
+            )
+            .unwrap();
         target.finish().unwrap();
     }
 
@@ -270,7 +303,7 @@ impl<T: Filter> GliumRenderer<T> {
     }
 }
 
-use std::sync::mpsc::{Sender, Receiver, channel, TryRecvError};
+use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 
 enum RendererMessage {
     Frame(Vec<u16>),
@@ -331,14 +364,19 @@ impl Renderer {
             }
         }
 
-        if input.is_none() { return; }
+        if input.is_none() {
+            return;
+        }
         let input = input.unwrap();
         self.closed.set(input.0);
         *self.input.borrow_mut() = input.1;
     }
 
     pub fn add_frame(&self, frame: &[u16]) {
-        let _ = self.tx.send(RendererMessage::Frame(frame.to_vec())).unwrap();
+        let _ = self
+            .tx
+            .send(RendererMessage::Frame(frame.to_vec()))
+            .unwrap();
         self.process_input();
     }
 

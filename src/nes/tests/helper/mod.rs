@@ -1,21 +1,29 @@
 extern crate nes;
-use self::nes::{UserInput, Machine, Region, Cartridge, Controller};
+use self::nes::{Cartridge, Controller, Machine, Region, UserInput};
 
+use std::convert::AsRef;
 use std::fs::File;
 use std::path::Path;
-use std::convert::AsRef;
 
 #[derive(Debug, Copy, Clone)]
 pub enum Condition {
     Equals(u16, u8),
+    PowerUpPc(u16),
 }
 
-pub fn run<T>(rom: T, frames: u32, condition: Condition) where T: AsRef<str> {
+pub fn run<T>(rom: T, frames: u32, condition: Condition)
+where
+    T: AsRef<str>,
+{
     let mut path = Path::new("./tests/").to_path_buf();
     path.push(Path::new(rom.as_ref()));
     let mut file = File::open(path).unwrap();
     let cart = Cartridge::load(&mut file).unwrap();
     let mut machine = Machine::new(Region::Ntsc, cart);
+
+    if let Condition::PowerUpPc(addr) = condition {
+        machine.force_power_up_pc(addr);
+    }
 
     loop {
         let mut r = Vec::new();
@@ -41,10 +49,15 @@ pub fn run<T>(rom: T, frames: u32, condition: Condition) where T: AsRef<str> {
                 match condition {
                     Condition::Equals(a, v) => {
                         let nes_val = system.debug.peek(system, state, a);
-                        assert!(v == nes_val,
-                                "Expected '0x{:04X}' to be '0x{:02X}', found '0x{:02X}'.",
-                                a, v, nes_val);
+                        assert!(
+                            v == nes_val,
+                            "Expected '0x{:04X}' to be '0x{:02X}', found '0x{:02X}'.",
+                            a,
+                            v,
+                            nes_val
+                        );
                     }
+                    _ => (),
                 }
                 break;
             }

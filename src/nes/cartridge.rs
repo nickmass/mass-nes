@@ -2,11 +2,11 @@ use std::io;
 use std::convert::From;
 use std::error;
 use std::fmt;
-use system::SystemState;
-use cpu::Cpu;
-use ppu::Ppu;
-use mapper;
-use mapper::Mapper;
+use crate::system::SystemState;
+use crate::cpu::Cpu;
+use crate::ppu::Ppu;
+use crate::mapper;
+use crate::mapper::Mapper;
 
 #[derive(Debug)]
 pub enum CartridgeError {
@@ -66,7 +66,7 @@ impl Cartridge {
     pub fn load<T: io::Read>(file: &mut T) -> Result<Cartridge, CartridgeError> {
         let mut buf = Vec::new();
 
-        let file_size = try!(file.read_to_end(&mut buf));
+        let file_size = file.read_to_end(&mut buf)?;
 
         match Cartridge::get_rom_type(&buf) {
             Some(RomType::Ines) =>  Cartridge::load_ines(&buf),

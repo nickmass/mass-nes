@@ -1,5 +1,5 @@
-use memory::Page;
-use system::SystemState;
+use crate::memory::Page;
+use crate::system::SystemState;
 
 pub struct NametablesState {
     mappings: [Nametable; 4],

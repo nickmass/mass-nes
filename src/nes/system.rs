@@ -1,13 +1,15 @@
-use bus::{DeviceMappings, RangeAndMask, NotAndMask, Address, DeviceKind};
-use cpu::{Cpu, CpuState};
-use ppu::{Ppu, PpuState};
-use apu::{Apu, ApuState};
-use cartridge::Cartridge;
-use memory::Pages;
-use debug::{Debug, DebugState};
-use input::{Input, InputState};
+use crate::apu::{Apu, ApuState};
+use crate::bus::{
+    Address, AddressBus, BusKind, DeviceKind, DeviceMappings, NotAndMask, RangeAndMask,
+};
+use crate::cartridge::Cartridge;
+use crate::cpu::{Cpu, CpuPinIn, TickResult};
+use crate::debug::{Debug, DebugState};
+use crate::input::{Input, InputState};
+use crate::memory::{MemoryBlock, Pages};
+use crate::ppu::{Ppu, PpuState};
 
-pub use input::{Controller, InputDevice};
+pub use crate::input::{Controller, InputDevice};
 
 pub enum UserInput {
     PlayerOne(Controller),
@@ -96,7 +98,6 @@ impl Region {
             Region::Pal => DMC_RATES_PAL,
         }
     }
-
 }
 
 const FIVE_STEP_SEQ_NTSC: &'static [u32] = &[7457, 14913, 22371, 37281, 37282];
@@ -105,11 +106,12 @@ const FIVE_STEP_SEQ_PAL: &'static [u32] = &[8314, 16628, 24940, 33254, 41566];
 const FOUR_STEP_SEQ_NTSC: &'static [u32] = &[7457, 14913, 22371, 29829, 29830];
 const FOUR_STEP_SEQ_PAL: &'static [u32] = &[8314, 16626, 24940, 33254, 33255];
 
-const DMC_RATES_NTSC: &'static [u16] = &[428, 380, 340, 320, 286, 254, 226, 214,
-                                        190, 160, 142, 128, 106, 84, 72, 54];
-const DMC_RATES_PAL: &'static [u16] = &[398, 354, 316, 298, 276, 236, 210, 198,
-                                        176, 148, 132, 118, 98, 78, 66, 50];
-
+const DMC_RATES_NTSC: &'static [u16] = &[
+    428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 84, 72, 54,
+];
+const DMC_RATES_PAL: &'static [u16] = &[
+    398, 354, 316, 298, 276, 236, 210, 198, 176, 148, 132, 118, 98, 78, 66, 50,
+];
 
 pub enum EmphMode {
     Bgr,
@@ -126,7 +128,9 @@ impl Machine {
     pub fn new(region: Region, cartridge: Cartridge) -> Machine {
         let mut state = Box::new(SystemState::default());
         let system = System::new(region, cartridge, &mut state);
-        system.cpu.power(&system, &mut state);
+
+        system.debug.log_for(&mut state, 10000);
+
         Machine {
             state: state,
             system: system,
@@ -134,13 +138,67 @@ impl Machine {
         }
     }
 
+    pub fn force_power_up_pc(&mut self, addr: u16) {
+        self.system.cpu.power_up_pc(Some(addr));
+    }
+
     pub fn run(&mut self) {
         let mut last_vblank = false;
+        let mut cpu_pin_in = CpuPinIn {
+            data: 0,
+            reset: false,
+            irq: false,
+            nmi: false,
+            power: false,
+        };
         while self.state.ppu.in_vblank || !last_vblank {
             last_vblank = self.state.ppu.in_vblank;
-            self.system.cpu.tick(&self.system, &mut self.state);
+
+            if self.state.cpu_power {
+                cpu_pin_in.power = true;
+                self.state.cpu_power = false
+            } else {
+                cpu_pin_in.power = false;
+            }
+
+            if self.state.cpu_reset {
+                cpu_pin_in.reset = true;
+                self.state.cpu_reset = false
+            } else {
+                cpu_pin_in.reset = false;
+            }
+
+            let tick_result = self.system.cpu.tick(cpu_pin_in);
+
+            let cpu_state = self.system.cpu.debug_state();
+            self.system
+                .debug
+                .trace(&self.system, &mut self.state, cpu_state);
+
+            if let Some(dmc_read) = self.system.cpu.dmc_read {
+                self.system.apu.dmc.dmc_read(dmc_read);
+            }
+
+            match tick_result {
+                TickResult::Read(addr) => {
+                    let value = self
+                        .system
+                        .cpu_bus
+                        .read(&self.system, &mut self.state, addr);
+                    cpu_pin_in.data = value;
+                }
+                TickResult::Write(addr, value) => {
+                    self.system
+                        .cpu_bus
+                        .write(&self.system, &mut self.state, addr, value)
+                }
+            }
+
             self.system.apu.tick(&self.system, &mut self.state);
-            self.system.cartridge.mapper.tick(&self.system, &mut self.state);
+            self.system
+                .cartridge
+                .mapper
+                .tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
@@ -163,7 +221,7 @@ impl Machine {
         (&self.system, &mut self.state)
     }
 
-    pub fn set_input<T: IntoIterator<Item=UserInput>>(&mut self, input: T) {
+    pub fn set_input<T: IntoIterator<Item = UserInput>>(&mut self, input: T) {
         let input = input.into_iter();
         for i in input {
             self.handle_input(i);
@@ -181,19 +239,22 @@ impl Machine {
 
 #[derive(Default)]
 pub struct SystemState {
-    pub cpu: CpuState,
     pub ppu: PpuState,
     pub apu: ApuState,
     pub mem: Pages,
     pub mappings: DeviceMappings,
     pub input: InputState,
     pub debug: DebugState,
+    cpu_power: bool,
+    cpu_reset: bool,
 }
 
 pub struct System {
     pub region: Region,
     pub ppu: Ppu,
     pub cpu: Cpu,
+    pub cpu_bus: AddressBus,
+    pub cpu_mem: MemoryBlock,
     pub apu: Apu,
     pub cartridge: Cartridge,
     pub debug: Debug,
@@ -201,58 +262,89 @@ pub struct System {
 }
 
 impl System {
-    pub fn new(region: Region, mut cartridge: Cartridge,
-               state: &mut SystemState) -> System {
-        let cpu = Cpu::new(state);
+    pub fn new(region: Region, mut cartridge: Cartridge, state: &mut SystemState) -> System {
+        let cpu = Cpu::new();
         let ppu = Ppu::new(state);
         let apu = Apu::new(state);
+        let cpu_bus = AddressBus::new(BusKind::Cpu, state, 0);
+        let cpu_mem = MemoryBlock::new(2, &mut state.mem);
         cartridge.init(state, &cpu, &ppu);
 
         let mut system = System {
             region: region,
             ppu: ppu,
             cpu: cpu,
+            cpu_bus: cpu_bus,
+            cpu_mem: cpu_mem,
             apu: apu,
             cartridge: cartridge,
             debug: Debug::new(),
             input: Input::new(),
         };
 
-        system.cpu.register_read(state, DeviceKind::CpuRam,
-                                 NotAndMask(0x7ff));
-        system.cpu.register_write(state, DeviceKind::CpuRam,
-                                 NotAndMask(0x7ff));
-        system.cpu.register_read(state, DeviceKind::Ppu,
-                                 RangeAndMask(0x2000, 0x4000, 0x2007));
-        system.cpu.register_write(state, DeviceKind::Ppu,
-                                  RangeAndMask(0x2000, 0x4000, 0x2007));
-        system.cpu.register_write(state, DeviceKind::Ppu, Address(0x4014));
-        system.ppu.register_read(state, DeviceKind::Nametables,
-                                 RangeAndMask(0x2000, 0x4000, 0xfff));
-        system.ppu.register_write(state, DeviceKind::Nametables,
-                                 RangeAndMask(0x2000, 0x4000, 0xfff));
-        system.cpu.register_read(state, DeviceKind::Apu, Address(0x4015));
-        system.cpu.register_write(state, DeviceKind::Apu, Address(0x4015));
-        system.cpu.register_write(state, DeviceKind::Apu, Address(0x4017));
-        system.cpu.register_read(state, DeviceKind::Input, Address(0x4016));
-        system.cpu.register_read(state, DeviceKind::Input, Address(0x4017));
-        system.cpu.register_write(state, DeviceKind::Input, Address(0x4016));
-        system.cartridge.mapper.register(state, &mut system.cpu, &mut system.ppu,
-                               &system.cartridge);
+        system
+            .cpu_bus
+            .register_read(state, DeviceKind::CpuRam, NotAndMask(0x7ff));
+        system
+            .cpu_bus
+            .register_write(state, DeviceKind::CpuRam, NotAndMask(0x7ff));
+        system
+            .cpu_bus
+            .register_read(state, DeviceKind::Ppu, RangeAndMask(0x2000, 0x4000, 0x2007));
+        system
+            .cpu_bus
+            .register_write(state, DeviceKind::Ppu, RangeAndMask(0x2000, 0x4000, 0x2007));
+        system
+            .cpu_bus
+            .register_write(state, DeviceKind::Ppu, Address(0x4014));
+        system.ppu.register_read(
+            state,
+            DeviceKind::Nametables,
+            RangeAndMask(0x2000, 0x4000, 0xfff),
+        );
+        system.ppu.register_write(
+            state,
+            DeviceKind::Nametables,
+            RangeAndMask(0x2000, 0x4000, 0xfff),
+        );
+        system
+            .cpu_bus
+            .register_read(state, DeviceKind::Apu, Address(0x4015));
+        system
+            .cpu_bus
+            .register_write(state, DeviceKind::Apu, Address(0x4015));
+        system
+            .cpu_bus
+            .register_write(state, DeviceKind::Apu, Address(0x4017));
+        system
+            .cpu_bus
+            .register_read(state, DeviceKind::Input, Address(0x4016));
+        system
+            .cpu_bus
+            .register_read(state, DeviceKind::Input, Address(0x4017));
+        system
+            .cpu_bus
+            .register_write(state, DeviceKind::Input, Address(0x4016));
+        system.cartridge.mapper.register(
+            state,
+            &mut system.cpu_bus,
+            &mut system.ppu,
+            &system.cartridge,
+        );
 
-        system.apu.register(state, &mut system.cpu);
+        system.apu.register(state, &mut system.cpu_bus);
         system.power(state);
         system
     }
 
-    pub fn power(&self, state: &mut SystemState) {
-        self.cpu.power(self, state);
+    pub fn power(&mut self, state: &mut SystemState) {
+        state.cpu_power = true;
         self.apu.power(self, state);
         self.ppu.power(self, state);
     }
 
-    pub fn reset(&self, state: &mut SystemState) {
-        self.cpu.reset(self, state);
+    pub fn reset(&mut self, state: &mut SystemState) {
+        state.cpu_reset = true;
         self.apu.reset(self, state);
         self.ppu.power(self, state);
     }
