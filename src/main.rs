@@ -41,9 +41,9 @@ fn run(mut file: File, region: Region) {
     let window = Renderer::new(filter);
 
     //let mut audio = ui::audio::RodioAudio::new(48000);
-    //let mut audio = CpalAudio::new();
+    let mut audio = CpalAudio::new();
 
-    let sample_rate = 48000; //audio.sample_rate();
+    let sample_rate = audio.sample_rate();
     let mut delta = 0;
     let mut blip = BlipBuf::new(sample_rate / 30);
     blip.set_rates(
@@ -71,7 +71,7 @@ fn run(mut file: File, region: Region) {
             while blip.samples_avail() > 0 {
                 let mut buf = [0i16; 1024];
                 let count = blip.read_samples(&mut buf, false);
-                //audio.add_samples(buf[0..count].to_vec());
+                audio.add_samples(buf[0..count].to_vec());
             }
         }
         {
@@ -106,7 +106,7 @@ fn run(mut file: File, region: Region) {
         }
     }
 
-    //audio.close();
+    audio.close();
     window.close();
 }
 

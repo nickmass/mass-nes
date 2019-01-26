@@ -144,31 +144,24 @@ impl Machine {
 
     pub fn run(&mut self) {
         let mut last_vblank = false;
-        let mut cpu_pin_in = CpuPinIn {
-            data: 0,
-            reset: false,
-            irq: false,
-            nmi: false,
-            power: false,
-        };
         while self.state.ppu.in_vblank || !last_vblank {
             last_vblank = self.state.ppu.in_vblank;
 
             if self.state.cpu_power {
-                cpu_pin_in.power = true;
+                self.state.cpu_pin_in.power = true;
                 self.state.cpu_power = false
             } else {
-                cpu_pin_in.power = false;
+                self.state.cpu_pin_in.power = false;
             }
 
             if self.state.cpu_reset {
-                cpu_pin_in.reset = true;
+                self.state.cpu_pin_in.reset = true;
                 self.state.cpu_reset = false
             } else {
-                cpu_pin_in.reset = false;
+                self.state.cpu_pin_in.reset = false;
             }
 
-            let tick_result = self.system.cpu.tick(cpu_pin_in);
+            let tick_result = self.system.cpu.tick(self.state.cpu_pin_in);
 
             let cpu_state = self.system.cpu.debug_state();
             self.system
@@ -185,7 +178,7 @@ impl Machine {
                         .system
                         .cpu_bus
                         .read(&self.system, &mut self.state, addr);
-                    cpu_pin_in.data = value;
+                    self.state.cpu_pin_in.data = value;
                 }
                 TickResult::Write(addr, value) => {
                     self.system
@@ -247,6 +240,7 @@ pub struct SystemState {
     pub debug: DebugState,
     cpu_power: bool,
     cpu_reset: bool,
+    cpu_pin_in: CpuPinIn,
 }
 
 pub struct System {

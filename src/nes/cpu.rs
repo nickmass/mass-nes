@@ -41,7 +41,7 @@ enum Power {
     UpdateRegPc(u16),
 }
 
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum TickResult {
     Read(u16),
     Write(u16, u8),
