@@ -197,7 +197,7 @@ impl<T: Filter> GliumRenderer<T> {
         let dims = filter.get_dimensions();
         let events_loop = glium::glutin::EventsLoop::new();
         let window = glium::glutin::WindowBuilder::new()
-            .with_dimensions(dims.0, dims.1)
+            .with_dimensions((dims.0, dims.1).into())
             .with_title("Mass NES");
 
         let context = glium::glutin::ContextBuilder::new();
@@ -254,7 +254,7 @@ impl<T: Filter> GliumRenderer<T> {
                 WindowEvent { event, .. } => {
                     use glium::glutin::WindowEvent::*;
                     match event {
-                        Closed => {
+                        CloseRequested => {
                             self.closed.set(true);
                         }
                         _ => (),
