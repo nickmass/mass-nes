@@ -17,6 +17,7 @@ pub enum UserInput {
     Reset,
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum Region {
     Ntsc,
     Pal,
@@ -113,6 +114,7 @@ const DMC_RATES_PAL: &'static [u16] = &[
     398, 354, 316, 298, 276, 236, 210, 198, 176, 148, 132, 118, 98, 78, 66, 50,
 ];
 
+#[derive(Debug, Copy, Clone)]
 pub enum EmphMode {
     Bgr,
     Brg,
@@ -129,7 +131,7 @@ impl Machine {
         let mut state = Box::new(SystemState::default());
         let system = System::new(region, cartridge, &mut state);
 
-        system.debug.log_for(&mut state, 10000);
+        //system.debug.log_for(&mut state, 10000);
 
         Machine {
             state: state,
@@ -203,6 +205,7 @@ impl Machine {
     }
 
     pub fn get_screen(&mut self) -> &[u16] {
+        eprintln!("{:?}", ::std::mem::size_of::<SystemState>());
         &self.state.ppu.screen
     }
 

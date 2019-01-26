@@ -9,6 +9,15 @@ pub trait Audio {
     fn close(self);
 }
 
+pub struct Null;
+impl Audio for Null {
+    fn sample_rate(&self) -> u32 {
+        48000
+    }
+    fn add_samples(&mut self, _samples: Vec<i16>) {}
+    fn close(self) {}
+}
+
 pub struct CpalAudio {
     device: cpal::Device,
     format: cpal::Format,

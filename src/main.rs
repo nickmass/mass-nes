@@ -13,7 +13,7 @@ use blip_buf::BlipBuf;
 use nes::{Cartridge, Controller, Machine, Region, UserInput};
 
 mod ui;
-use ui::audio::{Audio, CpalAudio};
+use ui::audio::Audio;
 use ui::gfx::{Key, Renderer};
 use ui::sync::FrameSync;
 
@@ -41,7 +41,8 @@ fn run(mut file: File, region: Region) {
     let window = Renderer::new(filter);
 
     //let mut audio = ui::audio::RodioAudio::new(48000);
-    let mut audio = CpalAudio::new();
+    //let mut audio = ui::audio::CpalAudio::new();
+    let mut audio = ui::audio::Null;
 
     let sample_rate = audio.sample_rate();
     let mut delta = 0;

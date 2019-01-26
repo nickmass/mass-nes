@@ -25,7 +25,7 @@ pub enum DeviceKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Bus(u32);
+pub struct Bus(usize);
 
 #[derive(Clone, Copy, Debug)]
 enum BusMapping {
@@ -38,7 +38,7 @@ type Mapping = Vec<Vec<BusMapping>>;
 pub struct DeviceMappings {
     read_mappings: Mapping,
     write_mappings: Mapping,
-    next_bus: u32,
+    next_bus: usize,
 }
 
 impl Default for DeviceMappings {
@@ -72,24 +72,24 @@ impl DeviceMappings {
     }
 
     fn insert_read_mapping(&mut self, bus: &Bus, addr: u16, base_addr: u16, device: DeviceKind) {
-        self.read_mappings.get_mut(bus.0 as usize).unwrap()[addr as usize] =
+        self.read_mappings.get_mut(bus.0).unwrap()[addr as usize] =
             BusMapping::Mapped(base_addr, device);
     }
 
     fn insert_write_mapping(&mut self, bus: &Bus, addr: u16, base_addr: u16, device: DeviceKind) {
-        self.write_mappings.get_mut(bus.0 as usize).unwrap()[addr as usize] =
+        self.write_mappings.get_mut(bus.0).unwrap()[addr as usize] =
             BusMapping::Mapped(base_addr, device);
     }
 
-    fn get_read_mapping(&self, bus: &Bus, addr: &u16) -> Option<(u16, DeviceKind)> {
-        match self.read_mappings[bus.0 as usize][*addr as usize] {
+    fn get_read_mapping(&self, bus: &Bus, addr: u16) -> Option<(u16, DeviceKind)> {
+        match self.read_mappings[bus.0][addr as usize] {
             BusMapping::Mapped(x, y) => Some((x, y)),
             BusMapping::Unmapped => None,
         }
     }
 
-    fn get_write_mapping(&self, bus: &Bus, addr: &u16) -> Option<(u16, DeviceKind)> {
-        match self.write_mappings[bus.0 as usize][*addr as usize] {
+    fn get_write_mapping(&self, bus: &Bus, addr: u16) -> Option<(u16, DeviceKind)> {
+        match self.write_mappings[bus.0][addr as usize] {
             BusMapping::Mapped(x, y) => Some((x, y)),
             BusMapping::Unmapped => None,
         }
@@ -149,62 +149,72 @@ impl AddressBus {
 
     pub fn peek(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
         let addr = addr & !(self.block_size - 1);
-        let mapping = state.mappings.get_read_mapping(&self.bus, &addr);
+        let mapping = state.mappings.get_read_mapping(&self.bus, addr);
         match mapping {
-            Some(h) => match h.1 {
-                DeviceKind::CpuRam => system.cpu_mem.peek(state, h.0),
-                DeviceKind::Ppu => system.ppu.peek(system, state, h.0),
-                DeviceKind::Nametables => system.cartridge.mapper.nt_peek(system, state, h.0),
-                DeviceKind::Mapper => system.cartridge.mapper.peek(self.kind, system, state, h.0),
-                DeviceKind::Input => system.input.peek(self.kind, system, state, h.0),
-                DeviceKind::Apu => system.apu.peek(system, state, h.0),
-                _ => unimplemented!(),
-            },
+            Some((addr, DeviceKind::CpuRam)) => system.cpu_mem.peek(state, addr),
+            Some((addr, DeviceKind::Ppu)) => system.ppu.peek(system, state, addr),
+            Some((addr, DeviceKind::Nametables)) => {
+                system.cartridge.mapper.nt_peek(system, state, addr)
+            }
+            Some((addr, DeviceKind::Mapper)) => {
+                system.cartridge.mapper.peek(self.kind, system, state, addr)
+            }
+            Some((addr, DeviceKind::Input)) => system.input.peek(self.kind, system, state, addr),
+            Some((addr, DeviceKind::Apu)) => system.apu.peek(system, state, addr),
             None => 0xff,
+            _ => unimplemented!(),
         }
     }
 
     pub fn read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
         let addr = addr & !(self.block_size - 1);
-        let mapping = state.mappings.get_read_mapping(&self.bus, &addr);
+        let mapping = state.mappings.get_read_mapping(&self.bus, addr);
         match mapping {
-            Some(h) => match h.1 {
-                DeviceKind::CpuRam => system.cpu_mem.read(state, h.0),
-                DeviceKind::Ppu => system.ppu.read(system, state, h.0),
-                DeviceKind::Mapper => system.cartridge.mapper.read(self.kind, system, state, h.0),
-                DeviceKind::Nametables => system.cartridge.mapper.nt_read(system, state, h.0),
-                DeviceKind::Input => system.input.read(self.kind, system, state, h.0),
-                DeviceKind::Apu => system.apu.read(system, state, h.0),
-                _ => unimplemented!(),
-            },
+            Some((addr, DeviceKind::CpuRam)) => system.cpu_mem.read(state, addr),
+            Some((addr, DeviceKind::Ppu)) => system.ppu.read(system, state, addr),
+            Some((addr, DeviceKind::Mapper)) => {
+                system.cartridge.mapper.read(self.kind, system, state, addr)
+            }
+            Some((addr, DeviceKind::Nametables)) => {
+                system.cartridge.mapper.nt_read(system, state, addr)
+            }
+            Some((addr, DeviceKind::Input)) => system.input.read(self.kind, system, state, addr),
+            Some((addr, DeviceKind::Apu)) => system.apu.read(system, state, addr),
             None => 0xff,
+            _ => unimplemented!(),
         }
     }
 
     pub fn write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
         let addr = addr & !(self.block_size - 1);
-        let mapping = state.mappings.get_write_mapping(&self.bus, &addr);
+        let mapping = state.mappings.get_write_mapping(&self.bus, addr);
         match mapping {
-            Some(h) => match h.1 {
-                DeviceKind::CpuRam => system.cpu_mem.write(state, h.0, value),
-                DeviceKind::Ppu => system.ppu.write(system, state, h.0, value),
-                DeviceKind::Mapper => system
-                    .cartridge
-                    .mapper
-                    .write(self.kind, system, state, h.0, value),
-                DeviceKind::Nametables => {
-                    system.cartridge.mapper.nt_write(system, state, h.0, value)
-                }
-                DeviceKind::Input => system.input.write(self.kind, system, state, h.0, value),
-                DeviceKind::Apu => system.apu.write(system, state, h.0, value),
-                DeviceKind::PulseOne => system.apu.pulse_one.write(system, state, h.0, value),
-                DeviceKind::PulseTwo => system.apu.pulse_two.write(system, state, h.0, value),
-                DeviceKind::Noise => system.apu.noise.write(system, state, h.0, value),
-                DeviceKind::Triangle => system.apu.triangle.write(system, state, h.0, value),
-                DeviceKind::Dmc => system.apu.dmc.write(system, state, h.0, value),
-                _ => unimplemented!(),
-            },
+            Some((addr, DeviceKind::CpuRam)) => system.cpu_mem.write(state, addr, value),
+            Some((addr, DeviceKind::Ppu)) => system.ppu.write(system, state, addr, value),
+            Some((addr, DeviceKind::Mapper)) => system
+                .cartridge
+                .mapper
+                .write(self.kind, system, state, addr, value),
+            Some((addr, DeviceKind::Nametables)) => {
+                system.cartridge.mapper.nt_write(system, state, addr, value)
+            }
+            Some((addr, DeviceKind::Input)) => {
+                system.input.write(self.kind, system, state, addr, value)
+            }
+            Some((addr, DeviceKind::Apu)) => system.apu.write(system, state, addr, value),
+            Some((addr, DeviceKind::PulseOne)) => {
+                system.apu.pulse_one.write(system, state, addr, value)
+            }
+            Some((addr, DeviceKind::PulseTwo)) => {
+                system.apu.pulse_two.write(system, state, addr, value)
+            }
+            Some((addr, DeviceKind::Noise)) => system.apu.noise.write(system, state, addr, value),
+            Some((addr, DeviceKind::Triangle)) => {
+                system.apu.triangle.write(system, state, addr, value)
+            }
+            Some((addr, DeviceKind::Dmc)) => system.apu.dmc.write(system, state, addr, value),
             None => {}
+            _ => unimplemented!(),
         }
     }
 
