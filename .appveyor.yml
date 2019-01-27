@@ -27,7 +27,6 @@ deploy:
     artifact: release
     force_update: true
     on:
-        branch: master
-        appveyor_repo_tag: true
+        APPVEYOR_REPO_TAG: true
 
 

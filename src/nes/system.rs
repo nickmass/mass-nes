@@ -1,4 +1,4 @@
-use crate::apu::{Apu, ApuState};
+use crate::apu::Apu;
 use crate::bus::{
     Address, AddressBus, BusKind, DeviceKind, DeviceMappings, NotAndMask, RangeAndMask,
 };
@@ -22,6 +22,13 @@ pub enum Region {
     Ntsc,
     Pal,
 }
+
+impl Default for Region {
+    fn default() -> Self {
+        Region::Ntsc
+    }
+}
+
 impl Region {
     pub fn frame_ticks(&self) -> f64 {
         match *self {
@@ -194,20 +201,18 @@ impl Machine {
                 TickResult::Idle => (),
             }
 
-            self.system.apu.tick(&self.system, &mut self.state);
+            self.system.apu.tick();
 
-            let apu_irq = self.system.apu.get_irq(&self.system, &mut self.state);
+            let apu_irq = self.system.apu.get_irq();
+
+            self.state.cpu_pin_in.dmc_req = self.system.apu.get_dmc_req();
 
             self.system
                 .cartridge
                 .mapper
                 .tick(&self.system, &mut self.state);
 
-            let mapper_irq = self
-                .system
-                .cartridge
-                .mapper
-                .get_irq(&self.system, &mut self.state);
+            let mapper_irq = self.system.cartridge.mapper.get_irq();
 
             self.state.cpu_pin_in.irq = apu_irq | mapper_irq;
 
@@ -226,7 +231,7 @@ impl Machine {
     }
 
     pub fn get_audio(&mut self) -> &[i16] {
-        self.system.apu.get_samples(&self.system, &mut self.state)
+        self.system.apu.get_samples()
     }
 
     pub fn get_debug(&mut self) -> (&System, &mut SystemState) {
@@ -252,7 +257,6 @@ impl Machine {
 #[derive(Default)]
 pub struct SystemState {
     pub ppu: PpuState,
-    pub apu: ApuState,
     pub mem: Pages,
     pub mappings: DeviceMappings,
     pub input: InputState,
@@ -277,11 +281,11 @@ pub struct System {
 impl System {
     pub fn new(region: Region, mut cartridge: Cartridge, state: &mut SystemState) -> System {
         let cpu = Cpu::new();
-        let ppu = Ppu::new(state);
-        let apu = Apu::new(state);
+        let ppu = Ppu::new(state, region);
+        let apu = Apu::new(region);
         let cpu_bus = AddressBus::new(BusKind::Cpu, state, 0);
         let cpu_mem = MemoryBlock::new(2, &mut state.mem);
-        cartridge.init(state, &cpu, &ppu);
+        cartridge.init(state, &ppu);
 
         let mut system = System {
             region: region,
@@ -352,13 +356,13 @@ impl System {
 
     pub fn power(&mut self, state: &mut SystemState) {
         state.cpu_power = true;
-        self.apu.power(self, state);
+        self.apu.power();
         self.ppu.power(self, state);
     }
 
     pub fn reset(&mut self, state: &mut SystemState) {
         state.cpu_reset = true;
-        self.apu.reset(self, state);
+        self.apu.reset();
         self.ppu.power(self, state);
     }
 }

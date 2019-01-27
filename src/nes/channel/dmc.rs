@@ -1,7 +1,7 @@
-use crate::bus::AddressBus;
-use crate::bus::{AndEqualsAndMask, DeviceKind};
+use crate::apu::ApuState;
+use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
-use crate::system::{System, SystemState};
+use crate::system::{Region, SystemState};
 
 use std::cell::RefCell;
 
@@ -20,6 +20,8 @@ struct DmcState {
     irq: bool,
     silence: bool,
     regs: [u8; 4],
+    region: Region,
+    dmc_req: Option<u16>,
 }
 
 impl DmcState {
@@ -31,8 +33,8 @@ impl DmcState {
         self.regs[0] & 0x40 != 0
     }
 
-    fn rate(&self, system: &System) -> u16 {
-        let rates = system.region.dmc_rates();
+    fn rate(&self) -> u16 {
+        let rates = self.region.dmc_rates();
         rates[(self.regs[0] & 0xf) as usize]
     }
 
@@ -51,16 +53,19 @@ impl DmcState {
 
 pub struct Dmc {
     state: RefCell<DmcState>,
+    region: Region,
 }
 
 impl Dmc {
-    pub fn new() -> Dmc {
+    pub fn new(region: Region) -> Dmc {
         let state = DmcState {
+            region: region,
             ..Default::default()
         };
 
         Dmc {
             state: RefCell::new(state),
+            region: region,
         }
     }
 
@@ -86,6 +91,11 @@ impl Dmc {
         let channel = self.state.borrow();
         channel.irq
     }
+
+    pub fn get_dmc_req(&self) -> Option<u16> {
+        let mut channel = self.state.borrow_mut();
+        channel.dmc_req.take()
+    }
 }
 
 impl Channel for Dmc {
@@ -97,11 +107,7 @@ impl Channel for Dmc {
         );
     }
 
-    fn read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
-        0
-    }
-
-    fn write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
+    fn write(&self, addr: u16, value: u8) {
         let mut channel = self.state.borrow_mut();
         channel.regs[addr as usize] = value;
         match addr {
@@ -119,19 +125,19 @@ impl Channel for Dmc {
         }
     }
 
-    fn tick(&self, system: &System, state: &mut SystemState) -> u8 {
+    fn tick(&self, _state: &ApuState) -> u8 {
         let mut channel = self.state.borrow_mut();
         channel.current_tick += 1;
 
         if !channel.read_pending && channel.sample_buffer_empty && channel.bytes_remaining != 0 {
-            system.cpu.dmc_req(channel.address_counter);
+            channel.dmc_req = Some(channel.address_counter);
             channel.read_pending = true;
         }
 
         if channel.timer_counter != 0 {
             channel.timer_counter -= 1
         } else {
-            channel.timer_counter = channel.rate(system) - 1;
+            channel.timer_counter = channel.rate() - 1;
             if !channel.silence {
                 let offset = if channel.output_shifter & 1 == 1 {
                     if channel.output_value <= 125 {

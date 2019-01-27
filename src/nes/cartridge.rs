@@ -1,12 +1,11 @@
-use std::io;
+use crate::mapper;
+use crate::mapper::Mapper;
+use crate::ppu::Ppu;
+use crate::system::SystemState;
 use std::convert::From;
 use std::error;
 use std::fmt;
-use crate::system::SystemState;
-use crate::cpu::Cpu;
-use crate::ppu::Ppu;
-use crate::mapper;
-use crate::mapper::Mapper;
+use std::io;
 
 #[derive(Debug)]
 pub enum CartridgeError {
@@ -22,13 +21,13 @@ impl fmt::Display for CartridgeError {
     }
 }
 
-impl  error::Error for CartridgeError {
+impl error::Error for CartridgeError {
     fn description(&self) -> &str {
         match *self {
             CartridgeError::InvalidFileType => "Unrecognized rom file format",
             CartridgeError::NotSupported => "Rom file format not supported",
             CartridgeError::CorruptedFile => "Rom file is corrupt",
-            CartridgeError::IoError(ref x) => x.description()
+            CartridgeError::IoError(ref x) => x.description(),
         }
     }
 }
@@ -38,7 +37,6 @@ impl From<io::Error> for CartridgeError {
         CartridgeError::IoError(err)
     }
 }
-
 
 enum RomType {
     Ines,
@@ -66,12 +64,12 @@ impl Cartridge {
     pub fn load<T: io::Read>(file: &mut T) -> Result<Cartridge, CartridgeError> {
         let mut buf = Vec::new();
 
-        let file_size = file.read_to_end(&mut buf)?;
+        let _file_size = file.read_to_end(&mut buf)?;
 
         match Cartridge::get_rom_type(&buf) {
-            Some(RomType::Ines) =>  Cartridge::load_ines(&buf),
-            Some(RomType::Fds) =>  Cartridge::load_fds(&buf),
-            Some(RomType::Unif) =>  Cartridge::load_unif(&buf),
+            Some(RomType::Ines) => Cartridge::load_ines(&buf),
+            Some(RomType::Fds) => Cartridge::load_fds(&buf),
+            Some(RomType::Unif) => Cartridge::load_unif(&buf),
             None => Err(CartridgeError::InvalidFileType),
         }
     }
@@ -123,16 +121,19 @@ impl Cartridge {
             mapper_number: mapper_number,
         };
 
-        println!("PRGROM: {}, CHRROM: {}, Mapper: {}", prg_rom_bytes, chr_rom_bytes, mapper_number);
+        println!(
+            "PRGROM: {}, CHRROM: {}, Mapper: {}",
+            prg_rom_bytes, chr_rom_bytes, mapper_number
+        );
         Ok(cartridge)
     }
 
-    fn load_fds(rom: &Vec<u8>) -> Result<Cartridge, CartridgeError> {
+    fn load_fds(_rom: &Vec<u8>) -> Result<Cartridge, CartridgeError> {
         println!("FDS");
         Err(CartridgeError::NotSupported)
     }
 
-    fn load_unif(rom: &Vec<u8>) -> Result<Cartridge, CartridgeError> {
+    fn load_unif(_rom: &Vec<u8>) -> Result<Cartridge, CartridgeError> {
         println!("UNIF");
         Err(CartridgeError::NotSupported)
     }
@@ -156,7 +157,7 @@ impl Cartridge {
         None
     }
 
-    pub fn init(&mut self, state: &mut SystemState, cpu: &Cpu, ppu: &Ppu) {
+    pub fn init(&mut self, state: &mut SystemState, ppu: &Ppu) {
         match self.mirroring {
             Mirroring::Horizontal => ppu.nametables.set_horizontal(state),
             Mirroring::Vertical => ppu.nametables.set_vertical(state),

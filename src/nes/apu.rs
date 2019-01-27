@@ -1,6 +1,8 @@
 use crate::bus::AddressBus;
 use crate::channel::{Channel, Dmc, Noise, Pulse, PulseChannel, Triangle};
-use crate::system::{System, SystemState};
+use crate::system::{Region, SystemState};
+
+use std::cell::RefCell;
 
 //TODO - Is this table the same for both PAL and NTSC?
 pub const LENGTH_TABLE: [u8; 0x20] = [
@@ -14,15 +16,6 @@ enum SequenceMode {
     FiveStep,
 }
 
-impl SequenceMode {
-    fn steps(&self, system: &System) -> &[u32] {
-        match *self {
-            SequenceMode::FourStep => system.region.four_step_seq(),
-            SequenceMode::FiveStep => system.region.five_step_seq(),
-        }
-    }
-}
-
 pub struct ApuState {
     current_tick: u32,
     reset_delay: u32,
@@ -30,9 +23,8 @@ pub struct ApuState {
     sequence_mode: SequenceMode,
     irq_inhibit: bool,
     irq: bool,
-    samples: Vec<i16>,
-    sample_index: usize,
     last_4017: u8,
+    region: Region,
 }
 
 impl Default for ApuState {
@@ -44,31 +36,43 @@ impl Default for ApuState {
             sequence_mode: SequenceMode::FourStep,
             irq_inhibit: false,
             irq: false,
-            samples: vec![0; 33248], //Max cycles for the longer pal frame
-            sample_index: 0,
             last_4017: 0,
+            region: Region::default(),
         }
     }
 }
 
 impl ApuState {
-    pub fn is_quarter_frame(&self, system: &System) -> bool {
-        let steps = self.sequence_mode.steps(system);
+    fn new(region: Region) -> ApuState {
+        ApuState {
+            region: region,
+            ..Default::default()
+        }
+    }
+    fn sequence_steps(&self) -> &'static [u32] {
+        match self.sequence_mode {
+            SequenceMode::FourStep => self.region.four_step_seq(),
+            SequenceMode::FiveStep => self.region.five_step_seq(),
+        }
+    }
+
+    pub fn is_quarter_frame(&self) -> bool {
+        let steps = self.sequence_steps();
         self.frame_counter == steps[0]
             || self.frame_counter == steps[1]
             || self.frame_counter == steps[2]
             || self.frame_counter == steps[3]
     }
 
-    pub fn is_half_frame(&self, system: &System) -> bool {
-        let steps = self.sequence_mode.steps(system);
+    pub fn is_half_frame(&self) -> bool {
+        let steps = self.sequence_steps();
         self.frame_counter == steps[1] || self.frame_counter == steps[3]
     }
 
-    fn is_irq_frame(&self, system: &System) -> bool {
+    fn is_irq_frame(&self) -> bool {
         match self.sequence_mode {
             SequenceMode::FourStep => {
-                let steps = self.sequence_mode.steps(system);
+                let steps = self.sequence_steps();
                 !self.irq_inhibit
                     && (self.frame_counter == steps[3] - 1
                         || self.frame_counter == steps[3]
@@ -78,9 +82,10 @@ impl ApuState {
         }
     }
 
-    fn increment_frame_counter(&mut self, system: &System) {
+    fn increment_frame_counter(&mut self) {
         self.frame_counter += 1;
-        if self.frame_counter == self.sequence_mode.steps(system)[4] {
+        let steps = self.sequence_steps();
+        if self.frame_counter == steps[4] {
             self.frame_counter = 0;
         }
     }
@@ -94,10 +99,14 @@ pub struct Apu {
     pub dmc: Dmc,
     pulse_table: Vec<i16>,
     tnd_table: Vec<i16>,
+    region: Region,
+    state: RefCell<ApuState>,
+    samples: Vec<i16>,
+    sample_index: usize,
 }
 
 impl Apu {
-    pub fn new(state: &mut SystemState) -> Apu {
+    pub fn new(region: Region) -> Apu {
         let mut pulse_table = Vec::new();
         for x in 0..32 {
             let f_val = 95.52 / (8128.0 / (x as f64) + 100.0);
@@ -111,36 +120,40 @@ impl Apu {
         }
 
         Apu {
-            pulse_one: Pulse::new(PulseChannel::InternalOne),
-            pulse_two: Pulse::new(PulseChannel::InternalTwo),
-            triangle: Triangle::new(),
-            noise: Noise::new(),
-            dmc: Dmc::new(),
+            pulse_one: Pulse::new(PulseChannel::InternalOne, region),
+            pulse_two: Pulse::new(PulseChannel::InternalTwo, region),
+            triangle: Triangle::new(region),
+            noise: Noise::new(region),
+            dmc: Dmc::new(region),
             pulse_table: pulse_table,
             tnd_table: tnd_table,
+            region: region,
+            state: RefCell::new(ApuState::new(region)),
+            samples: vec![0; 33248], //Max cycles for the longer pal frame
+            sample_index: 0,
         }
     }
 
-    pub fn power(&self, system: &System, state: &mut SystemState) {
+    pub fn power(&mut self) {
         for a in 0..4 {
-            self.pulse_one.write(system, state, a, 0);
-            self.pulse_two.write(system, state, a, 0);
-            self.noise.write(system, state, a, 0);
-            self.triangle.write(system, state, a, 0);
+            self.pulse_one.write(a, 0);
+            self.pulse_two.write(a, 0);
+            self.noise.write(a, 0);
+            self.triangle.write(a, 0);
         }
-        self.write(system, state, 0x4015, 0);
-        self.write(system, state, 0x4017, 0);
-        state.apu.reset_delay = 6;
+        self.write(0x4015, 0);
+        self.write(0x4017, 0);
+        self.state.borrow_mut().reset_delay = 6;
     }
 
-    pub fn reset(&self, system: &System, state: &mut SystemState) {
-        self.write(system, state, 0x4015, 0);
-        let val = state.apu.last_4017;
-        self.write(system, state, 0x4017, val);
-        state.apu.reset_delay = 6;
+    pub fn reset(&mut self) {
+        self.write(0x4015, 0);
+        let val = self.state.borrow().last_4017;
+        self.write(0x4017, val);
+        self.state.borrow_mut().reset_delay = 6;
     }
 
-    pub fn peek(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
+    pub fn peek(&self, addr: u16) -> u8 {
         match addr {
             0x4015 => {
                 let mut val = 0;
@@ -159,7 +172,7 @@ impl Apu {
                 if self.dmc.get_state() {
                     val |= 0x10;
                 }
-                if state.apu.irq {
+                if self.state.borrow().irq {
                     val |= 0x40;
                 }
                 if self.dmc.get_irq() {
@@ -171,7 +184,8 @@ impl Apu {
         }
     }
 
-    pub fn read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
+    pub fn read(&self, addr: u16) -> u8 {
+        let mut state = self.state.borrow_mut();
         match addr {
             0x4015 => {
                 let mut val = 0;
@@ -190,20 +204,21 @@ impl Apu {
                 if self.dmc.get_state() {
                     val |= 0x10;
                 }
-                if state.apu.irq {
+                if state.irq {
                     val |= 0x40;
                 }
                 if self.dmc.get_irq() {
                     val |= 0x80;
                 }
-                state.apu.irq = false;
+                state.irq = false;
                 val
             }
             _ => unreachable!(),
         }
     }
 
-    pub fn write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
+    pub fn write(&self, addr: u16, value: u8) {
+        let mut state = self.state.borrow_mut();
         match addr {
             0x4015 => {
                 if value & 1 != 0 {
@@ -233,23 +248,19 @@ impl Apu {
                 }
             }
             0x4017 => {
-                state.apu.last_4017 = value;
-                state.apu.sequence_mode = match value & 0x80 {
+                state.last_4017 = value;
+                state.sequence_mode = match value & 0x80 {
                     0 => SequenceMode::FourStep,
                     _ => SequenceMode::FiveStep,
                 };
-                state.apu.irq_inhibit = value & 0x40 != 0;
-                if state.apu.irq_inhibit {
-                    state.apu.irq = false
+                state.irq_inhibit = value & 0x40 != 0;
+                if state.irq_inhibit {
+                    state.irq = false
                 }
-                if state.apu.sequence_mode == SequenceMode::FiveStep {
+                if state.sequence_mode == SequenceMode::FiveStep {
                     self.forced_clock();
                 }
-                state.apu.reset_delay = if state.apu.current_tick & 1 == 0 {
-                    3
-                } else {
-                    4
-                };
+                state.reset_delay = if state.current_tick & 1 == 0 { 3 } else { 4 };
             }
             _ => unreachable!(),
         }
@@ -262,44 +273,49 @@ impl Apu {
         self.noise.forced_clock();
     }
 
-    pub fn tick(&self, system: &System, state: &mut SystemState) {
-        state.apu.current_tick += 1;
-        state.apu.increment_frame_counter(system);
-        if state.apu.is_irq_frame(system) {
-            state.apu.irq = true;
+    pub fn tick(&mut self) {
+        let mut state = self.state.borrow_mut();
+        state.current_tick += 1;
+        state.increment_frame_counter();
+        if state.is_irq_frame() {
+            state.irq = true;
         }
 
-        if state.apu.reset_delay != 0 {
-            state.apu.reset_delay -= 1;
-            if state.apu.reset_delay == 0 {
-                state.apu.frame_counter = 0;
+        if state.reset_delay != 0 {
+            state.reset_delay -= 1;
+            if state.reset_delay == 0 {
+                state.frame_counter = 0;
             }
         }
 
-        let pulse1 = self.pulse_one.tick(system, state);
-        let pulse2 = self.pulse_two.tick(system, state);
-        let triangle = self.triangle.tick(system, state);
-        let noise = self.noise.tick(system, state);
-        let dmc = self.dmc.tick(system, state);
+        let pulse1 = self.pulse_one.tick(&state);
+        let pulse2 = self.pulse_two.tick(&state);
+        let triangle = self.triangle.tick(&state);
+        let noise = self.noise.tick(&state);
+        let dmc = self.dmc.tick(&state);
 
         let pulse_out = self.pulse_table[(pulse1 + pulse2) as usize];
         let tnd_out = self.tnd_table[((3 * triangle) + (2 * noise) + dmc) as usize];
 
-        if let Some(v) = state.apu.samples.get_mut(state.apu.sample_index) {
+        if let Some(v) = self.samples.get_mut(self.sample_index) {
             *v = pulse_out + tnd_out;
         }
 
-        state.apu.sample_index += 1;
+        self.sample_index += 1;
     }
 
-    pub fn get_irq(&self, system: &System, state: &mut SystemState) -> bool {
-        state.apu.irq | self.dmc.get_irq()
+    pub fn get_irq(&self) -> bool {
+        self.state.borrow().irq | self.dmc.get_irq()
     }
 
-    pub fn get_samples<'a>(&'a self, system: &'a System, state: &'a mut SystemState) -> &[i16] {
-        let index = state.apu.sample_index;
-        state.apu.sample_index = 0;
-        &state.apu.samples[0..index]
+    pub fn get_dmc_req(&self) -> Option<u16> {
+        self.dmc.get_dmc_req()
+    }
+
+    pub fn get_samples<'a>(&'a mut self) -> &[i16] {
+        let index = self.sample_index;
+        self.sample_index = 0;
+        &self.samples[0..index]
     }
 
     pub fn register(&self, state: &mut SystemState, cpu: &mut AddressBus) {

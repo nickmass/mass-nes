@@ -1,8 +1,7 @@
-use crate::apu;
-use crate::bus::AddressBus;
-use crate::bus::{AndEqualsAndMask, DeviceKind};
+use crate::apu::ApuState;
+use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
-use crate::system::{System, SystemState};
+use crate::system::{Region, SystemState};
 
 use std::cell::RefCell;
 
@@ -46,7 +45,7 @@ impl PulseState {
         if !self.enabled {
             0
         } else {
-            apu::LENGTH_TABLE[(self.regs[3] >> 3 & 0x1f) as usize]
+            crate::apu::LENGTH_TABLE[(self.regs[3] >> 3 & 0x1f) as usize]
         }
     }
 
@@ -144,10 +143,11 @@ impl PulseState {
 pub struct Pulse {
     state: RefCell<PulseState>,
     channel: PulseChannel,
+    region: Region,
 }
 
 impl Pulse {
-    pub fn new(chan: PulseChannel) -> Pulse {
+    pub fn new(chan: PulseChannel, region: Region) -> Pulse {
         let state = PulseState {
             channel: chan,
             ..Default::default()
@@ -156,6 +156,7 @@ impl Pulse {
         Pulse {
             state: RefCell::new(state),
             channel: chan,
+            region: region,
         }
     }
 
@@ -185,11 +186,7 @@ impl Channel for Pulse {
         }
     }
 
-    fn read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
-        0
-    }
-
-    fn write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
+    fn write(&self, addr: u16, value: u8) {
         let mut channel = self.state.borrow_mut();
         channel.regs[addr as usize] = value;
         match addr {
@@ -210,7 +207,7 @@ impl Channel for Pulse {
         }
     }
 
-    fn tick(&self, system: &System, state: &mut SystemState) -> u8 {
+    fn tick(&self, state: &ApuState) -> u8 {
         let mut channel = self.state.borrow_mut();
         channel.current_tick += 1;
 
@@ -223,7 +220,7 @@ impl Channel for Pulse {
             }
         }
 
-        if state.apu.is_quarter_frame(system) || channel.forced_clock {
+        if state.is_quarter_frame() || channel.forced_clock {
             if channel.envelope_start {
                 channel.envelope_start = false;
                 channel.decay_counter = 0xf;
@@ -244,7 +241,7 @@ impl Channel for Pulse {
             }
         }
 
-        if state.apu.is_half_frame(system) || channel.forced_clock {
+        if state.is_half_frame() || channel.forced_clock {
             if channel.length_counter != 0 && !channel.halt() {
                 channel.length_counter -= 1;
             }

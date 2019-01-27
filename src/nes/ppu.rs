@@ -1,6 +1,6 @@
 use crate::bus::{AddressBus, AddressValidator, BusKind, DeviceKind};
 use crate::nametables::{Nametables, NametablesState};
-use crate::system::{EmphMode, System, SystemState};
+use crate::system::{EmphMode, Region, System, SystemState};
 
 pub struct PpuState {
     current_tick: u64,
@@ -69,6 +69,8 @@ pub struct PpuState {
 
     pub nametables: NametablesState,
     reset_delay: u32,
+
+    region: Region,
 }
 
 impl Default for PpuState {
@@ -140,6 +142,8 @@ impl Default for PpuState {
 
             nametables: Default::default(),
             reset_delay: 0,
+
+            region: Region::default(),
         }
     }
 }
@@ -183,9 +187,9 @@ impl PpuState {
         (self.regs[0] as u16 & 3) << 10
     }
 
-    fn emph_bits(&self, system: &System) -> u16 {
+    fn emph_bits(&self) -> u16 {
         let mut val = 0;
-        match system.region.emph_bits() {
+        match self.region.emph_bits() {
             EmphMode::Bgr => {
                 if self.is_red_emph() {
                     val |= 0x40;
@@ -333,13 +337,16 @@ impl Default for Stage {
 pub struct Ppu {
     bus: AddressBus,
     pub nametables: Nametables,
+    region: Region,
 }
 
 impl Ppu {
-    pub fn new(state: &mut SystemState) -> Ppu {
+    pub fn new(state: &mut SystemState, region: Region) -> Ppu {
+        state.ppu.region = region;
         let ppu = Ppu {
             bus: AddressBus::new(BusKind::Ppu, state, 0),
             nametables: Nametables::new(state),
+            region: region,
         };
 
         ppu
@@ -662,7 +669,7 @@ impl Ppu {
             }
             Stage::Prerender(_, 340) => {
                 //Skip tick on odd frames
-                if system.region.uneven_frames() {
+                if self.region.uneven_frames() {
                     if state.ppu.frame % 2 == 1 && state.ppu.is_background_enabled() {
                         state.ppu.stage = state.ppu.stage.increment(system);
                     }
@@ -713,7 +720,7 @@ impl Ppu {
             Stage::Hblank(s, 257) => {
                 self.horz_reset(system, state);
             }
-            Stage::Vblank(s, 1) if s == system.region.vblank_line() + 1 => {
+            Stage::Vblank(s, 1) if s == self.region.vblank_line() + 1 => {
                 state.ppu.in_vblank = true;
                 if state.ppu.current_tick != state.ppu.last_status_read + 1 {
                     state.ppu.vblank = true;
@@ -930,7 +937,7 @@ impl Ppu {
         }
 
         state.ppu.screen[((scanline * 256) + dot) as usize] =
-            pixel_result as u16 | state.ppu.emph_bits(system);
+            pixel_result as u16 | state.ppu.emph_bits();
 
         state.ppu.low_attr_shift <<= 1;
         state.ppu.high_attr_shift <<= 1;

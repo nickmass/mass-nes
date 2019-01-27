@@ -1,19 +1,19 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
-mod system;
-mod bus;
-mod cpu;
-mod ppu;
 mod apu;
-mod channel;
+mod bus;
 mod cartridge;
-mod memory;
-mod ops;
+mod channel;
+mod cpu;
 mod debug;
 mod input;
 mod mapper;
+mod memory;
 mod nametables;
+mod ops;
+mod ppu;
+mod system;
 
 pub use self::cartridge::Cartridge;
 pub use self::system::*;

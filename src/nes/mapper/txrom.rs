@@ -162,7 +162,7 @@ impl Txrom {
                     is_zero = true;
                 }
             } else {
-                rom.irq_counter -= 1;
+                rom.irq_counter = rom.irq_counter.saturating_sub(1);
                 if rom.irq_counter == 0 {
                     is_zero = true;
                     rom.irq_reload_pending = true;
@@ -285,7 +285,7 @@ impl Mapper for Txrom {
         rom.current_tick += 1;
     }
 
-    fn get_irq(&self, system: &System, state: &mut SystemState) -> bool {
+    fn get_irq(&mut self) -> bool {
         let rom = self.state.borrow();
         rom.irq
     }

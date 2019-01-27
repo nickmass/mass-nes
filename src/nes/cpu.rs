@@ -8,6 +8,7 @@ pub struct CpuPinIn {
     pub nmi: bool,
     pub reset: bool,
     pub power: bool,
+    pub dmc_req: Option<u16>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -107,7 +108,7 @@ pub struct Cpu {
     instruction_addr: Option<u16>,
     pub dmc_read: Option<u8>,
     dmc_hold: u8,
-    pending_dmc: Cell<Option<PendingDmcRead>>,
+    pending_dmc: Option<PendingDmcRead>,
     pending_nmi: Cell<Option<u32>>,
     pending_oam_dma: Cell<Option<u8>>,
     pending_power: bool,
@@ -139,7 +140,7 @@ impl Cpu {
             dmc_read: None,
             dmc_hold: 0,
             stage: Stage::Fetch,
-            pending_dmc: Cell::new(None),
+            pending_dmc: None,
             pending_nmi: Cell::new(None),
             pending_oam_dma: Cell::new(None),
             pending_power: false,
@@ -241,8 +242,10 @@ impl Cpu {
         self.pending_nmi.set(Some(delay));
     }
 
-    pub fn dmc_req(&self, addr: u16) {
-        self.pending_dmc.set(Some(PendingDmcRead::Pending(addr, 4)));
+    fn dmc_req(&mut self) {
+        if let Some(addr) = self.pin_in.dmc_req {
+            self.pending_dmc = Some(PendingDmcRead::Pending(addr, 4));
+        }
     }
 
     pub fn nmi_cancel(&self) {
@@ -251,6 +254,7 @@ impl Cpu {
 
     pub fn tick(&mut self, pin_in: CpuPinIn) -> TickResult {
         self.pin_in = pin_in;
+        self.dmc_req();
         self.instruction_addr = None;
         self.dmc_read = None;
         self.current_tick += 1;
@@ -264,14 +268,13 @@ impl Cpu {
             self.pending_reset = true;
         }
 
-        match self.pending_dmc.get() {
+        match self.pending_dmc {
             Some(PendingDmcRead::Pending(addr, 0)) => {
-                self.pending_dmc.set(Some(PendingDmcRead::Reading));
+                self.pending_dmc = Some(PendingDmcRead::Reading);
                 return TickResult::Read(addr);
             }
             Some(PendingDmcRead::Pending(addr, count)) => {
-                self.pending_dmc
-                    .set(Some(PendingDmcRead::Pending(addr, count - 1)));
+                self.pending_dmc = Some(PendingDmcRead::Pending(addr, count - 1));
                 match self.last_tick {
                     TickResult::Read(_) => {
                         self.dmc_hold = self.pin_in.data;
@@ -282,7 +285,7 @@ impl Cpu {
             }
             Some(PendingDmcRead::Reading) => {
                 self.dmc_read = Some(self.pin_in.data);
-                self.pending_dmc.set(None);
+                self.pending_dmc = None;
                 self.pin_in.data = self.dmc_hold
             }
             None => (),
@@ -1475,7 +1478,6 @@ impl Cpu {
     }
 
     fn inst_sta(&mut self, addr: u16) -> ExecResult {
-        let value = self.reg_a;
         ExecResult::Tick(TickResult::Write(addr, self.reg_a as u8))
     }
 

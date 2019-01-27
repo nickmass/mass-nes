@@ -199,7 +199,7 @@ impl Mapper for Fme7 {
         }
     }
 
-    fn get_irq(&self, system: &System, state: &mut SystemState) -> bool {
+    fn get_irq(&mut self) -> bool {
         let rom = self.state.borrow();
         rom.irq
     }

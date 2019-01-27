@@ -159,8 +159,8 @@ impl AddressBus {
             Some((addr, DeviceKind::Mapper)) => {
                 system.cartridge.mapper.peek(self.kind, system, state, addr)
             }
-            Some((addr, DeviceKind::Input)) => system.input.peek(self.kind, system, state, addr),
-            Some((addr, DeviceKind::Apu)) => system.apu.peek(system, state, addr),
+            Some((addr, DeviceKind::Input)) => system.input.peek(addr),
+            Some((addr, DeviceKind::Apu)) => system.apu.peek(addr),
             None => 0xff,
             _ => unimplemented!(),
         }
@@ -178,8 +178,8 @@ impl AddressBus {
             Some((addr, DeviceKind::Nametables)) => {
                 system.cartridge.mapper.nt_read(system, state, addr)
             }
-            Some((addr, DeviceKind::Input)) => system.input.read(self.kind, system, state, addr),
-            Some((addr, DeviceKind::Apu)) => system.apu.read(system, state, addr),
+            Some((addr, DeviceKind::Input)) => system.input.read(addr),
+            Some((addr, DeviceKind::Apu)) => system.apu.read(addr),
             None => 0xff,
             _ => unimplemented!(),
         }
@@ -198,21 +198,13 @@ impl AddressBus {
             Some((addr, DeviceKind::Nametables)) => {
                 system.cartridge.mapper.nt_write(system, state, addr, value)
             }
-            Some((addr, DeviceKind::Input)) => {
-                system.input.write(self.kind, system, state, addr, value)
-            }
-            Some((addr, DeviceKind::Apu)) => system.apu.write(system, state, addr, value),
-            Some((addr, DeviceKind::PulseOne)) => {
-                system.apu.pulse_one.write(system, state, addr, value)
-            }
-            Some((addr, DeviceKind::PulseTwo)) => {
-                system.apu.pulse_two.write(system, state, addr, value)
-            }
-            Some((addr, DeviceKind::Noise)) => system.apu.noise.write(system, state, addr, value),
-            Some((addr, DeviceKind::Triangle)) => {
-                system.apu.triangle.write(system, state, addr, value)
-            }
-            Some((addr, DeviceKind::Dmc)) => system.apu.dmc.write(system, state, addr, value),
+            Some((addr, DeviceKind::Input)) => system.input.write(addr, value),
+            Some((addr, DeviceKind::Apu)) => system.apu.write(addr, value),
+            Some((addr, DeviceKind::PulseOne)) => system.apu.pulse_one.write(addr, value),
+            Some((addr, DeviceKind::PulseTwo)) => system.apu.pulse_two.write(addr, value),
+            Some((addr, DeviceKind::Noise)) => system.apu.noise.write(addr, value),
+            Some((addr, DeviceKind::Triangle)) => system.apu.triangle.write(addr, value),
+            Some((addr, DeviceKind::Dmc)) => system.apu.dmc.write(addr, value),
             None => {}
             _ => unimplemented!(),
         }

@@ -1,8 +1,7 @@
-use crate::apu;
-use crate::bus::AddressBus;
-use crate::bus::{AndEqualsAndMask, DeviceKind};
+use crate::apu::ApuState;
+use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
-use crate::system::{System, SystemState};
+use crate::system::{Region, SystemState};
 
 use std::cell::RefCell;
 
@@ -32,7 +31,7 @@ impl TriangleState {
         if !self.enabled {
             0
         } else {
-            apu::LENGTH_TABLE[(self.regs[3] >> 3 & 0x1f) as usize]
+            crate::apu::LENGTH_TABLE[(self.regs[3] >> 3 & 0x1f) as usize]
         }
     }
 
@@ -52,16 +51,18 @@ impl TriangleState {
 
 pub struct Triangle {
     state: RefCell<TriangleState>,
+    region: Region,
 }
 
 impl Triangle {
-    pub fn new() -> Triangle {
+    pub fn new(region: Region) -> Triangle {
         let state = TriangleState {
             ..Default::default()
         };
 
         Triangle {
             state: RefCell::new(state),
+            region: region,
         }
     }
 
@@ -80,11 +81,7 @@ impl Channel for Triangle {
         );
     }
 
-    fn read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
-        0
-    }
-
-    fn write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
+    fn write(&self, addr: u16, value: u8) {
         let mut channel = self.state.borrow_mut();
         channel.regs[addr as usize] = value;
         match addr {
@@ -99,7 +96,7 @@ impl Channel for Triangle {
         }
     }
 
-    fn tick(&self, system: &System, state: &mut SystemState) -> u8 {
+    fn tick(&self, state: &ApuState) -> u8 {
         let mut channel = self.state.borrow_mut();
         channel.current_tick += 1;
 
@@ -112,7 +109,7 @@ impl Channel for Triangle {
             channel.timer_counter -= 1;
         }
 
-        if state.apu.is_quarter_frame(system) || channel.forced_clock {
+        if state.is_quarter_frame() || channel.forced_clock {
             if channel.current_tick & 1 == 0 {
                 if channel.linear_reload {
                     channel.linear_counter = channel.linear_load();
@@ -125,7 +122,7 @@ impl Channel for Triangle {
             }
         }
 
-        if state.apu.is_half_frame(system) || channel.forced_clock {
+        if state.is_half_frame() || channel.forced_clock {
             if channel.length_counter != 0 && !channel.halt() {
                 channel.length_counter -= 1;
             }

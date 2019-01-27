@@ -1,5 +1,5 @@
 ### Mass NES
-Learning project, NES Emulator in Rust
+A very basic NES Emulator written in Rust
 
 ![Demo](https://raw.githubusercontent.com/nickmass/mass-nes/master/demo.png)
 

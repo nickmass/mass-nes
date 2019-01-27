@@ -1,8 +1,7 @@
-use crate::apu;
-use crate::bus::AddressBus;
-use crate::bus::{AndEqualsAndMask, DeviceKind};
+use crate::apu::ApuState;
+use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
-use crate::system::{System, SystemState};
+use crate::system::{Region, SystemState};
 
 use std::cell::RefCell;
 
@@ -25,7 +24,7 @@ impl NoiseState {
         if !self.enabled {
             0
         } else {
-            apu::LENGTH_TABLE[(self.regs[3] >> 3 & 0x1f) as usize]
+            crate::apu::LENGTH_TABLE[(self.regs[3] >> 3 & 0x1f) as usize]
         }
     }
 
@@ -73,10 +72,11 @@ impl NoiseState {
 
 pub struct Noise {
     state: RefCell<NoiseState>,
+    region: Region,
 }
 
 impl Noise {
-    pub fn new() -> Noise {
+    pub fn new(region: Region) -> Noise {
         let state = NoiseState {
             shifter: 1,
             ..Default::default()
@@ -84,6 +84,7 @@ impl Noise {
 
         Noise {
             state: RefCell::new(state),
+            region: region,
         }
     }
 
@@ -102,11 +103,7 @@ impl Channel for Noise {
         );
     }
 
-    fn read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
-        0
-    }
-
-    fn write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
+    fn write(&self, addr: u16, value: u8) {
         let mut channel = self.state.borrow_mut();
         channel.regs[addr as usize] = value;
         match addr {
@@ -121,7 +118,7 @@ impl Channel for Noise {
         }
     }
 
-    fn tick(&self, system: &System, state: &mut SystemState) -> u8 {
+    fn tick(&self, state: &ApuState) -> u8 {
         let mut channel = self.state.borrow_mut();
         channel.current_tick += 1;
 
@@ -134,7 +131,7 @@ impl Channel for Noise {
             }
         }
 
-        if state.apu.is_quarter_frame(system) || channel.forced_clock {
+        if state.is_quarter_frame() || channel.forced_clock {
             if channel.envelope_start {
                 channel.envelope_start = false;
                 channel.decay_counter = 0xf;
@@ -155,7 +152,7 @@ impl Channel for Noise {
             }
         }
 
-        if state.apu.is_half_frame(system) || channel.forced_clock {
+        if state.is_half_frame() || channel.forced_clock {
             if channel.length_counter != 0 && !channel.halt() {
                 channel.length_counter -= 1;
             }
