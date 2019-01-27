@@ -5,7 +5,7 @@ use crate::bus::{
 use crate::cartridge::Cartridge;
 use crate::cpu::{Cpu, CpuPinIn, TickResult};
 use crate::debug::{Debug, DebugState};
-use crate::input::{Input, InputState};
+use crate::input::Input;
 use crate::memory::{MemoryBlock, Pages};
 use crate::ppu::{Ppu, PpuState};
 
@@ -157,22 +157,7 @@ impl Machine {
         while self.state.ppu.in_vblank || !last_vblank {
             last_vblank = self.state.ppu.in_vblank;
 
-            if self.state.cpu_power {
-                self.state.cpu_pin_in.power = true;
-                self.state.cpu_power = false
-            } else {
-                self.state.cpu_pin_in.power = false;
-            }
-
-            if self.state.cpu_reset {
-                eprintln!("RESET");
-                self.state.cpu_pin_in.reset = true;
-                self.state.cpu_reset = false
-            } else {
-                self.state.cpu_pin_in.reset = false;
-            }
-
-            let tick_result = self.system.cpu.tick(self.state.cpu_pin_in);
+            let tick_result = self.system.cpu.tick(self.system.cpu_pin_in);
 
             let cpu_state = self.system.cpu.debug_state();
             let ppu_state = self.system.ppu.debug_state(&mut self.state);
@@ -180,17 +165,13 @@ impl Machine {
                 .debug
                 .trace(&self.system, &mut self.state, cpu_state, ppu_state);
 
-            if let Some(dmc_read) = self.system.cpu.dmc_read {
-                self.system.apu.dmc.dmc_read(dmc_read);
-            }
-
             match tick_result {
                 TickResult::Read(addr) => {
                     let value = self
                         .system
                         .cpu_bus
                         .read(&self.system, &mut self.state, addr);
-                    self.state.cpu_pin_in.data = value;
+                    self.system.cpu_pin_in.data = value;
                 }
                 TickResult::Write(addr, value) => {
                     self.system
@@ -198,23 +179,22 @@ impl Machine {
                         .write(&self.system, &mut self.state, addr, value)
                 }
                 // DMC Read holding bus
-                TickResult::Idle => (),
+                TickResult::Idle => {}
+                TickResult::DmcRead(value) => self.system.apu.dmc.dmc_read(value),
             }
 
             self.system.apu.tick();
-
-            let apu_irq = self.system.apu.get_irq();
-
-            self.state.cpu_pin_in.dmc_req = self.system.apu.get_dmc_req();
 
             self.system
                 .cartridge
                 .mapper
                 .tick(&self.system, &mut self.state);
 
+            let apu_irq = self.system.apu.get_irq();
             let mapper_irq = self.system.cartridge.mapper.get_irq();
 
-            self.state.cpu_pin_in.irq = apu_irq | mapper_irq;
+            self.system.cpu_pin_in.irq = apu_irq | mapper_irq;
+            self.system.cpu_pin_in.dmc_req = self.system.apu.get_dmc_req();
 
             self.system.ppu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
@@ -222,6 +202,9 @@ impl Machine {
             if self.system.region.extra_ppu_tick() && self.cycle % 5 == 0 {
                 self.system.ppu.tick(&self.system, &mut self.state);
             }
+
+            self.system.cpu_pin_in.power = false;
+            self.system.cpu_pin_in.reset = false;
             self.cycle += 1;
         }
     }
@@ -247,7 +230,7 @@ impl Machine {
 
     fn handle_input(&mut self, input: UserInput) {
         match input {
-            UserInput::PlayerOne(c) => self.state.input.input = c.to_byte(),
+            UserInput::PlayerOne(c) => self.system.input.set_input(c.to_byte()),
             UserInput::Power => self.system.power(&mut self.state),
             UserInput::Reset => self.system.reset(&mut self.state),
         }
@@ -259,11 +242,7 @@ pub struct SystemState {
     pub ppu: PpuState,
     pub mem: Pages,
     pub mappings: DeviceMappings,
-    pub input: InputState,
     pub debug: DebugState,
-    cpu_power: bool,
-    cpu_reset: bool,
-    cpu_pin_in: CpuPinIn,
 }
 
 pub struct System {
@@ -276,6 +255,7 @@ pub struct System {
     pub cartridge: Cartridge,
     pub debug: Debug,
     pub input: Input,
+    cpu_pin_in: CpuPinIn,
 }
 
 impl System {
@@ -297,6 +277,7 @@ impl System {
             cartridge: cartridge,
             debug: Debug::new(),
             input: Input::new(),
+            cpu_pin_in: CpuPinIn::default(),
         };
 
         system
@@ -355,13 +336,13 @@ impl System {
     }
 
     pub fn power(&mut self, state: &mut SystemState) {
-        state.cpu_power = true;
+        self.cpu_pin_in.power = true;
         self.apu.power();
         self.ppu.power(self, state);
     }
 
     pub fn reset(&mut self, state: &mut SystemState) {
-        state.cpu_reset = true;
+        self.cpu_pin_in.reset = true;
         self.apu.reset();
         self.ppu.power(self, state);
     }

@@ -5,7 +5,7 @@ pub struct InputState {
     read_counter: u32,
     read_shifter: u8,
     input_buffer: u8,
-    pub input: u8,
+    input: u8,
 }
 
 pub trait InputDevice {
@@ -129,5 +129,10 @@ impl Input {
             }
             _ => unimplemented!(),
         }
+    }
+
+    pub fn set_input(&mut self, input: u8) {
+        let mut state = self.state.borrow_mut();
+        state.input = input;
     }
 }

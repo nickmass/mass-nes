@@ -15,6 +15,7 @@ pub struct CpuPinIn {
 enum PendingDmcRead {
     Pending(u16, u32),
     Reading,
+    Resume,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -47,6 +48,7 @@ pub enum TickResult {
     Read(u16),
     Write(u16, u8),
     Idle,
+    DmcRead(u8),
 }
 
 #[derive(Copy, Clone)]
@@ -106,7 +108,6 @@ pub struct Cpu {
     stage: Stage,
     last_tick: TickResult,
     instruction_addr: Option<u16>,
-    pub dmc_read: Option<u8>,
     dmc_hold: u8,
     pending_dmc: Option<PendingDmcRead>,
     pending_nmi: Cell<Option<u32>>,
@@ -137,7 +138,6 @@ impl Cpu {
             flag_s: 0,
             instruction_addr: None,
             last_tick: TickResult::Read(0),
-            dmc_read: None,
             dmc_hold: 0,
             stage: Stage::Fetch,
             pending_dmc: None,
@@ -254,37 +254,39 @@ impl Cpu {
 
     pub fn tick(&mut self, pin_in: CpuPinIn) -> TickResult {
         self.pin_in = pin_in;
+        self.current_tick += 1;
         self.dmc_req();
         self.instruction_addr = None;
-        self.dmc_read = None;
-        self.current_tick += 1;
 
         if self.pin_in.power {
-            self.pin_in.power = false;
             self.pending_power = true;
         }
         if self.pin_in.reset {
-            self.pin_in.reset = false;
             self.pending_reset = true;
         }
 
         match self.pending_dmc {
-            Some(PendingDmcRead::Pending(addr, 0)) => {
-                self.pending_dmc = Some(PendingDmcRead::Reading);
-                return TickResult::Read(addr);
-            }
             Some(PendingDmcRead::Pending(addr, count)) => {
-                self.pending_dmc = Some(PendingDmcRead::Pending(addr, count - 1));
                 match self.last_tick {
                     TickResult::Read(_) => {
                         self.dmc_hold = self.pin_in.data;
-                        return TickResult::Idle;
                     }
                     _ => (),
                 }
+
+                if count == 0 {
+                    self.pending_dmc = Some(PendingDmcRead::Reading);
+                    return TickResult::Read(addr);
+                } else {
+                    self.pending_dmc = Some(PendingDmcRead::Pending(addr, count - 1));
+                    return TickResult::Idle;
+                }
             }
             Some(PendingDmcRead::Reading) => {
-                self.dmc_read = Some(self.pin_in.data);
+                self.pending_dmc = Some(PendingDmcRead::Resume);
+                return TickResult::DmcRead(self.pin_in.data);
+            }
+            Some(PendingDmcRead::Resume) => {
                 self.pending_dmc = None;
                 self.pin_in.data = self.dmc_hold
             }
@@ -432,8 +434,8 @@ impl Cpu {
             self.pending_oam_dma.set(None);
             stage = Stage::OamDma(OamDma::Read((high_addr as u16) << 8, 0))
         }
-        if self.pending_power {
-            self.pending_power = false;
+        if self.pin_in.power {
+            self.pin_in.power = false;
             stage = Stage::Power(Power::ReadRegPcLow);
         }
 

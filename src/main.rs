@@ -35,8 +35,8 @@ fn run(mut file: File, region: Region) {
     let pal = region.default_palette();
     let cart = Cartridge::load(&mut file).unwrap();
 
-    //let filter = ui::ntsc::NtscFilter::new(NesNtscSetup::composite());
-    let filter = ui::gfx::PalettedFilter::new(NesNtscSetup::composite().generate_palette());
+    let filter = ui::ntsc::NtscFilter::new(NesNtscSetup::composite());
+    //let filter = ui::gfx::PalettedFilter::new(NesNtscSetup::composite().generate_palette());
 
     let window = Renderer::new(filter);
 

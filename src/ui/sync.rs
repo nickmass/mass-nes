@@ -19,9 +19,13 @@ impl FrameSync {
     pub fn sync_frame(&mut self) {
         let dur = self.compute_start.elapsed();
         let delay = self.frame_ns as i64 + self.offset_ns;
-        let delay = if delay < 0 { 0 }
-        else if delay > u32::max_value() as i64 { u32::max_value() }
-        else { delay as u32 };
+        let delay = if delay < 0 {
+            0
+        } else if delay > u32::max_value() as i64 {
+            u32::max_value()
+        } else {
+            delay as u32
+        };
         if dur.as_secs() == 0 && delay >= dur.subsec_nanos() {
             while delay > self.compute_start.elapsed().subsec_nanos() {}
             //::std::thread::sleep(::std::trime::Duration::new(0, delay - dur.subsec_nanos()));
