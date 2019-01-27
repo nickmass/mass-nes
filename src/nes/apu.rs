@@ -268,9 +268,6 @@ impl Apu {
         if state.apu.is_irq_frame(system) {
             state.apu.irq = true;
         }
-        if state.apu.irq {
-            system.cpu.irq_req();
-        }
 
         if state.apu.reset_delay != 0 {
             state.apu.reset_delay -= 1;
@@ -293,6 +290,10 @@ impl Apu {
         }
 
         state.apu.sample_index += 1;
+    }
+
+    pub fn get_irq(&self, system: &System, state: &mut SystemState) -> bool {
+        state.apu.irq | self.dmc.get_irq()
     }
 
     pub fn get_samples<'a>(&'a self, system: &'a System, state: &'a mut SystemState) -> &[i16] {

@@ -40,9 +40,9 @@ fn run(mut file: File, region: Region) {
 
     let window = Renderer::new(filter);
 
-    //let mut audio = ui::audio::RodioAudio::new(48000);
+    let mut audio = ui::audio::RodioAudio::new(48000);
     //let mut audio = ui::audio::CpalAudio::new();
-    let mut audio = ui::audio::Null;
+    //let mut audio = ui::audio::Null;
 
     let sample_rate = audio.sample_rate();
     let mut delta = 0;

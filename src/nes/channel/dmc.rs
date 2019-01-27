@@ -123,10 +123,6 @@ impl Channel for Dmc {
         let mut channel = self.state.borrow_mut();
         channel.current_tick += 1;
 
-        if channel.irq {
-            system.cpu.irq_req();
-        }
-
         if !channel.read_pending && channel.sample_buffer_empty && channel.bytes_remaining != 0 {
             system.cpu.dmc_req(channel.address_counter);
             channel.read_pending = true;

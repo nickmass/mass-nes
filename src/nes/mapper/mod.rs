@@ -22,6 +22,9 @@ pub trait Mapper {
     fn peek(&self, bus: BusKind, system: &System, state: &SystemState, addr: u16) -> u8;
     fn read(&self, bus: BusKind, system: &System, state: &mut SystemState, addr: u16) -> u8;
     fn write(&self, bus: BusKind, system: &System, state: &mut SystemState, addr: u16, value: u8);
+    fn get_irq(&self, system: &System, state: &mut SystemState) -> bool {
+        false
+    }
     fn tick(&self, system: &System, state: &mut SystemState);
     fn nt_peek(&self, system: &System, state: &SystemState, addr: u16) -> u8;
     fn nt_read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8;

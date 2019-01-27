@@ -146,6 +146,7 @@ impl Machine {
 
     pub fn run(&mut self) {
         let mut last_vblank = false;
+        //self.system.debug.log_for(&mut self.state, 100000);
         while self.state.ppu.in_vblank || !last_vblank {
             last_vblank = self.state.ppu.in_vblank;
 
@@ -157,6 +158,7 @@ impl Machine {
             }
 
             if self.state.cpu_reset {
+                eprintln!("RESET");
                 self.state.cpu_pin_in.reset = true;
                 self.state.cpu_reset = false
             } else {
@@ -166,9 +168,10 @@ impl Machine {
             let tick_result = self.system.cpu.tick(self.state.cpu_pin_in);
 
             let cpu_state = self.system.cpu.debug_state();
+            let ppu_state = self.system.ppu.debug_state(&mut self.state);
             self.system
                 .debug
-                .trace(&self.system, &mut self.state, cpu_state);
+                .trace(&self.system, &mut self.state, cpu_state, ppu_state);
 
             if let Some(dmc_read) = self.system.cpu.dmc_read {
                 self.system.apu.dmc.dmc_read(dmc_read);
@@ -187,13 +190,27 @@ impl Machine {
                         .cpu_bus
                         .write(&self.system, &mut self.state, addr, value)
                 }
+                // DMC Read holding bus
+                TickResult::Idle => (),
             }
 
             self.system.apu.tick(&self.system, &mut self.state);
+
+            let apu_irq = self.system.apu.get_irq(&self.system, &mut self.state);
+
             self.system
                 .cartridge
                 .mapper
                 .tick(&self.system, &mut self.state);
+
+            let mapper_irq = self
+                .system
+                .cartridge
+                .mapper
+                .get_irq(&self.system, &mut self.state);
+
+            self.state.cpu_pin_in.irq = apu_irq | mapper_irq;
+
             self.system.ppu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
@@ -205,7 +222,6 @@ impl Machine {
     }
 
     pub fn get_screen(&mut self) -> &[u16] {
-        eprintln!("{:?}", ::std::mem::size_of::<SystemState>());
         &self.state.ppu.screen
     }
 

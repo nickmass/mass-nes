@@ -267,6 +267,13 @@ impl PpuState {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct PpuDebugState {
+    pub tick: u64,
+    pub scanline: u32,
+    pub dot: u32,
+}
+
 enum Stage {
     Vblank(u32, u32),
     Hblank(u32, u32),
@@ -358,6 +365,16 @@ impl Ppu {
         self.write(system, state, 0x2005, 0);
         state.ppu.data_read_buffer = 0;
         state.ppu.reset_delay = 29658 * 3;
+    }
+
+    pub fn debug_state(&self, state: &mut SystemState) -> PpuDebugState {
+        let (scanline, dot) = state.ppu.scanline();
+        let tick = state.ppu.current_tick;
+        PpuDebugState {
+            tick,
+            scanline,
+            dot,
+        }
     }
 
     pub fn register_read<T>(&mut self, state: &mut SystemState, device: DeviceKind, addr: T)

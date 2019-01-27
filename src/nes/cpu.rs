@@ -45,6 +45,7 @@ enum Power {
 pub enum TickResult {
     Read(u16),
     Write(u16, u8),
+    Idle,
 }
 
 #[derive(Copy, Clone)]
@@ -74,7 +75,7 @@ enum Stage {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct CpuState {
+pub struct CpuDebugState {
     pub reg_a: u8,
     pub reg_x: u8,
     pub reg_y: u8,
@@ -82,6 +83,7 @@ pub struct CpuState {
     pub reg_sp: u8,
     pub reg_p: u8,
     pub instruction_addr: Option<u16>,
+    pub cycle: u64,
 }
 
 pub struct Cpu {
@@ -101,11 +103,12 @@ pub struct Cpu {
     flag_v: u32,
     flag_s: u32,
     stage: Stage,
+    last_tick: TickResult,
     instruction_addr: Option<u16>,
     pub dmc_read: Option<u8>,
+    dmc_hold: u8,
     pending_dmc: Cell<Option<PendingDmcRead>>,
     pending_nmi: Cell<Option<u32>>,
-    pending_irq: Cell<bool>,
     pending_oam_dma: Cell<Option<u8>>,
     pending_power: bool,
     pending_reset: bool,
@@ -132,11 +135,12 @@ impl Cpu {
             flag_v: 0,
             flag_s: 0,
             instruction_addr: None,
+            last_tick: TickResult::Read(0),
             dmc_read: None,
+            dmc_hold: 0,
             stage: Stage::Fetch,
             pending_dmc: Cell::new(None),
             pending_nmi: Cell::new(None),
-            pending_irq: Cell::new(false),
             pending_oam_dma: Cell::new(None),
             pending_power: false,
             pending_reset: false,
@@ -237,10 +241,6 @@ impl Cpu {
         self.pending_nmi.set(Some(delay));
     }
 
-    pub fn irq_req(&self) {
-        self.pending_irq.set(true);
-    }
-
     pub fn dmc_req(&self, addr: u16) {
         self.pending_dmc.set(Some(PendingDmcRead::Pending(addr, 4)));
     }
@@ -272,15 +272,23 @@ impl Cpu {
             Some(PendingDmcRead::Pending(addr, count)) => {
                 self.pending_dmc
                     .set(Some(PendingDmcRead::Pending(addr, count - 1)));
+                match self.last_tick {
+                    TickResult::Read(_) => {
+                        self.dmc_hold = self.pin_in.data;
+                        return TickResult::Idle;
+                    }
+                    _ => (),
+                }
             }
             Some(PendingDmcRead::Reading) => {
                 self.dmc_read = Some(self.pin_in.data);
                 self.pending_dmc.set(None);
+                self.pin_in.data = self.dmc_hold
             }
             None => (),
         }
 
-        match self.stage {
+        self.last_tick = match self.stage {
             Stage::Fetch => self.fetch(),
             Stage::Decode => self.decode(),
             Stage::Address(addressing, instruction) => self.addressing(addressing, instruction),
@@ -289,11 +297,13 @@ impl Cpu {
             Stage::Irq(irq) => self.irq_nmi(irq),
             Stage::Power(step) => self.power(step),
             Stage::Reset(step) => self.reset(step),
-        }
+        };
+
+        self.last_tick
     }
 
-    pub fn debug_state(&self) -> CpuState {
-        CpuState {
+    pub fn debug_state(&self) -> CpuDebugState {
+        CpuDebugState {
             reg_a: self.reg_a as u8,
             reg_x: self.reg_x as u8,
             reg_y: self.reg_y as u8,
@@ -301,6 +311,7 @@ impl Cpu {
             reg_p: self.reg_p(),
             reg_pc: self.reg_pc as u16,
             instruction_addr: self.instruction_addr,
+            cycle: self.current_tick,
         }
     }
 
@@ -402,14 +413,10 @@ impl Cpu {
             None => (),
         }
 
-        if self.pending_irq.get()
-            && (self.flag_i == 0 || self.irq_set_delay != 0)
-            && self.irq_delay == 0
-        {
+        if self.pin_in.irq && (self.flag_i == 0 || self.irq_set_delay != 0) && self.irq_delay == 0 {
             if self.irq_set_delay != 0 {
                 self.irq_set_delay -= 1;
             }
-            self.pending_irq.set(false);
             stage = Stage::Irq(Irq::ReadPcOne(0xfffe))
         }
         if self.irq_set_delay != 0 {
@@ -1425,7 +1432,7 @@ impl Cpu {
             Exec(low_addr) => {
                 let high_addr = (self.pin_in.data as u16) << 8;
                 self.reg_pc = (high_addr | low_addr).wrapping_add(1) as u32;
-                Done
+                Tick(TickResult::Read(self.reg_pc as u16))
             }
         }
     }

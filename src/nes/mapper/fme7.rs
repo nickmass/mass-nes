@@ -197,9 +197,11 @@ impl Mapper for Fme7 {
                 rom.irq = true;
             }
         }
-        if rom.irq {
-            system.cpu.irq_req();
-        }
+    }
+
+    fn get_irq(&self, system: &System, state: &mut SystemState) -> bool {
+        let rom = self.state.borrow();
+        rom.irq
     }
 
     fn nt_peek(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
