@@ -1,4 +1,3 @@
-import webEmu from "../Cargo.toml";
 
 ((canvas, romlist, enableAudio, pauseMsg, loadMsg) => {
   let gfxCtx = canvas.getContext("2d");
@@ -8,7 +7,30 @@ import webEmu from "../Cargo.toml";
   let frame = 0;
   let romList = "roms/romlist.txt";
 
-  populatList(romList);
+  Rust.web.then(emu => {
+    emu.main();
+    emu.addEventListener("screen", screen => {
+      let img = gfxCtx.createImageData(256, 240);
+      img.data.set(screen);
+      gfxCtx.putImageData(img, 0, 0);
+    });
+
+    emu.addEventListener("audio", samples => {
+      if (!enableAudio.checked) { return; }
+      let buf = audioCtx.createBuffer(1, samples.length, samples.length * 60);
+      let data = buf.getChannelData(0);
+      data.set(samples);
+
+      let source = audioCtx.createBufferSource();
+      source.buffer = buf;
+      source.connect(audioCtx.destination);
+
+      source.start();
+    });
+
+
+    populatList(romList, emu);
+  });
 
   function mapKey(key) {
     switch (key) {
@@ -46,35 +68,27 @@ import webEmu from "../Cargo.toml";
     keys = keys.filter(k => k != key);
   });
 
-  webEmu.addEventListener("screen", screen => {
-    let img = gfxCtx.createImageData(256, 240);
-    img.data.set(screen);
-    gfxCtx.putImageData(img, 0, 0);
-  });
+  function selectChange(evt, emu) {
+    let path = evt.target.value;
+    if (path) {
+      loadMsg.innerHTML = "Loading...";
+      return loadRom(path, emu);
+    } else {
+      loadMsg.innerHTML = "";
+      return Promise.resolve();
+    }
+  }
 
-  webEmu.addEventListener("audio", samples => {
-    if (!enableAudio.checked) { return; }
-    let buf = audioCtx.createBuffer(1, samples.length, samples.length * 60);
-    let data = buf.getChannelData(0);
-    data.set(samples);
-
-    let source = audioCtx.createBufferSource();
-    source.buffer = buf;
-    source.connect(audioCtx.destination);
-
-    source.start();
-  });
-
-  function emuLoop() {
+  function emuLoop(emu) {
     if(!pause) {
-      webEmu.run_frame(keys);
+      emu.run_frame(keys);
       frame += 1;
       console.log("Frame", frame);
     }
-    window.requestAnimationFrame(emuLoop);
+    window.requestAnimationFrame(() => emuLoop(emu));
   }
 
-  function populatList(romList) {
+  function populatList(romList, emu) {
     fetch(romList)
       .then(res => res.text())
       .then(text => {
@@ -109,22 +123,12 @@ import webEmu from "../Cargo.toml";
         selectElem.setAttribute("value", "");
         romlist.appendChild(selectElem);
         options.forEach(opt => romlist.appendChild(opt));
-        romlist.addEventListener("change", selectChange);
+        romlist.addEventListener("change", (evt) => selectChange(evt, emu));
       });
   }
 
-  function selectChange(evt) {
-    let path = evt.target.value;
-    if (path) {
-      loadMsg.innerHTML = "Loading...";
-      return loadRom(path);
-    } else {
-      loadMsg.innerHTML = "";
-      return Promise.resolve();
-    }
-  }
 
-  function loadRom(path) {
+  function loadRom(path, emu) {
     return fetch(path)
       .then(res => res.blob())
       .then(blob => {
@@ -137,10 +141,10 @@ import webEmu from "../Cargo.toml";
       })
       .then(rom => {
         let buf = new Uint8Array(rom);
-        webEmu.load_rom(Array.from(buf));
+        emu.load_rom(Array.from(buf));
 
         frame = 0;
-        emuLoop();
+        emuLoop(emu);
       })
       .then(() => {
         loadMsg.innerHTML = "";

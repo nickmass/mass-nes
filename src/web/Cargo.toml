@@ -3,8 +3,11 @@ authors = ["Nick Massey <nickmass@nickmass.com>"]
 name = "web"
 version = "0.1.0"
 
+[lib]
+crate-type = ["cdylib"]
+
 [dependencies]
-stdweb = "0.4.0"
+stdweb = "0.4"
 
 [dependencies.nes]
 path = "../nes"

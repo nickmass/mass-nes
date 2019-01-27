@@ -1,18 +1,20 @@
-#![recursion_limit="1024"]
-#![feature(proc_macro)]
+#![recursion_limit = "1024"]
+#![feature(custom_attribute)]
 
 #[macro_use]
 extern crate stdweb;
 extern crate nes;
 
-use stdweb::{UnsafeTypedArray, js_export};
+use stdweb::{UnsafeTypedArray};
 
-use nes::{UserInput, Controller, Machine, Cartridge, Region};
+use nes::{Cartridge, Controller, Machine, Region, UserInput};
 use std::cell::RefCell;
 
 thread_local!(static MACHINE: RefCell<Option<Machine>> = RefCell::new(None));
 
-fn main() {
+
+#[js_export]
+pub fn main() {
     js! {
         let listeners = [];
         Module.exports.addEventListener = (event, cb) => {
@@ -26,7 +28,7 @@ fn main() {
 }
 
 #[js_export]
-fn load_rom(rom: Vec<u8>) {
+pub fn load_rom(rom: Vec<u8>) {
     let region = Region::Ntsc;
     let cart = Cartridge::load(&mut rom.as_slice()).unwrap();
 
@@ -37,7 +39,7 @@ fn load_rom(rom: Vec<u8>) {
 }
 
 #[js_export]
-fn run_frame(input: Vec<String>) {
+pub fn run_frame(input: Vec<String>) {
     let input = input.iter().fold(Controller::new(), |mut c, i| {
         match i.as_str() {
             "Up" => c.up = true,
@@ -60,10 +62,10 @@ fn run_frame(input: Vec<String>) {
             let pal = Region::Ntsc.default_palette();
             m.set_input(vec![UserInput::PlayerOne(input)]);
             m.run();
-            let screen: Vec<u8> = m.get_screen().iter().fold( Vec::new(), |mut screen, i| {
-                let red = pal[(i*3) as usize];
-                let green = pal[((i*3) + 1) as usize];
-                let blue = pal[((i*3) + 2) as usize];
+            let screen: Vec<u8> = m.get_screen().iter().fold(Vec::new(), |mut screen, i| {
+                let red = pal[(i * 3) as usize];
+                let green = pal[((i * 3) + 1) as usize];
+                let blue = pal[((i * 3) + 2) as usize];
                 screen.push(red);
                 screen.push(green);
                 screen.push(blue);
@@ -81,7 +83,10 @@ fn run_frame(input: Vec<String>) {
                 let rate = (samples.len() as f32 / (48000.0 / 60.0)) as usize;
                 samples
                     .chunks(rate)
-                    .map(|c| c.iter().map(|s| *s as f32).sum::<f32>() / (c.len() as f32 * i16::max_value() as f32))
+                    .map(|c| {
+                        c.iter().map(|s| *s as f32).sum::<f32>()
+                            / (c.len() as f32 * i16::max_value() as f32)
+                    })
                     .collect()
             };
 
