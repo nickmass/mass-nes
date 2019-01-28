@@ -286,7 +286,7 @@ enum Stage {
 }
 
 impl Stage {
-    fn increment(&self, system: &System) -> Stage {
+    fn increment(&self, region: Region) -> Stage {
         match *self {
             Stage::Prerender(s, d) => {
                 if d == 340 {
@@ -297,8 +297,8 @@ impl Stage {
             }
             Stage::Vblank(s, d) => {
                 if d == 340 {
-                    if s == system.region.prerender_line() - 1 {
-                        Stage::Prerender(system.region.prerender_line(), 0)
+                    if s == region.prerender_line() - 1 {
+                        Stage::Prerender(region.prerender_line(), 0)
                     } else {
                         Stage::Vblank(s + 1, 0)
                     }
@@ -308,7 +308,7 @@ impl Stage {
             }
             Stage::Hblank(s, d) => {
                 if d == 340 {
-                    if s == system.region.vblank_line() - 1 {
+                    if s == region.vblank_line() - 1 {
                         Stage::Vblank(s + 1, 0)
                     } else {
                         Stage::Dot(s + 1, 0)
@@ -671,7 +671,7 @@ impl Ppu {
                 //Skip tick on odd frames
                 if self.region.uneven_frames() {
                     if state.ppu.frame % 2 == 1 && state.ppu.is_background_enabled() {
-                        state.ppu.stage = state.ppu.stage.increment(system);
+                        state.ppu.stage = state.ppu.stage.increment(self.region);
                     }
                 }
             }
@@ -831,7 +831,7 @@ impl Ppu {
             _ => {}
         }
 
-        state.ppu.stage = state.ppu.stage.increment(system);
+        state.ppu.stage = state.ppu.stage.increment(self.region);
     }
 
     fn render(&self, system: &System, state: &mut SystemState, dot: u32, scanline: u32) {

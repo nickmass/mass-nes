@@ -5,4 +5,4 @@ edition = "2018"
 authors = ["Nick Massey <nickmass@nickmass.com>"]
 
 [lib]
-path = "lib.rs"
+path = "src/lib.rs"

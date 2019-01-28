@@ -1,7 +1,5 @@
-extern crate gcc;
-
-use std::env;
+extern crate cc;
 
 fn main() {
-	gcc::compile_library("libnes_ntsc.a", &["nes_ntsc.c"]);
+    cc::Build::new().file("nes_ntsc.c").compile("libnes_ntsc.a");
 }

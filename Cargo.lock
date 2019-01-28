@@ -598,7 +598,7 @@ dependencies = [
 name = "nes_ntsc-sys"
 version = "0.1.0"
 dependencies = [
- "gcc 0.3.55 (registry+https://github.com/rust-lang/crates.io-index)",
+ "cc 1.0.28 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]

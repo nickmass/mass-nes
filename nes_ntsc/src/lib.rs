@@ -11,33 +11,24 @@ extern crate nes_ntsc_sys as ffi;
 /// in parenthesis and should remain fairly stage in future versions.
 pub struct NesNtscSetup(ffi::nes_ntsc_setup_t);
 impl NesNtscSetup {
-
     /// color bleeding + artifacts
     pub fn composite() -> NesNtscSetup {
-        unsafe {
-            NesNtscSetup(ffi::nes_ntsc_composite)
-        }
+        unsafe { NesNtscSetup(ffi::nes_ntsc_composite) }
     }
 
     /// color bleeding only
     pub fn svideo() -> NesNtscSetup {
-        unsafe {
-            NesNtscSetup(ffi::nes_ntsc_svideo)
-        }
+        unsafe { NesNtscSetup(ffi::nes_ntsc_svideo) }
     }
 
     /// crisp image
     pub fn rgb() -> NesNtscSetup {
-        unsafe {
-            NesNtscSetup(ffi::nes_ntsc_rgb)
-        }
+        unsafe { NesNtscSetup(ffi::nes_ntsc_rgb) }
     }
 
     /// desaturated + artifacts
     pub fn monochrome() -> NesNtscSetup {
-        unsafe {
-            NesNtscSetup(ffi::nes_ntsc_monochrome)
-        }
+        unsafe { NesNtscSetup(ffi::nes_ntsc_monochrome) }
     }
 
     /// -1 = -180 degrees, +1 = +180 degrees
@@ -55,7 +46,7 @@ impl NesNtscSetup {
     }
 
     /// -1 = dark (0.5), +1 = light (1.5)
-    pub fn set_contrast(&mut self, val: f64) -> &mut Self{
+    pub fn set_contrast(&mut self, val: f64) -> &mut Self {
         assert!(val >= -1f64 && val <= 1f64);
         self.0.contrast = val;
         self
@@ -123,7 +114,10 @@ impl NesNtscSetup {
         self.0.palette_out = buf.as_mut_ptr();
 
         unsafe {
-            ffi::nes_ntsc_init(::std::ptr::null_mut(), &self.0 as *const ffi::nes_ntsc_setup_t);
+            ffi::nes_ntsc_init(
+                ::std::ptr::null_mut(),
+                &self.0 as *const ffi::nes_ntsc_setup_t,
+            );
         }
 
         buf
@@ -139,8 +133,10 @@ impl NesNtsc {
         let mut ntsc = NesNtsc(unsafe { ::std::mem::zeroed() });
 
         unsafe {
-            ffi::nes_ntsc_init(&mut ntsc.0 as *mut ffi::nes_ntsc_t,
-                               &setup.0 as *const ffi::nes_ntsc_setup_t);
+            ffi::nes_ntsc_init(
+                &mut ntsc.0 as *mut ffi::nes_ntsc_t,
+                &setup.0 as *const ffi::nes_ntsc_setup_t,
+            );
         }
 
         ntsc
@@ -164,18 +160,26 @@ impl NesNtsc {
     /// The `burst_phase` parameter should generally toggle values between frames, i.e. 0 on first
     /// call, 1 on second call, 0 on third call, 1 on fourth, etc. If `merge_fields` is enabled,
     /// you should always pass 0.
-    pub fn blit(&mut self, in_width: u32, in_pixels: &[u16], burst_phase: u32,
-                out_pixels: &mut [u32], out_pitch: u32) {
+    pub fn blit(
+        &mut self,
+        in_width: u32,
+        in_pixels: &[u16],
+        burst_phase: u32,
+        out_pixels: &mut [u32],
+        out_pitch: u32,
+    ) {
         let rows = in_pixels.len() as u32 / in_width;
         unsafe {
-            ffi::nes_ntsc_blit(&self.0 as *const ffi::nes_ntsc_t,
-                               in_pixels.as_ptr(),
-                               in_width as ::std::os::raw::c_long,
-                               burst_phase as ::std::os::raw::c_int,
-                               in_width as ::std::os::raw::c_int,
-                               rows as ::std::os::raw::c_int,
-                               out_pixels.as_mut_ptr() as *mut ::std::os::raw::c_void,
-                               out_pitch as ::std::os::raw::c_long);
+            ffi::nes_ntsc_blit(
+                &self.0 as *const ffi::nes_ntsc_t,
+                in_pixels.as_ptr(),
+                in_width as ::std::os::raw::c_long,
+                burst_phase as ::std::os::raw::c_int,
+                in_width as ::std::os::raw::c_int,
+                rows as ::std::os::raw::c_int,
+                out_pixels.as_mut_ptr() as *mut ::std::os::raw::c_void,
+                out_pitch as ::std::os::raw::c_long,
+            );
         }
     }
 }
