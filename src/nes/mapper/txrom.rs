@@ -1,5 +1,5 @@
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind, NotAndMask};
-use crate::cartridge::Cartridge;
+use crate::cartridge::{Cartridge, Mirroring};
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind};
 use crate::ppu::Ppu;
@@ -23,6 +23,7 @@ pub struct TxromState {
     irq_counter: u8,
     irq_reload_pending: bool,
     last_a12: bool,
+    hardwired: bool,
     last: usize,
 }
 
@@ -66,6 +67,7 @@ impl Txrom {
             irq_counter: 0,
             irq_reload_pending: false,
             last_a12: false,
+            hardwired: false,
             last: (cartridge.prg_rom.len() / 0x2000) - 1,
         };
         let rom = Txrom {
@@ -108,11 +110,13 @@ impl Txrom {
                 rom.bank_data[bank_index as usize] = value;
                 self.sync(&mut rom);
             }
-            0xa000 => match value & 1 {
-                0 => system.ppu.nametables.set_vertical(state),
-                1 => system.ppu.nametables.set_horizontal(state),
-                _ => unreachable!(),
-            },
+            0xa000 => {
+                if rom.hardwired { return }
+                match value & 1 {
+                    0 => system.ppu.nametables.set_vertical(state),
+                    1 => system.ppu.nametables.set_horizontal(state),
+                    _ => unreachable!(),
+                }},
             0xa001 => {
                 rom.ram_protect = value & 0x40 != 0;
                 rom.ram_enabled = value & 0x80 != 0;
@@ -256,6 +260,18 @@ impl Mapper for Txrom {
         ppu.register_read(state, DeviceKind::Mapper, NotAndMask(0x1fff));
         ppu.register_write(state, DeviceKind::Mapper, NotAndMask(0x1fff));
         let mut rom = self.state.borrow_mut();
+
+        match cart.mirroring {
+            Mirroring::Horizontal => ppu.nametables.set_horizontal(state),
+            Mirroring::Vertical => ppu.nametables.set_vertical(state),
+            Mirroring::FourScreen => {
+                rom.hardwired = true;
+                let ext1 = state.mem.alloc_kb(1);
+                let ext2 = state.mem.alloc_kb(1);
+                ppu.nametables.set_four_screen(state, ext1, ext2);
+            },
+        }
+
         self.sync(&mut rom);
     }
 

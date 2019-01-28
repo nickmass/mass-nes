@@ -486,7 +486,7 @@ impl Ppu {
                         state.ppu.vram_addr =
                             state.ppu.vram_addr.wrapping_add(state.ppu.vram_inc()) & 0x7fff;
                         let addr = state.ppu.vram_addr;
-                        system.cartridge.mapper.update_ppu_addr(system, state, addr);
+                        system.mapper.update_ppu_addr(system, state, addr);
                     }
                 }
                 result
@@ -555,7 +555,7 @@ impl Ppu {
                     state.ppu.vram_addr_temp |= value as u16;
                     state.ppu.vram_addr = state.ppu.vram_addr_temp;
                     let addr = state.ppu.vram_addr;
-                    system.cartridge.mapper.update_ppu_addr(system, state, addr);
+                    system.mapper.update_ppu_addr(system, state, addr);
                 } else {
                     state.ppu.vram_addr_temp &= 0x00ff;
                     state.ppu.vram_addr_temp |= ((value & 0x3f) as u16) << 8;
@@ -586,7 +586,7 @@ impl Ppu {
                         state.ppu.vram_addr =
                             state.ppu.vram_addr.wrapping_add(state.ppu.vram_inc()) & 0x7fff;
                         let addr = state.ppu.vram_addr;
-                        system.cartridge.mapper.update_ppu_addr(system, state, addr);
+                        system.mapper.update_ppu_addr(system, state, addr);
                     }
                 }
             }

@@ -154,10 +154,10 @@ impl AddressBus {
             Some((addr, DeviceKind::CpuRam)) => system.cpu_mem.peek(state, addr),
             Some((addr, DeviceKind::Ppu)) => system.ppu.peek(system, state, addr),
             Some((addr, DeviceKind::Nametables)) => {
-                system.cartridge.mapper.nt_peek(system, state, addr)
+                system.mapper.nt_peek(system, state, addr)
             }
             Some((addr, DeviceKind::Mapper)) => {
-                system.cartridge.mapper.peek(self.kind, system, state, addr)
+                system.mapper.peek(self.kind, system, state, addr)
             }
             Some((addr, DeviceKind::Input)) => system.input.peek(addr),
             Some((addr, DeviceKind::Apu)) => system.apu.peek(addr),
@@ -173,10 +173,10 @@ impl AddressBus {
             Some((addr, DeviceKind::CpuRam)) => system.cpu_mem.read(state, addr),
             Some((addr, DeviceKind::Ppu)) => system.ppu.read(system, state, addr),
             Some((addr, DeviceKind::Mapper)) => {
-                system.cartridge.mapper.read(self.kind, system, state, addr)
+                system.mapper.read(self.kind, system, state, addr)
             }
             Some((addr, DeviceKind::Nametables)) => {
-                system.cartridge.mapper.nt_read(system, state, addr)
+                system.mapper.nt_read(system, state, addr)
             }
             Some((addr, DeviceKind::Input)) => system.input.read(addr),
             Some((addr, DeviceKind::Apu)) => system.apu.read(addr),
@@ -192,11 +192,10 @@ impl AddressBus {
             Some((addr, DeviceKind::CpuRam)) => system.cpu_mem.write(state, addr, value),
             Some((addr, DeviceKind::Ppu)) => system.ppu.write(system, state, addr, value),
             Some((addr, DeviceKind::Mapper)) => system
-                .cartridge
                 .mapper
                 .write(self.kind, system, state, addr, value),
             Some((addr, DeviceKind::Nametables)) => {
-                system.cartridge.mapper.nt_write(system, state, addr, value)
+                system.mapper.nt_write(system, state, addr, value)
             }
             Some((addr, DeviceKind::Input)) => system.input.write(addr, value),
             Some((addr, DeviceKind::Apu)) => system.apu.write(addr, value),

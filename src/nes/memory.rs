@@ -98,7 +98,7 @@ impl Banks {
         match self.kind {
             MemKind::Prg =>
                 system.cartridge.prg_rom[bank.start + addr as usize],
-            MemKind::Chr => 
+            MemKind::Chr =>
                 system.cartridge.chr_rom[bank.start + addr as usize],
         }
     }

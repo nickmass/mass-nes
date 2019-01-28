@@ -8,6 +8,7 @@ use crate::debug::{Debug, DebugState};
 use crate::input::Input;
 use crate::memory::{MemoryBlock, Pages};
 use crate::ppu::{Ppu, PpuState};
+use crate::mapper::Mapper;
 
 pub use crate::input::{Controller, InputDevice};
 
@@ -186,12 +187,11 @@ impl Machine {
             self.system.apu.tick();
 
             self.system
-                .cartridge
                 .mapper
                 .tick(&self.system, &mut self.state);
 
             let apu_irq = self.system.apu.get_irq();
-            let mapper_irq = self.system.cartridge.mapper.get_irq();
+            let mapper_irq = self.system.mapper.get_irq();
 
             self.system.cpu_pin_in.irq = apu_irq | mapper_irq;
             self.system.cpu_pin_in.dmc_req = self.system.apu.get_dmc_req();
@@ -255,17 +255,18 @@ pub struct System {
     pub cartridge: Cartridge,
     pub debug: Debug,
     pub input: Input,
+    pub mapper: Box<dyn Mapper>,
     cpu_pin_in: CpuPinIn,
 }
 
 impl System {
-    pub fn new(region: Region, mut cartridge: Cartridge, state: &mut SystemState) -> System {
+    pub fn new(region: Region, cartridge: Cartridge, state: &mut SystemState) -> System {
         let cpu = Cpu::new();
         let ppu = Ppu::new(state, region);
         let apu = Apu::new(region);
         let cpu_bus = AddressBus::new(BusKind::Cpu, state, 0);
         let cpu_mem = MemoryBlock::new(2, &mut state.mem);
-        cartridge.init(state, &ppu);
+        let mapper = cartridge.get_mapper(state, &ppu);
 
         let mut system = System {
             region: region,
@@ -277,6 +278,7 @@ impl System {
             cartridge: cartridge,
             debug: Debug::new(),
             input: Input::new(),
+            mapper: mapper,
             cpu_pin_in: CpuPinIn::default(),
         };
 
@@ -323,7 +325,7 @@ impl System {
         system
             .cpu_bus
             .register_write(state, DeviceKind::Input, Address(0x4016));
-        system.cartridge.mapper.register(
+        system.mapper.register(
             state,
             &mut system.cpu_bus,
             &mut system.ppu,

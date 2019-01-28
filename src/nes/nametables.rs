@@ -8,10 +8,12 @@ pub struct NametablesState {
 impl Default for NametablesState {
     fn default() -> NametablesState {
         NametablesState {
-            mappings: [Nametable::First,
-                       Nametable::Second,
-                       Nametable::First,
-                       Nametable::Second]
+            mappings: [
+                Nametable::First,
+                Nametable::Second,
+                Nametable::First,
+                Nametable::Second,
+            ],
         }
     }
 }
@@ -38,23 +40,36 @@ impl Nametables {
             internal_second: second,
         }
     }
-   
+
     pub fn set_vertical(&self, state: &mut SystemState) {
-        state.ppu.nametables.mappings = [Nametable::First,
-                                     Nametable::Second,
-                                     Nametable::First,
-                                     Nametable::Second];
+        state.ppu.nametables.mappings = [
+            Nametable::First,
+            Nametable::Second,
+            Nametable::First,
+            Nametable::Second,
+        ];
     }
-   
+
     pub fn set_horizontal(&self, state: &mut SystemState) {
-        state.ppu.nametables.mappings = [Nametable::First,
-                                     Nametable::First,
-                                     Nametable::Second,
-                                     Nametable::Second];
+        state.ppu.nametables.mappings = [
+            Nametable::First,
+            Nametable::First,
+            Nametable::Second,
+            Nametable::Second,
+        ];
     }
 
     pub fn set_single(&self, state: &mut SystemState, nt: Nametable) {
         state.ppu.nametables.mappings = [nt, nt, nt, nt];
+    }
+
+    pub fn set_four_screen(&self, state: &mut SystemState, nt_three: Page, nt_four: Page) {
+        state.ppu.nametables.mappings = [
+            Nametable::First,
+            Nametable::Second,
+            Nametable::External(nt_three),
+            Nametable::External(nt_four),
+        ];
     }
 
     fn get_table(&self, state: &SystemState, addr: u16) -> (Page, u16) {
@@ -63,7 +78,7 @@ impl Nametables {
         let nametable = state.ppu.nametables.mappings[table_ind as usize];
         match nametable {
             Nametable::First => (self.internal_first, table_addr),
-            Nametable::Second=> (self.internal_second, table_addr),
+            Nametable::Second => (self.internal_second, table_addr),
             Nametable::External(nt) => (nt, table_addr),
         }
     }

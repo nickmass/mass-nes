@@ -57,7 +57,6 @@ pub struct Cartridge {
     pub chr_rom: Vec<u8>,
     pub mirroring: Mirroring,
     mapper_number: u8,
-    pub mapper: Box<Mapper>,
 }
 
 impl Cartridge {
@@ -117,7 +116,6 @@ impl Cartridge {
             prg_rom: rom[data_start..prg_rom_end].to_vec(),
             chr_rom: rom[prg_rom_end..chr_rom_end].to_vec(),
             mirroring: mirroring,
-            mapper: Box::new(mapper::Null),
             mapper_number: mapper_number,
         };
 
@@ -157,12 +155,12 @@ impl Cartridge {
         None
     }
 
-    pub fn init(&mut self, state: &mut SystemState, ppu: &Ppu) {
+    pub fn get_mapper(&self, state: &mut SystemState, ppu: &Ppu) -> Box<dyn Mapper> {
         match self.mirroring {
             Mirroring::Horizontal => ppu.nametables.set_horizontal(state),
             Mirroring::Vertical => ppu.nametables.set_vertical(state),
             _ => {}
         }
-        self.mapper = mapper::ines(self.mapper_number, state, self);
+        mapper::ines(self.mapper_number, state, self)
     }
 }
