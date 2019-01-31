@@ -40,7 +40,13 @@ fn run(mut file: File, region: Region) {
 
     let window = Renderer::new(filter);
 
-    let mut audio = ui::audio::RodioAudio::new(48000);
+    let mut audio: Box<dyn Audio> = ui::audio::RodioAudio::new(48000)
+        .map(|a| Box::new(a) as Box<dyn Audio>)
+        .or_else(|| ui::audio::CpalAudio::new().map(|a| Box::new(a) as Box<dyn Audio>))
+        .unwrap_or_else(|| {
+            eprintln!("Unable to load audio device");
+            Box::new(ui::audio::Null)
+        });
     //let mut audio = ui::audio::CpalAudio::new();
     //let mut audio = ui::audio::Null;
 

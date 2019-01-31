@@ -6,7 +6,7 @@ use std::thread;
 pub trait Audio {
     fn sample_rate(&self) -> u32;
     fn add_samples(&mut self, samples: Vec<i16>);
-    fn close(self);
+    fn close(&mut self);
 }
 
 pub struct Null;
@@ -15,7 +15,7 @@ impl Audio for Null {
         48000
     }
     fn add_samples(&mut self, _samples: Vec<i16>) {}
-    fn close(self) {}
+    fn close(&mut self) {}
 }
 
 pub struct CpalAudio {
@@ -25,13 +25,13 @@ pub struct CpalAudio {
 }
 
 impl CpalAudio {
-    pub fn new() -> CpalAudio {
+    pub fn new() -> Option<CpalAudio> {
         let allowed_sample_rates = vec![
             cpal::SampleRate(48000),
             cpal::SampleRate(44100),
             cpal::SampleRate(96000),
         ];
-        let device = cpal::default_output_device().expect("No audio output avaliable");
+        let device = cpal::default_output_device()?;
 
         struct Match {
             rate: cpal::SampleRate,
@@ -41,9 +41,7 @@ impl CpalAudio {
         }
 
         let mut best_match = None;
-        let formats = device
-            .supported_output_formats()
-            .expect("No audio formats found");
+        let formats = device.supported_output_formats().ok()?;
         for f in formats {
             let s = allowed_sample_rates
                 .iter()
@@ -83,7 +81,7 @@ impl CpalAudio {
             }
         }
 
-        let best_match = best_match.expect("No supported audio format found");
+        let best_match = best_match?;
         let format = cpal::Format {
             channels: best_match.chan,
             sample_rate: best_match.rate,
@@ -93,9 +91,7 @@ impl CpalAudio {
 
         let event_loop = cpal::EventLoop::new();
 
-        let stream = event_loop
-            .build_output_stream(&device, &format)
-            .expect("Could not build output stream");
+        let stream = event_loop.build_output_stream(&device, &format).ok()?;
         event_loop.play_stream(stream);
 
         let (tx, rx) = channel();
@@ -135,7 +131,7 @@ impl CpalAudio {
             })
         });
 
-        CpalAudio { device, format, tx }
+        Some(CpalAudio { device, format, tx })
     }
 }
 
@@ -149,7 +145,7 @@ impl Audio for CpalAudio {
         let _ = self.tx.send(samples).unwrap();
     }
 
-    fn close(self) {}
+    fn close(&mut self) {}
 }
 
 use std::collections::VecDeque;
@@ -196,14 +192,19 @@ pub struct RodioAudio {
 }
 
 impl RodioAudio {
-    pub fn new(sample_rate: u32) -> RodioAudio {
-        let device = rodio::default_output_device().expect("Could not get default audio endpoint");
+    pub fn new(sample_rate: u32) -> Option<RodioAudio> {
+        let device = rodio::default_output_device()?;
+        let formats = device.supported_output_formats().ok()?;
+        if formats.count() == 0 {
+            return None;
+        }
+
         let sink = rodio::Sink::new(&device);
-        RodioAudio {
+        Some(RodioAudio {
             sample_rate: sample_rate,
             device: device,
             sink: sink,
-        }
+        })
     }
 }
 
@@ -221,7 +222,7 @@ impl Audio for RodioAudio {
         self.sink.append(source);
     }
 
-    fn close(self) {}
+    fn close(&mut self) {}
 }
 
 struct RodioSamples {
