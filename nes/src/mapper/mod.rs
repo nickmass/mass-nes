@@ -1,4 +1,5 @@
 mod axrom;
+mod bf909x;
 mod cnrom;
 mod fme7;
 mod nrom;
@@ -41,6 +42,7 @@ pub fn ines(ines_number: u8, state: &mut SystemState, cart: &Cartridge) -> Box<d
         4 => Box::new(txrom::Txrom::new(cart, state)),
         7 => Box::new(axrom::Axrom::new(cart, state)),
         69 => Box::new(fme7::Fme7::new(cart, state)),
+        71 | 232 => Box::new(bf909x::Bf909x::new(cart, state)),
         _ => {
             println!("Mapper not implemented.");
             Box::new(nrom::Nrom::new(cart, state))

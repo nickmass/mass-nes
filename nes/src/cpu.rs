@@ -500,13 +500,11 @@ impl Cpu {
     }
 
     fn addr_none(&mut self) -> AddressResult {
-        let dummy_addr = (self.reg_pc as u16).wrapping_add(1);
-        AddressResult::TickAddress(TickResult::Read(dummy_addr), 0x0000)
+        AddressResult::TickAddress(TickResult::Read(self.reg_pc as u16), 0x0000)
     }
 
     fn addr_accumulator(&mut self) -> AddressResult {
-        let dummy_addr = (self.reg_pc as u16).wrapping_add(1);
-        AddressResult::TickAddress(TickResult::Read(dummy_addr), self.reg_a as u16)
+        AddressResult::TickAddress(TickResult::Read(self.reg_pc as u16), self.reg_a as u16)
     }
 
     fn addr_immediate(&mut self) -> AddressResult {

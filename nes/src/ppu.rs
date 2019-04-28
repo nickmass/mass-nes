@@ -1,5 +1,6 @@
 use crate::bus::{AddressBus, AddressValidator, BusKind, DeviceKind};
 use crate::nametables::{Nametables, NametablesState};
+use crate::ppu_step::*;
 use crate::system::{EmphMode, Region, System, SystemState};
 
 pub struct PpuState {
@@ -9,7 +10,6 @@ pub struct PpuState {
     pub frame: u32,
     regs: [u8; 8],
     vblank: bool,
-    pub in_vblank: bool,
     sprite_zero_hit: bool,
     sprite_overflow: bool,
     last_write: u8,
@@ -28,7 +28,6 @@ pub struct PpuState {
 
     current_frame: i32,
     current_line: i32,
-    stage: Stage,
 
     palette_data: [u8; 32],
 
@@ -71,6 +70,9 @@ pub struct PpuState {
     reset_delay: u32,
 
     region: Region,
+
+    ppu_steps: PpuSteps,
+    step: PpuStep,
 }
 
 impl Default for PpuState {
@@ -82,7 +84,6 @@ impl Default for PpuState {
             frame: 0,
             regs: [0; 8],
             vblank: false,
-            in_vblank: false,
             sprite_zero_hit: false,
             sprite_overflow: false,
             last_write: 0,
@@ -101,7 +102,6 @@ impl Default for PpuState {
 
             current_frame: 0,
             current_line: 0,
-            stage: Stage::Dot(0, 0),
 
             palette_data: [0; 32],
 
@@ -144,6 +144,9 @@ impl Default for PpuState {
             reset_delay: 0,
 
             region: Region::default(),
+
+            ppu_steps: generate_steps(Region::default()),
+            step: PpuStep::default(),
         }
     }
 }
@@ -261,13 +264,13 @@ impl PpuState {
         self.regs[3]
     }
 
+    fn in_vblank(&self) -> bool {
+        self.step.scanline >= self.region.vblank_line()
+            && self.step.scanline < self.region.prerender_line()
+    }
+
     pub fn scanline(&self) -> (u32, u32) {
-        match self.stage {
-            Stage::Prerender(s, c) => (s, c),
-            Stage::Vblank(s, c) => (s, c),
-            Stage::Hblank(s, c) => (s, c),
-            Stage::Dot(s, c) => (s, c),
-        }
+        (self.step.scanline, self.step.dot)
     }
 }
 
@@ -276,62 +279,6 @@ pub struct PpuDebugState {
     pub tick: u64,
     pub scanline: u32,
     pub dot: u32,
-}
-
-enum Stage {
-    Vblank(u32, u32),
-    Hblank(u32, u32),
-    Dot(u32, u32),
-    Prerender(u32, u32),
-}
-
-impl Stage {
-    fn increment(&self, region: Region) -> Stage {
-        match *self {
-            Stage::Prerender(s, d) => {
-                if d == 340 {
-                    Stage::Dot(0, 0)
-                } else {
-                    Stage::Prerender(s, d + 1)
-                }
-            }
-            Stage::Vblank(s, d) => {
-                if d == 340 {
-                    if s == region.prerender_line() - 1 {
-                        Stage::Prerender(region.prerender_line(), 0)
-                    } else {
-                        Stage::Vblank(s + 1, 0)
-                    }
-                } else {
-                    Stage::Vblank(s, d + 1)
-                }
-            }
-            Stage::Hblank(s, d) => {
-                if d == 340 {
-                    if s == region.vblank_line() - 1 {
-                        Stage::Vblank(s + 1, 0)
-                    } else {
-                        Stage::Dot(s + 1, 0)
-                    }
-                } else {
-                    Stage::Hblank(s, d + 1)
-                }
-            }
-            Stage::Dot(s, d) => {
-                if d == 255 {
-                    Stage::Hblank(s, d + 1)
-                } else {
-                    Stage::Dot(s, d + 1)
-                }
-            }
-        }
-    }
-}
-
-impl Default for Stage {
-    fn default() -> Stage {
-        Stage::Dot(0, 0)
-    }
 }
 
 pub struct Ppu {
@@ -343,8 +290,9 @@ pub struct Ppu {
 impl Ppu {
     pub fn new(state: &mut SystemState, region: Region) -> Ppu {
         state.ppu.region = region;
+        state.ppu.ppu_steps = generate_steps(region);
         let ppu = Ppu {
-            bus: AddressBus::new(BusKind::Ppu, state, 0),
+            bus: AddressBus::new(BusKind::Ppu, state, 0, 0x3fff),
             nametables: Nametables::new(state),
             region: region,
         };
@@ -436,6 +384,7 @@ impl Ppu {
             0x2000 => state.ppu.last_write,
             0x2001 => state.ppu.last_write,
             0x2002 => {
+                //PPUSTATUS
                 let status = state.ppu.ppu_status();
                 state.ppu.write_latch = false;
                 state.ppu.vblank = false;
@@ -445,16 +394,20 @@ impl Ppu {
                 {
                     system.cpu.nmi_cancel();
                 }
+                state.ppu.last_write = status;
                 status
-            } //PPUSTATUS
+            }
             0x2003 => state.ppu.oam_addr, //OAMADDR
             0x2004 => {
-                if state.ppu.in_sprite_render {
-                    0xff
+                //OANDATA
+                let value = if state.ppu.is_rendering() && !state.ppu.in_vblank() {
+                    state.ppu.next_sprite_byte
                 } else {
                     state.ppu.oam_data[state.ppu.oam_addr as usize]
-                }
-            } //OANDATA
+                };
+                state.ppu.last_write = value;
+                value
+            }
             0x2005 => state.ppu.last_write,
             0x2006 => state.ppu.last_write,
             0x2007 => {
@@ -475,20 +428,16 @@ impl Ppu {
                     state.ppu.data_read_buffer
                 };
                 state.ppu.data_read_buffer = self.bus.read(system, state, addr);
-                match state.ppu.stage {
-                    Stage::Prerender(_, _) | Stage::Dot(_, _) | Stage::Hblank(_, _)
-                        if state.ppu.is_rendering() =>
-                    {
-                        self.horz_increment(system, state);
-                        self.vert_increment(system, state);
-                    }
-                    _ => {
-                        state.ppu.vram_addr =
-                            state.ppu.vram_addr.wrapping_add(state.ppu.vram_inc()) & 0x7fff;
-                        let addr = state.ppu.vram_addr;
-                        system.mapper.update_ppu_addr(system, state, addr);
-                    }
+                if !state.ppu.in_vblank() && state.ppu.is_rendering() {
+                    self.horz_increment(system, state);
+                    self.vert_increment(system, state);
+                } else {
+                    state.ppu.vram_addr =
+                        state.ppu.vram_addr.wrapping_add(state.ppu.vram_inc()) & 0x7fff;
+                    let addr = state.ppu.vram_addr;
+                    system.mapper.update_ppu_addr(system, state, addr);
                 }
+                state.ppu.last_write = result;
                 result
             }
             0x4014 => 0,
@@ -499,6 +448,7 @@ impl Ppu {
     pub fn write(&self, system: &System, state: &mut SystemState, address: u16, value: u8) {
         match address {
             0x2000 => {
+                //PPUCTRL
                 if state.ppu.reset_delay != 0 {
                     return;
                 }
@@ -506,28 +456,39 @@ impl Ppu {
                 state.ppu.regs[0] = value;
                 state.ppu.vram_addr_temp &= 0xf3ff;
                 state.ppu.vram_addr_temp |= state.ppu.base_nametable();
-                match state.ppu.stage {
-                    Stage::Vblank(_, _) => {
-                        if !was_nmi_enabled && state.ppu.is_nmi_enabled() && state.ppu.vblank {
-                            state.ppu.last_nmi_set = state.ppu.current_tick;
-                            system.cpu.nmi_req(1);
-                        }
-                    }
-                    _ => {}
+                if state.ppu.in_vblank()
+                    && !was_nmi_enabled
+                    && state.ppu.is_nmi_enabled()
+                    && state.ppu.vblank
+                {
+                    state.ppu.last_nmi_set = state.ppu.current_tick;
+                    system.cpu.nmi_req(1);
                 }
-            } //PPUCTRL
+                state.ppu.last_write = value;
+            }
             0x2001 => {
+                //PPUMASK
                 if state.ppu.reset_delay != 0 {
                     return;
                 }
-                state.ppu.regs[1] = value
-            } //PPUMASK
-            0x2002 => state.ppu.regs[2] = value,
-            0x2003 => state.ppu.oam_addr = value, //OAMADDR
+                state.ppu.regs[1] = value;
+                state.ppu.last_write = value;
+            }
+            0x2002 => {
+                state.ppu.regs[2] = value;
+                state.ppu.last_write = value;
+            }
+            0x2003 => {
+                //OAMADDR
+                state.ppu.oam_addr = value;
+                state.ppu.last_write = value;
+            }
             0x2004 => {
+                //OAMDATA
                 state.ppu.oam_data[state.ppu.oam_addr as usize] = value;
                 state.ppu.oam_addr = state.ppu.oam_addr.wrapping_add(1);
-            } //OAMDATA
+                state.ppu.last_write = value;
+            }
             0x2005 => {
                 //PPUSCROLL
                 if state.ppu.reset_delay != 0 {
@@ -544,6 +505,7 @@ impl Ppu {
                     state.ppu.vram_fine_x = (value & 0x07) as u16;
                 }
                 state.ppu.write_latch = !state.ppu.write_latch;
+                state.ppu.last_write = value;
             }
             0x2006 => {
                 //PPUADDR
@@ -561,6 +523,7 @@ impl Ppu {
                     state.ppu.vram_addr_temp |= ((value & 0x3f) as u16) << 8;
                 }
                 state.ppu.write_latch = !state.ppu.write_latch;
+                state.ppu.last_write = value;
             }
             0x2007 => {
                 //PPUDATA
@@ -575,20 +538,16 @@ impl Ppu {
                 } else {
                     self.bus.write(system, state, addr & 0x3fff, value);
                 }
-                match state.ppu.stage {
-                    Stage::Prerender(_, _) | Stage::Dot(_, _) | Stage::Hblank(_, _)
-                        if state.ppu.is_rendering() =>
-                    {
-                        self.horz_increment(system, state);
-                        self.vert_increment(system, state);
-                    }
-                    _ => {
-                        state.ppu.vram_addr =
-                            state.ppu.vram_addr.wrapping_add(state.ppu.vram_inc()) & 0x7fff;
-                        let addr = state.ppu.vram_addr;
-                        system.mapper.update_ppu_addr(system, state, addr);
-                    }
+                if !state.ppu.in_vblank() && state.ppu.is_rendering() {
+                    self.horz_increment(system, state);
+                    self.vert_increment(system, state);
+                } else {
+                    state.ppu.vram_addr =
+                        state.ppu.vram_addr.wrapping_add(state.ppu.vram_inc()) & 0x7fff;
+                    let addr = state.ppu.vram_addr;
+                    system.mapper.update_ppu_addr(system, state, addr);
                 }
+                state.ppu.last_write = value;
             }
             0x4014 => {
                 //OAMDMA
@@ -599,10 +558,6 @@ impl Ppu {
                 unreachable!()
             }
         }
-
-        if address < 8 {
-            state.ppu.last_write = value;
-        }
     }
 
     pub fn tick(&self, system: &System, state: &mut SystemState) {
@@ -610,118 +565,16 @@ impl Ppu {
             state.ppu.reset_delay -= 1;
         }
         state.ppu.current_tick += 1;
-        match state.ppu.stage {
-            Stage::Prerender(_, 1) => {
-                state.ppu.in_vblank = false;
-                state.ppu.vblank = false;
-                state.ppu.sprite_zero_hit = false;
-                state.ppu.sprite_overflow = false;
-                state.ppu.frame += 1;
-                self.fetch_nametable(system, state);
-            }
-            Stage::Prerender(_, c) if c % 8 == 1 && c < 256 => {
-                self.fetch_nametable(system, state);
-            }
-            Stage::Prerender(_, c) if c % 8 == 3 && c < 256 => {
-                self.fetch_attribute(system, state);
-            }
-            Stage::Prerender(_, c) if c % 8 == 5 && c < 256 => {
-                self.fetch_low_bg_pattern(system, state);
-            }
-            Stage::Prerender(_, c) if c % 8 == 7 && c < 256 => {
-                self.fetch_high_bg_pattern(system, state);
-            }
-            Stage::Prerender(_, c) if c % 8 == 0 && c != 0 && c < 256 => {
-                self.load_bg_shifters(state);
-                self.horz_increment(system, state);
-            }
-            Stage::Prerender(_, 256) => {
-                self.horz_increment(system, state);
-                self.vert_increment(system, state);
-            }
-            Stage::Prerender(_, 257) => {
-                self.horz_reset(system, state);
-            }
-            Stage::Prerender(_, c) if c >= 280 && c < 304 => {
-                self.vert_reset(system, state);
-            }
-            Stage::Prerender(_, c) if c == 321 || c == 329 || c == 337 || c == 339 => {
-                self.fetch_nametable(system, state);
-            }
-            Stage::Prerender(_, c) if c == 323 || c == 331 => {
-                self.fetch_attribute(system, state);
-            }
-            Stage::Prerender(_, c) if c == 325 || c == 333 => {
-                self.fetch_low_bg_pattern(system, state);
-            }
-            Stage::Prerender(_, c) if c == 327 || c == 335 => {
-                self.fetch_high_bg_pattern(system, state);
-            }
-            Stage::Prerender(_, c) if c == 328 || c == 336 => {
-                if c == 336 {
-                    state.ppu.low_bg_shift <<= 8;
-                    state.ppu.high_bg_shift <<= 8;
-                    state.ppu.low_attr_shift <<= 8;
-                    state.ppu.high_attr_shift <<= 8;
-                }
-                self.load_bg_shifters(state);
-                self.horz_increment(system, state);
-            }
-            Stage::Prerender(_, 340) => {
-                //Skip tick on odd frames
-                if self.region.uneven_frames() {
-                    if state.ppu.frame % 2 == 1 && state.ppu.is_background_enabled() {
-                        state.ppu.stage = state.ppu.stage.increment(self.region);
-                    }
+
+        let mut step = state.ppu.ppu_steps.step();
+
+        match step.state {
+            Some(StateChange::SkippedTick) => {
+                if state.ppu.frame % 2 == 1 && state.ppu.is_background_enabled() {
+                    step = state.ppu.ppu_steps.step();
                 }
             }
-            Stage::Dot(s, c) if c % 8 == 1 => {
-                self.fetch_nametable(system, state);
-            }
-            Stage::Dot(s, c) if c % 8 == 3 => {
-                self.fetch_attribute(system, state);
-            }
-            Stage::Dot(s, c) if c % 8 == 5 => {
-                self.fetch_low_bg_pattern(system, state);
-            }
-            Stage::Dot(s, c) if c % 8 == 7 => {
-                self.fetch_high_bg_pattern(system, state);
-            }
-            Stage::Dot(s, c) if c % 8 == 0 && c != 0 => {
-                self.load_bg_shifters(state);
-                self.horz_increment(system, state);
-            }
-            Stage::Hblank(s, c) if c == 321 || c == 329 || c == 337 || c == 339 => {
-                self.fetch_nametable(system, state);
-            }
-            Stage::Hblank(s, c) if c == 323 || c == 331 => {
-                self.fetch_attribute(system, state);
-            }
-            Stage::Hblank(s, c) if c == 325 || c == 333 => {
-                self.fetch_low_bg_pattern(system, state);
-            }
-            Stage::Hblank(s, c) if c == 327 || c == 335 => {
-                self.fetch_high_bg_pattern(system, state);
-            }
-            Stage::Hblank(s, c) if c == 328 || c == 336 => {
-                if c == 336 {
-                    state.ppu.low_bg_shift <<= 8;
-                    state.ppu.high_bg_shift <<= 8;
-                    state.ppu.low_attr_shift <<= 8;
-                    state.ppu.high_attr_shift <<= 8;
-                }
-                self.load_bg_shifters(state);
-                self.horz_increment(system, state);
-            }
-            Stage::Hblank(s, 256) => {
-                self.horz_increment(system, state);
-                self.vert_increment(system, state);
-            }
-            Stage::Hblank(s, 257) => {
-                self.horz_reset(system, state);
-            }
-            Stage::Vblank(s, 1) if s == self.region.vblank_line() + 1 => {
-                state.ppu.in_vblank = true;
+            Some(StateChange::SetVblank) => {
                 if state.ppu.current_tick != state.ppu.last_status_read + 1 {
                     state.ppu.vblank = true;
                     if state.ppu.is_nmi_enabled() {
@@ -730,11 +583,55 @@ impl Ppu {
                     }
                 }
             }
-            _ => {}
+            Some(StateChange::ClearVblank) => {
+                state.ppu.vblank = false;
+                state.ppu.sprite_zero_hit = false;
+                state.ppu.sprite_overflow = false;
+                state.ppu.frame += 1;
+            }
+            None => (),
         }
 
-        match state.ppu.stage {
-            Stage::Dot(s, 1) => {
+        match step.background {
+            Some(BackgroundStep::VertReset) => {
+                self.vert_reset(system, state);
+            }
+            Some(BackgroundStep::HorzReset) => {
+                self.horz_reset(system, state);
+            }
+            Some(BackgroundStep::VertIncrement) => {
+                self.horz_increment(system, state);
+                self.vert_increment(system, state);
+            }
+            Some(BackgroundStep::HorzIncrement) => {
+                self.load_bg_shifters(state);
+                self.horz_increment(system, state);
+            }
+            Some(BackgroundStep::ShiftedHorzIncrement) => {
+                state.ppu.low_bg_shift <<= 8;
+                state.ppu.high_bg_shift <<= 8;
+                state.ppu.low_attr_shift <<= 8;
+                state.ppu.high_attr_shift <<= 8;
+                self.load_bg_shifters(state);
+                self.horz_increment(system, state);
+            }
+            Some(BackgroundStep::Nametable) => {
+                self.fetch_nametable(system, state);
+            }
+            Some(BackgroundStep::Attribute) => {
+                self.fetch_attribute(system, state);
+            }
+            Some(BackgroundStep::LowPattern) => {
+                self.fetch_low_bg_pattern(system, state);
+            }
+            Some(BackgroundStep::HighPattern) => {
+                self.fetch_high_bg_pattern(system, state);
+            }
+            None => (),
+        }
+
+        match step.sprite {
+            Some(SpriteStep::Reset) => {
                 state.ppu.sprite_render_index = 0;
                 state.ppu.sprite_n = 0;
                 state.ppu.sprite_m = 0;
@@ -748,90 +645,41 @@ impl Ppu {
                 state.ppu.sprite_zero_on_next_line = false;
                 self.init_line_oam(system, state, 0);
             }
-            Stage::Dot(s, d) if d >= 1 && d < 65 && d % 2 == 1 => {
+            Some(SpriteStep::Clear) => {
                 state.ppu.in_sprite_render = false;
-                self.init_line_oam(system, state, d / 2);
+                self.init_line_oam(system, state, step.dot / 2);
             }
-            Stage::Hblank(s, 256) => {
-                state.ppu.sprite_n = 0;
-                self.sprite_eval(system, state, s);
+            Some(SpriteStep::Eval) => {
+                self.sprite_eval(system, state, step.scanline);
             }
-            Stage::Dot(s, d) if d >= 65 && d % 2 == 0 => {
-                self.sprite_eval(system, state, s);
-            }
-            Stage::Dot(s, d) if d >= 65 && d % 2 == 1 => {
+            Some(SpriteStep::Read) => {
                 state.ppu.in_sprite_render = false;
                 self.sprite_read(system, state);
             }
-            Stage::Hblank(s, d) if d >= 257 && d < 320 && d % 8 == 1 => {
-                //Garbage Nametable
+            Some(SpriteStep::Hblank) => {
+                state.ppu.sprite_n = 0;
+                self.sprite_eval(system, state, step.scanline);
+            }
+            Some(SpriteStep::Nametable) => {
                 self.fetch_nametable(system, state);
             }
-            Stage::Hblank(s, d) if d >= 257 && d < 320 && d % 8 == 3 => {
-                //Garbage Nametable
+            Some(SpriteStep::Attribute) => {
                 self.fetch_attribute(system, state);
             }
-            Stage::Hblank(s, d) if d >= 257 && d < 320 && d % 8 == 5 => {
-                self.sprite_fetch(system, state, s, false);
+            Some(SpriteStep::LowPattern) => {
+                self.sprite_fetch(system, state, step.scanline, false);
             }
-            Stage::Hblank(s, d) if d >= 257 && d < 320 && d % 8 == 7 => {
-                self.sprite_fetch(system, state, s, true);
+            Some(SpriteStep::HighPattern) => {
+                self.sprite_fetch(system, state, step.scanline, true);
             }
-
-            Stage::Prerender(_, 1) => {
-                state.ppu.sprite_render_index = 0;
-                state.ppu.sprite_n = 0;
-                state.ppu.sprite_m = 0;
-                state.ppu.found_sprites = 0;
-                state.ppu.sprite_reads = 0;
-                state.ppu.line_oam_index = 0;
-                state.ppu.in_sprite_render = false;
-                state.ppu.sprite_read_loop = false;
-                state.ppu.block_oam_writes = false;
-                state.ppu.sprite_zero_on_line = state.ppu.sprite_zero_on_next_line;
-                state.ppu.sprite_zero_on_next_line = false;
-                self.init_line_oam(system, state, 0);
-            }
-            Stage::Prerender(_, d) if d >= 1 && d < 65 && d % 2 == 1 => {
-                state.ppu.in_sprite_render = false;
-                self.init_line_oam(system, state, d / 2);
-            }
-            Stage::Prerender(s, 256) => {
-                state.ppu.sprite_n = 0;
-                self.sprite_eval(system, state, s);
-            }
-            Stage::Prerender(s, d) if d >= 65 && d % 2 == 0 => {
-                self.sprite_eval(system, state, s);
-            }
-            Stage::Prerender(_, d) if d >= 65 && d % 2 == 1 => {
-                state.ppu.in_sprite_render = false;
-                self.sprite_read(system, state);
-            }
-            Stage::Prerender(_, d) if d >= 257 && d < 320 && d % 8 == 1 => {
-                //Garbage Nametable
-                self.fetch_nametable(system, state);
-            }
-            Stage::Prerender(_, d) if d >= 257 && d < 320 && d % 8 == 3 => {
-                //Garbage Nametable
-                self.fetch_attribute(system, state);
-            }
-            Stage::Prerender(s, d) if d >= 257 && d < 320 && d % 8 == 5 => {
-                self.sprite_fetch(system, state, s, false);
-            }
-            Stage::Prerender(s, d) if d >= 257 && d < 320 && d % 8 == 7 => {
-                self.sprite_fetch(system, state, s, true);
-            }
-            _ => {}
+            None => (),
         }
 
-        match state.ppu.stage {
-            Stage::Dot(s, c) => {
-                self.render(system, state, c, s);
-            }
-            _ => {}
+        if step.scanline < self.region.vblank_line() && step.dot < 256 {
+            self.render(system, state, step.dot, step.scanline);
         }
 
-        state.ppu.stage = state.ppu.stage.increment(self.region);
+        state.ppu.step = step;
     }
 
     fn render(&self, system: &System, state: &mut SystemState, dot: u32, scanline: u32) {

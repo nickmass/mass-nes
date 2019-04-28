@@ -1,14 +1,12 @@
 use crate::apu::Apu;
-use crate::bus::{
-    Address, AddressBus, BusKind, DeviceKind, DeviceMappings, NotAndMask, RangeAndMask,
-};
+use crate::bus::{Address, AddressBus, BusKind, DeviceKind, DeviceMappings, RangeAndMask};
 use crate::cartridge::Cartridge;
 use crate::cpu::{Cpu, CpuPinIn, TickResult};
 use crate::debug::{Debug, DebugState};
 use crate::input::Input;
+use crate::mapper::Mapper;
 use crate::memory::{MemoryBlock, Pages};
 use crate::ppu::{Ppu, PpuState};
-use crate::mapper::Mapper;
 
 pub use crate::input::{Controller, InputDevice};
 
@@ -153,11 +151,9 @@ impl Machine {
     }
 
     pub fn run(&mut self) {
-        let mut last_vblank = false;
+        let last_frame = self.state.ppu.frame;
         //self.system.debug.log_for(&mut self.state, 100000);
-        while self.state.ppu.in_vblank || !last_vblank {
-            last_vblank = self.state.ppu.in_vblank;
-
+        while self.state.ppu.frame == last_frame {
             let tick_result = self.system.cpu.tick(self.system.cpu_pin_in);
 
             let cpu_state = self.system.cpu.debug_state();
@@ -186,9 +182,7 @@ impl Machine {
 
             self.system.apu.tick();
 
-            self.system
-                .mapper
-                .tick(&self.system, &mut self.state);
+            self.system.mapper.tick(&self.system, &mut self.state);
 
             let apu_irq = self.system.apu.get_irq();
             let mapper_irq = self.system.mapper.get_irq();
@@ -264,7 +258,7 @@ impl System {
         let cpu = Cpu::new();
         let ppu = Ppu::new(state, region);
         let apu = Apu::new(region);
-        let cpu_bus = AddressBus::new(BusKind::Cpu, state, 0);
+        let cpu_bus = AddressBus::new(BusKind::Cpu, state, 0, 0xffff);
         let cpu_mem = MemoryBlock::new(2, &mut state.mem);
         let mapper = cartridge.get_mapper(state, &ppu);
 
@@ -282,12 +276,16 @@ impl System {
             cpu_pin_in: CpuPinIn::default(),
         };
 
-        system
-            .cpu_bus
-            .register_read(state, DeviceKind::CpuRam, NotAndMask(0x7ff));
-        system
-            .cpu_bus
-            .register_write(state, DeviceKind::CpuRam, NotAndMask(0x7ff));
+        system.cpu_bus.register_read(
+            state,
+            DeviceKind::CpuRam,
+            RangeAndMask(0x0000, 0x2000, 0x07ff),
+        );
+        system.cpu_bus.register_write(
+            state,
+            DeviceKind::CpuRam,
+            RangeAndMask(0x0000, 0x2000, 0x07ff),
+        );
         system
             .cpu_bus
             .register_read(state, DeviceKind::Ppu, RangeAndMask(0x2000, 0x4000, 0x2007));

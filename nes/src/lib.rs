@@ -13,6 +13,7 @@ mod memory;
 mod nametables;
 mod ops;
 mod ppu;
+mod ppu_step;
 mod system;
 
 pub use self::cartridge::Cartridge;

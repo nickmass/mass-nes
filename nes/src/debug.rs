@@ -81,7 +81,7 @@ impl Debug {
 
             let inst = self.ops[self.peek(system, state, inst_addr) as usize];
             if let Instruction::IllKil = inst.instruction {
-                //self.log_history(system, state);
+                self.log_history(system, state);
                 panic!("KIL");
             }
         }
