@@ -189,6 +189,7 @@ impl Machine {
 
             self.system.cpu_pin_in.irq = apu_irq | mapper_irq;
             self.system.cpu_pin_in.dmc_req = self.system.apu.get_dmc_req();
+            self.system.cpu_pin_in.oam_req = self.system.apu.get_oam_req();
 
             self.system.ppu.tick(&self.system, &mut self.state);
             self.system.ppu.tick(&self.system, &mut self.state);
@@ -286,15 +287,14 @@ impl System {
             DeviceKind::CpuRam,
             RangeAndMask(0x0000, 0x2000, 0x07ff),
         );
+
         system
             .cpu_bus
             .register_read(state, DeviceKind::Ppu, RangeAndMask(0x2000, 0x4000, 0x2007));
         system
             .cpu_bus
             .register_write(state, DeviceKind::Ppu, RangeAndMask(0x2000, 0x4000, 0x2007));
-        system
-            .cpu_bus
-            .register_write(state, DeviceKind::Ppu, Address(0x4014));
+
         system.ppu.register_read(
             state,
             DeviceKind::Nametables,
@@ -305,15 +305,20 @@ impl System {
             DeviceKind::Nametables,
             RangeAndMask(0x2000, 0x4000, 0xfff),
         );
+
         system
             .cpu_bus
             .register_read(state, DeviceKind::Apu, Address(0x4015));
+        system
+            .cpu_bus
+            .register_write(state, DeviceKind::Apu, Address(0x4014));
         system
             .cpu_bus
             .register_write(state, DeviceKind::Apu, Address(0x4015));
         system
             .cpu_bus
             .register_write(state, DeviceKind::Apu, Address(0x4017));
+
         system
             .cpu_bus
             .register_read(state, DeviceKind::Input, Address(0x4016));
@@ -323,13 +328,13 @@ impl System {
         system
             .cpu_bus
             .register_write(state, DeviceKind::Input, Address(0x4016));
+
         system.mapper.register(
             state,
             &mut system.cpu_bus,
             &mut system.ppu,
             &system.cartridge,
         );
-
         system.apu.register(state, &mut system.cpu_bus);
         system.power(state);
         system

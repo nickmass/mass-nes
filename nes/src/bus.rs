@@ -101,6 +101,7 @@ pub struct AddressBus {
     bus: Bus,
     block_size: u16,
     mask: u16,
+    open_bus: std::cell::Cell<u8>,
 }
 
 impl AddressBus {
@@ -109,6 +110,7 @@ impl AddressBus {
             kind: bus,
             bus: state.mappings.add_bus(),
             block_size: 2u16.pow(block_size),
+            open_bus: std::cell::Cell::new(0),
             mask,
         }
     }
@@ -157,9 +159,9 @@ impl AddressBus {
             Some((addr, DeviceKind::Ppu)) => system.ppu.peek(system, state, addr),
             Some((addr, DeviceKind::Nametables)) => system.mapper.nt_peek(system, state, addr),
             Some((addr, DeviceKind::Mapper)) => system.mapper.peek(self.kind, system, state, addr),
-            Some((addr, DeviceKind::Input)) => system.input.peek(addr),
+            Some((addr, DeviceKind::Input)) => system.input.peek(addr, self.open_bus.get()),
             Some((addr, DeviceKind::Apu)) => system.apu.peek(addr),
-            None => 0xff,
+            None => self.open_bus.get(),
             _ => unimplemented!(),
         }
     }
@@ -167,16 +169,19 @@ impl AddressBus {
     pub fn read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
         let addr = (addr & !(self.block_size - 1)) & self.mask;
         let mapping = state.mappings.get_read_mapping(&self.bus, addr);
-        match mapping {
+        let value = match mapping {
             Some((addr, DeviceKind::CpuRam)) => system.cpu_mem.read(state, addr),
             Some((addr, DeviceKind::Ppu)) => system.ppu.read(system, state, addr),
             Some((addr, DeviceKind::Mapper)) => system.mapper.read(self.kind, system, state, addr),
             Some((addr, DeviceKind::Nametables)) => system.mapper.nt_read(system, state, addr),
-            Some((addr, DeviceKind::Input)) => system.input.read(addr),
+            Some((addr, DeviceKind::Input)) => system.input.read(addr, self.open_bus.get()),
             Some((addr, DeviceKind::Apu)) => system.apu.read(addr),
-            None => 0xff,
+            None => self.open_bus.get(),
             _ => unimplemented!(),
-        }
+        };
+
+        self.open_bus.set(value);
+        value
     }
 
     pub fn write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {

@@ -9,6 +9,7 @@ pub struct CpuPinIn {
     pub reset: bool,
     pub power: bool,
     pub dmc_req: Option<u16>,
+    pub oam_req: Option<u8>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -109,6 +110,7 @@ pub struct Cpu {
     last_tick: TickResult,
     instruction_addr: Option<u16>,
     dmc_hold: u8,
+    dmc_hold_addr: u16,
     pending_dmc: Option<PendingDmcRead>,
     pending_nmi: Cell<Option<u32>>,
     pending_oam_dma: Cell<Option<u8>>,
@@ -139,6 +141,7 @@ impl Cpu {
             instruction_addr: None,
             last_tick: TickResult::Read(0),
             dmc_hold: 0,
+            dmc_hold_addr: 0,
             stage: Stage::Fetch,
             pending_dmc: None,
             pending_nmi: Cell::new(None),
@@ -234,8 +237,10 @@ impl Cpu {
         self.flag_s = val & 0x80;
     }
 
-    pub fn oam_dma_req(&self, addr: u8) {
-        self.pending_oam_dma.set(Some(addr));
+    fn oam_dma_req(&self) {
+        if let Some(addr) = self.pin_in.oam_req {
+            self.pending_oam_dma.set(Some(addr));
+        }
     }
 
     pub fn nmi_req(&self, delay: u32) {
@@ -255,6 +260,7 @@ impl Cpu {
     pub fn tick(&mut self, pin_in: CpuPinIn) -> TickResult {
         self.pin_in = pin_in;
         self.current_tick += 1;
+        self.oam_dma_req();
         self.dmc_req();
         self.instruction_addr = None;
 
@@ -267,9 +273,12 @@ impl Cpu {
 
         match self.pending_dmc {
             Some(PendingDmcRead::Pending(addr, count)) => {
+                let mut was_read = false;
                 match self.last_tick {
-                    TickResult::Read(_) => {
+                    TickResult::Read(addr) => {
                         self.dmc_hold = self.pin_in.data;
+                        self.dmc_hold_addr = addr;
+                        was_read = true;
                     }
                     _ => (),
                 }
@@ -279,7 +288,9 @@ impl Cpu {
                     return TickResult::Read(addr);
                 } else {
                     self.pending_dmc = Some(PendingDmcRead::Pending(addr, count - 1));
-                    return TickResult::Idle;
+                    if was_read {
+                        return TickResult::Idle;
+                    }
                 }
             }
             Some(PendingDmcRead::Reading) => {
@@ -288,7 +299,7 @@ impl Cpu {
             }
             Some(PendingDmcRead::Resume) => {
                 self.pending_dmc = None;
-                self.pin_in.data = self.dmc_hold
+                self.pin_in.data = self.dmc_hold;
             }
             None => (),
         }
@@ -407,6 +418,27 @@ impl Cpu {
 
     fn interrupt(&mut self) -> Stage {
         let mut stage = Stage::Decode;
+
+        if let Some(high_addr) = self.pending_oam_dma.get() {
+            self.pending_oam_dma.set(None);
+            stage = Stage::OamDma(OamDma::Read((high_addr as u16) << 8, 0))
+        }
+
+        if self.pin_in.irq && (self.flag_i == 0 || self.irq_set_delay != 0) && self.irq_delay == 0 {
+            if self.irq_set_delay != 0 {
+                self.irq_set_delay -= 1;
+            }
+            stage = Stage::Irq(Irq::ReadPcOne(0xfffe))
+        }
+
+        if self.irq_set_delay != 0 {
+            self.irq_set_delay -= 1;
+        }
+
+        if self.irq_delay != 0 {
+            self.irq_delay -= 1;
+        }
+
         match self.pending_nmi.get() {
             Some(0) => {
                 self.pending_nmi.set(None);
@@ -418,22 +450,6 @@ impl Cpu {
             None => (),
         }
 
-        if self.pin_in.irq && (self.flag_i == 0 || self.irq_set_delay != 0) && self.irq_delay == 0 {
-            if self.irq_set_delay != 0 {
-                self.irq_set_delay -= 1;
-            }
-            stage = Stage::Irq(Irq::ReadPcOne(0xfffe))
-        }
-        if self.irq_set_delay != 0 {
-            self.irq_set_delay -= 1;
-        }
-        if self.irq_delay != 0 {
-            self.irq_delay -= 1;
-        }
-        if let Some(high_addr) = self.pending_oam_dma.get() {
-            self.pending_oam_dma.set(None);
-            stage = Stage::OamDma(OamDma::Read((high_addr as u16) << 8, 0))
-        }
         if self.pin_in.power {
             self.pin_in.power = false;
             stage = Stage::Power(Power::ReadRegPcLow);

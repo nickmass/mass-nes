@@ -25,6 +25,7 @@ pub struct ApuState {
     irq: bool,
     last_4017: u8,
     region: Region,
+    oam_req: Option<u8>,
 }
 
 impl Default for ApuState {
@@ -38,6 +39,7 @@ impl Default for ApuState {
             irq: false,
             last_4017: 0,
             region: Region::default(),
+            oam_req: None,
         }
     }
 }
@@ -220,6 +222,9 @@ impl Apu {
     pub fn write(&self, addr: u16, value: u8) {
         let mut state = self.state.borrow_mut();
         match addr {
+            0x4014 => {
+                state.oam_req = Some(value);
+            }
             0x4015 => {
                 if value & 1 != 0 {
                     self.pulse_one.enable();
@@ -310,6 +315,11 @@ impl Apu {
 
     pub fn get_dmc_req(&self) -> Option<u16> {
         self.dmc.get_dmc_req()
+    }
+
+    pub fn get_oam_req(&self) -> Option<u8> {
+        let mut state = self.state.borrow_mut();
+        state.oam_req.take()
     }
 
     pub fn get_samples<'a>(&'a mut self) -> &[i16] {

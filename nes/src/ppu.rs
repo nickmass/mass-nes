@@ -103,7 +103,7 @@ impl Default for PpuState {
             current_frame: 0,
             current_line: 0,
 
-            palette_data: [0; 32],
+            palette_data: [0x0f; 32],
 
             nametable_tile: 0,
 
@@ -119,7 +119,7 @@ impl Default for PpuState {
             low_attr_shift: 0,
             high_attr_shift: 0,
 
-            screen: vec![0; 256 * 240],
+            screen: vec![0x0f; 256 * 240],
 
             in_sprite_render: false,
             next_sprite_byte: 0,
@@ -351,7 +351,7 @@ impl Ppu {
             0x2000 => state.ppu.last_write,
             0x2001 => state.ppu.last_write,
             0x2002 => state.ppu.ppu_status(),
-            0x2003 => state.ppu.oam_addr, //OAMADDR
+            0x2003 => state.ppu.last_write, //OAMADDR
             0x2004 => state.ppu.oam_data[state.ppu.oam_addr as usize], //OANDATA
             0x2005 => state.ppu.last_write,
             0x2006 => state.ppu.last_write,
@@ -374,13 +374,12 @@ impl Ppu {
                 };
                 result
             }
-            0x4014 => 0,
             _ => unreachable!(),
         }
     }
 
     pub fn read(&self, system: &System, state: &mut SystemState, address: u16) -> u8 {
-        match address {
+        let value = match address {
             0x2000 => state.ppu.last_write,
             0x2001 => state.ppu.last_write,
             0x2002 => {
@@ -394,19 +393,16 @@ impl Ppu {
                 {
                     system.cpu.nmi_cancel();
                 }
-                state.ppu.last_write = status;
                 status
             }
-            0x2003 => state.ppu.oam_addr, //OAMADDR
+            0x2003 => state.ppu.last_write, //OAMADDR
             0x2004 => {
                 //OANDATA
-                let value = if state.ppu.is_rendering() && !state.ppu.in_vblank() {
+                if state.ppu.is_rendering() && !state.ppu.in_vblank() {
                     state.ppu.next_sprite_byte
                 } else {
                     state.ppu.oam_data[state.ppu.oam_addr as usize]
-                };
-                state.ppu.last_write = value;
-                value
+                }
             }
             0x2005 => state.ppu.last_write,
             0x2006 => state.ppu.last_write,
@@ -437,15 +433,17 @@ impl Ppu {
                     let addr = state.ppu.vram_addr;
                     system.mapper.update_ppu_addr(system, state, addr);
                 }
-                state.ppu.last_write = result;
+
                 result
             }
-            0x4014 => 0,
             _ => unreachable!(),
-        }
+        };
+        state.ppu.last_write = value;
+        value
     }
 
     pub fn write(&self, system: &System, state: &mut SystemState, address: u16, value: u8) {
+        state.ppu.last_write = value;
         match address {
             0x2000 => {
                 //PPUCTRL
@@ -464,7 +462,6 @@ impl Ppu {
                     state.ppu.last_nmi_set = state.ppu.current_tick;
                     system.cpu.nmi_req(1);
                 }
-                state.ppu.last_write = value;
             }
             0x2001 => {
                 //PPUMASK
@@ -472,22 +469,27 @@ impl Ppu {
                     return;
                 }
                 state.ppu.regs[1] = value;
-                state.ppu.last_write = value;
             }
             0x2002 => {
                 state.ppu.regs[2] = value;
-                state.ppu.last_write = value;
             }
             0x2003 => {
                 //OAMADDR
                 state.ppu.oam_addr = value;
-                state.ppu.last_write = value;
             }
             0x2004 => {
                 //OAMDATA
-                state.ppu.oam_data[state.ppu.oam_addr as usize] = value;
-                state.ppu.oam_addr = state.ppu.oam_addr.wrapping_add(1);
-                state.ppu.last_write = value;
+                if !state.ppu.in_vblank() && state.ppu.is_rendering() {
+                    state.ppu.sprite_n += 1;
+                    if state.ppu.sprite_n == 64 {
+                        state.ppu.sprite_read_loop = true;
+                        state.ppu.sprite_n = 0;
+                        state.ppu.sprite_m = 0;
+                    }
+                } else {
+                    state.ppu.oam_data[state.ppu.oam_addr as usize] = value;
+                    state.ppu.oam_addr = state.ppu.oam_addr.wrapping_add(1);
+                }
             }
             0x2005 => {
                 //PPUSCROLL
@@ -505,7 +507,6 @@ impl Ppu {
                     state.ppu.vram_fine_x = (value & 0x07) as u16;
                 }
                 state.ppu.write_latch = !state.ppu.write_latch;
-                state.ppu.last_write = value;
             }
             0x2006 => {
                 //PPUADDR
@@ -523,7 +524,6 @@ impl Ppu {
                     state.ppu.vram_addr_temp |= ((value & 0x3f) as u16) << 8;
                 }
                 state.ppu.write_latch = !state.ppu.write_latch;
-                state.ppu.last_write = value;
             }
             0x2007 => {
                 //PPUDATA
@@ -547,11 +547,6 @@ impl Ppu {
                     let addr = state.ppu.vram_addr;
                     system.mapper.update_ppu_addr(system, state, addr);
                 }
-                state.ppu.last_write = value;
-            }
-            0x4014 => {
-                //OAMDMA
-                system.cpu.oam_dma_req(value);
             }
             _ => {
                 println!("{:4X} Address", address);

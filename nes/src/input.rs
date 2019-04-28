@@ -82,38 +82,41 @@ impl Input {
         }
     }
 
-    pub fn peek(&self, addr: u16) -> u8 {
+    pub fn peek(&self, addr: u16, open_bus: u8) -> u8 {
         let state = self.state.borrow();
-        match addr {
+        let value = match addr {
             0x4016 => {
                 if state.read_counter == 0 {
-                    0x41
+                    0x01
                 } else {
-                    let value = (state.read_shifter & 1) | 0x40;
-                    value
+                    state.read_shifter & 1
                 }
             }
-            0x4017 => 0x40,
+            0x4017 => 0x00,
             _ => unimplemented!(),
-        }
+        };
+
+        value | (open_bus & 0xe0)
     }
 
-    pub fn read(&self, addr: u16) -> u8 {
+    pub fn read(&self, addr: u16, open_bus: u8) -> u8 {
         let mut state = self.state.borrow_mut();
-        match addr {
+        let value = match addr {
             0x4016 => {
                 if state.read_counter == 0 {
-                    0x41
+                    0x01
                 } else {
-                    let value = (state.read_shifter & 1) | 0x40;
+                    let value = state.read_shifter & 1;
                     state.read_shifter >>= 1;
                     state.read_counter -= 1;
                     value
                 }
             }
-            0x4017 => 0x40,
+            0x4017 => 0x00,
             _ => unimplemented!(),
-        }
+        };
+
+        value | (open_bus & 0xe0)
     }
 
     pub fn write(&self, addr: u16, value: u8) {
