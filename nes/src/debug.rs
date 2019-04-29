@@ -3,14 +3,120 @@ use crate::ops::*;
 use crate::ppu::PpuDebugState;
 use crate::system::{System, SystemState};
 
-use std::collections::VecDeque;
+const INST_HISTORY_BUF_SIZE: usize = 100;
 
-#[derive(Default)]
 pub struct DebugState {
     trace_instrs: u32,
     color_dots: u32,
     log_once: bool,
-    inst_queue: VecDeque<(CpuDebugState, PpuDebugState)>,
+    inst_ring: RingBuffer<(CpuDebugState, PpuDebugState)>,
+}
+
+impl Default for DebugState {
+    fn default() -> DebugState {
+        DebugState {
+            trace_instrs: 0,
+            color_dots: 0,
+            log_once: false,
+            inst_ring: RingBuffer::new(INST_HISTORY_BUF_SIZE),
+        }
+    }
+}
+
+impl DebugState {
+    fn log_inst(&mut self, inst: (CpuDebugState, PpuDebugState)) {
+        self.inst_ring.push(inst);
+    }
+
+    fn log_iter<'a>(&'a self) -> RingIter<'a, (CpuDebugState, PpuDebugState)> {
+        self.inst_ring.iter()
+    }
+}
+
+struct RingBuffer<T> {
+    ring: Box<[Option<T>]>,
+    ring_index: usize,
+}
+
+impl<T> RingBuffer<T> {
+    fn new(capacity: usize) -> RingBuffer<T> {
+        let mut ring = Vec::with_capacity(capacity);
+        for _ in 0..capacity {
+            ring.push(None);
+        }
+
+        RingBuffer {
+            ring: ring.into_boxed_slice(),
+            ring_index: 0,
+        }
+    }
+
+    fn push(&mut self, item: T) {
+        self.ring_index += 1;
+        if self.ring_index >= self.ring.len() {
+            self.ring_index = 0;
+        }
+
+        self.ring[self.ring_index] = Some(item);
+    }
+
+    fn iter<'a>(&'a self) -> RingIter<'a, T> {
+        RingIter {
+            ring: &self.ring[..],
+            ring_end_index: self.ring_index,
+            ring_index: self.ring_index,
+            first: true,
+        }
+    }
+}
+
+struct RingIter<'a, T> {
+    ring: &'a [Option<T>],
+    ring_end_index: usize,
+    ring_index: usize,
+    first: bool,
+}
+
+impl<'a, T> Iterator for RingIter<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.first && self.ring_index == self.ring_end_index {
+            None
+        } else {
+            let res = self.ring[self.ring_index].as_ref();
+            if self.ring_index == 0 {
+                self.ring_index = self.ring.len() - 1;
+            } else {
+                self.ring_index -= 1;
+            }
+
+            self.first = false;
+            res
+        }
+    }
+}
+
+impl<'a, T> DoubleEndedIterator for RingIter<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        loop {
+            if !self.first && self.ring_end_index == self.ring_index {
+                return None;
+            } else {
+                self.ring_end_index += 1;
+                if self.ring_end_index >= self.ring.len() {
+                    self.ring_end_index = 0;
+                }
+
+                let res = self.ring[self.ring_end_index].as_ref();
+
+                if res.is_some() {
+                    self.first = false;
+                    return res;
+                }
+            }
+        }
+    }
 }
 
 pub struct Debug {
@@ -53,9 +159,8 @@ impl Debug {
         state.debug.trace_instrs = count;
     }
 
-    pub fn log_history(&self, system: &System, state: &mut SystemState) {
-        let queue = state.debug.inst_queue.clone();
-        for &(cpu_state, ppu_state) in queue.iter() {
+    pub fn log_history(&self, system: &System, state: &SystemState) {
+        for (cpu_state, ppu_state) in state.debug.log_iter().rev() {
             let log = self.trace_instruction(system, state, cpu_state, ppu_state);
             eprintln!("{}", log);
         }
@@ -69,15 +174,13 @@ impl Debug {
         ppu_state: PpuDebugState,
     ) {
         if let Some(inst_addr) = cpu_state.instruction_addr {
-            if state.debug.inst_queue.len() == 100 {
-                let _ = state.debug.inst_queue.pop_front();
-            }
-            state.debug.inst_queue.push_back((cpu_state, ppu_state));
             if state.debug.trace_instrs != 0 {
-                let log = self.trace_instruction(system, state, cpu_state, ppu_state);
+                let log = self.trace_instruction(system, state, &cpu_state, &ppu_state);
                 eprintln!("{}", log);
                 state.debug.trace_instrs -= 1;
             }
+
+            state.debug.log_inst((cpu_state, ppu_state));
 
             let inst = self.ops[self.peek(system, state, inst_addr) as usize];
             if let Instruction::IllKil = inst.instruction {
@@ -90,9 +193,9 @@ impl Debug {
     pub fn trace_instruction(
         &self,
         system: &System,
-        state: &mut SystemState,
-        cpu_state: CpuDebugState,
-        ppu_state: PpuDebugState,
+        state: &SystemState,
+        cpu_state: &CpuDebugState,
+        ppu_state: &PpuDebugState,
     ) -> String {
         let addr = cpu_state.instruction_addr.unwrap();
         let instr = self.peek(system, state, addr);
