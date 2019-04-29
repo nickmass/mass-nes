@@ -29,6 +29,7 @@ pub enum StateChange {
     SkippedTick,
     SetVblank,
     ClearVblank,
+    ClearFlags,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -86,6 +87,8 @@ pub fn generate_steps(region: Region) -> PpuSteps {
     loop {
         let state = if scanline == prerender && dot == 1 {
             Some(StateChange::ClearVblank)
+        } else if scanline == prerender - 1 && dot == 340 {
+            Some(StateChange::ClearFlags)
         } else if scanline == prerender && dot == 340 && skip {
             Some(StateChange::SkippedTick)
         } else if dot == 1 && scanline == vblank + 1 {

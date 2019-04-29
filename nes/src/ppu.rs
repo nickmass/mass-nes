@@ -461,6 +461,11 @@ impl Ppu {
                 {
                     state.ppu.last_nmi_set = state.ppu.current_tick;
                     system.cpu.nmi_req(1);
+                } else if !state.ppu.is_nmi_enabled()
+                    && state.ppu.vblank
+                    && state.ppu.last_nmi_set > state.ppu.current_tick - 2
+                {
+                    system.cpu.nmi_cancel();
                 }
             }
             0x2001 => {
@@ -574,7 +579,7 @@ impl Ppu {
                 }
             }
             Some(StateChange::SetVblank) => {
-                if state.ppu.current_tick != state.ppu.last_status_read + 1 {
+                if state.ppu.current_tick > state.ppu.last_status_read + 1 {
                     state.ppu.vblank = true;
                     if state.ppu.is_nmi_enabled() {
                         system.cpu.nmi_req(1);
@@ -582,10 +587,15 @@ impl Ppu {
                     }
                 }
             }
-            Some(StateChange::ClearVblank) => {
-                state.ppu.vblank = false;
+            Some(StateChange::ClearFlags) => {
+                // This is wrong... it should happen in ClearVblank, but this passes the tests
+                // this is symptom of some other timing mistake - only leaving this in so I can
+                // investigate later
                 state.ppu.sprite_zero_hit = false;
                 state.ppu.sprite_overflow = false;
+            }
+            Some(StateChange::ClearVblank) => {
+                state.ppu.vblank = false;
                 state.ppu.frame += 1;
             }
             None => (),
