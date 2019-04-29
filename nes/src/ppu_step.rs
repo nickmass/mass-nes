@@ -20,10 +20,8 @@ pub enum SpriteStep {
     Read,
     Reset,
     Hblank,
-    Nametable,
-    Attribute,
-    LowPattern,
-    HighPattern,
+    Fetch(u32),
+    BackgroundWait,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -133,10 +131,8 @@ pub fn generate_steps(region: Region) -> PpuSteps {
                     }
                 }
                 256 => Some(SpriteStep::Hblank),
-                d if d >= 257 && d < 320 && d % 8 == 1 => Some(SpriteStep::Nametable),
-                d if d >= 257 && d < 320 && d % 8 == 3 => Some(SpriteStep::Attribute),
-                d if d >= 257 && d < 320 && d % 8 == 5 => Some(SpriteStep::LowPattern),
-                d if d >= 257 && d < 320 && d % 8 == 7 => Some(SpriteStep::HighPattern),
+                d if d >= 257 && d < 320 => Some(SpriteStep::Fetch(d % 8)),
+                d if d >= 321 && d < 340 => Some(SpriteStep::BackgroundWait),
                 _ => None,
             }
         } else {

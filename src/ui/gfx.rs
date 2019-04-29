@@ -93,7 +93,12 @@ pub trait Filter {
     fn get_dimensions(&self) -> (u32, u32);
     fn get_fragment_shader(&self) -> String;
     fn get_vertex_shader(&self) -> String;
-    fn process(&self, display: &glium::Display, screen: &[u16]) -> FilterUniforms;
+    fn process(
+        &self,
+        display: &glium::Display,
+        render_size: (f64, f64),
+        screen: &[u16],
+    ) -> FilterUniforms;
 }
 
 pub struct PalettedFilter {
@@ -146,7 +151,12 @@ impl Filter for PalettedFilter {
         .to_string()
     }
 
-    fn process(&self, display: &glium::Display, screen: &[u16]) -> FilterUniforms {
+    fn process(
+        &self,
+        display: &glium::Display,
+        _render_size: (f64, f64),
+        screen: &[u16],
+    ) -> FilterUniforms {
         let mut unis = FilterUniforms::new();
         let img = RawImage2d {
             data: ::std::borrow::Cow::Borrowed(screen),
@@ -190,6 +200,7 @@ pub struct GliumRenderer<T: Filter> {
     vertex_buffer: glium::VertexBuffer<Vertex>,
     closed: Cell<bool>,
     input: RefCell<HashMap<Key, bool>>,
+    size: Cell<(f64, f64)>,
 }
 
 impl<T: Filter> GliumRenderer<T> {
@@ -247,6 +258,7 @@ impl<T: Filter> GliumRenderer<T> {
             vertex_buffer: vertex_buffer,
             closed: Cell::new(false),
             input: RefCell::new(HashMap::new()),
+            size: Cell::new((dims.0 as f64, dims.1 as f64)),
         }
     }
 
@@ -257,6 +269,9 @@ impl<T: Filter> GliumRenderer<T> {
                 WindowEvent { event, .. } => {
                     use glium::glutin::WindowEvent::*;
                     match event {
+                        Resized(new_size) => {
+                            self.size.set(new_size.into());
+                        }
                         CloseRequested => {
                             self.closed.set(true);
                         }
@@ -281,8 +296,50 @@ impl<T: Filter> GliumRenderer<T> {
     }
 
     pub fn render(&self, screen: &[u16]) {
-        let uniforms = self.filter.process(&*self.display.borrow(), screen);
+        let uniforms = self
+            .filter
+            .process(&*self.display.borrow(), self.size.get(), screen);
         let mut target = self.display.borrow_mut().draw();
+
+        let (filter_width, filter_height) = self.filter.get_dimensions();
+        let (filter_width, filter_height) = (filter_width as f64, filter_height as f64);
+        let (window_width, window_height) = self.size.get();
+        let (surface_width, surface_height) = target.get_dimensions();
+        let (surface_width, surface_height) = (surface_width as f64, surface_height as f64);
+        let filter_ratio = filter_width / filter_height;
+        let window_ratio = window_width / window_height;
+        let surface_ratio = surface_width / surface_height;
+
+        let (left, bottom, width, height) = if filter_ratio > surface_ratio {
+            let target_height = (1.0 / filter_ratio) * window_height;
+            let target_height = (target_height / window_height) * surface_height * surface_ratio;
+            (
+                0,
+                ((surface_height - target_height) / 2.0) as u32,
+                surface_width as u32,
+                target_height as u32,
+            )
+        } else {
+            let target_width = (filter_ratio) * window_width;
+            let target_width =
+                (target_width / window_width) * surface_width * (1.0 / surface_ratio);
+            (
+                ((surface_width - target_width) / 2.0) as u32,
+                0,
+                target_width as u32,
+                surface_height as u32,
+            )
+        };
+
+        let params = glium::DrawParameters {
+            viewport: Some(glium::Rect {
+                left,
+                bottom,
+                width,
+                height,
+            }),
+            ..Default::default()
+        };
         target.clear_color(0.0, 0.0, 0.0, 1.0);
         target
             .draw(
@@ -290,7 +347,7 @@ impl<T: Filter> GliumRenderer<T> {
                 &self.indicies,
                 &self.program,
                 &uniforms,
-                &Default::default(),
+                &params,
             )
             .unwrap();
         target.finish().unwrap();

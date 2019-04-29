@@ -482,12 +482,15 @@ impl Ppu {
                 if !state.ppu.in_vblank() && state.ppu.is_rendering() {
                     state.ppu.sprite_n += 1;
                     if state.ppu.sprite_n == 64 {
-                        state.ppu.sprite_read_loop = true;
                         state.ppu.sprite_n = 0;
-                        state.ppu.sprite_m = 0;
                     }
                 } else {
-                    state.ppu.oam_data[state.ppu.oam_addr as usize] = value;
+                    // OAM byte 2 bits 2-4 dont exist in hardware are read back as 0
+                    if state.ppu.oam_addr & 3 == 2 {
+                        state.ppu.oam_data[state.ppu.oam_addr as usize] = value & 0xe3;
+                    } else {
+                        state.ppu.oam_data[state.ppu.oam_addr as usize] = value;
+                    }
                     state.ppu.oam_addr = state.ppu.oam_addr.wrapping_add(1);
                 }
             }
@@ -559,6 +562,7 @@ impl Ppu {
         if state.ppu.reset_delay != 0 {
             state.ppu.reset_delay -= 1;
         }
+
         state.ppu.current_tick += 1;
 
         let mut step = state.ppu.ppu_steps.step();
@@ -587,87 +591,105 @@ impl Ppu {
             None => (),
         }
 
-        match step.background {
-            Some(BackgroundStep::VertReset) => {
-                self.vert_reset(system, state);
-            }
-            Some(BackgroundStep::HorzReset) => {
-                self.horz_reset(system, state);
-            }
-            Some(BackgroundStep::VertIncrement) => {
-                self.horz_increment(system, state);
-                self.vert_increment(system, state);
-            }
-            Some(BackgroundStep::HorzIncrement) => {
-                self.load_bg_shifters(state);
-                self.horz_increment(system, state);
-            }
-            Some(BackgroundStep::ShiftedHorzIncrement) => {
-                state.ppu.low_bg_shift <<= 8;
-                state.ppu.high_bg_shift <<= 8;
-                state.ppu.low_attr_shift <<= 8;
-                state.ppu.high_attr_shift <<= 8;
-                self.load_bg_shifters(state);
-                self.horz_increment(system, state);
-            }
-            Some(BackgroundStep::Nametable) => {
-                self.fetch_nametable(system, state);
-            }
-            Some(BackgroundStep::Attribute) => {
-                self.fetch_attribute(system, state);
-            }
-            Some(BackgroundStep::LowPattern) => {
-                self.fetch_low_bg_pattern(system, state);
-            }
-            Some(BackgroundStep::HighPattern) => {
-                self.fetch_high_bg_pattern(system, state);
-            }
-            None => (),
+        // Always reset sprite eval, even if rendering disabled
+        if let Some(SpriteStep::Reset) = step.sprite {
+            state.ppu.sprite_render_index = 0;
+            state.ppu.sprite_n = 0;
+            state.ppu.sprite_m = 0;
+            state.ppu.found_sprites = 0;
+            state.ppu.sprite_reads = 0;
+            state.ppu.line_oam_index = 0;
+            state.ppu.sprite_read_loop = false;
+            state.ppu.block_oam_writes = false;
+            state.ppu.sprite_zero_on_line = state.ppu.sprite_zero_on_next_line;
+            state.ppu.sprite_zero_on_next_line = false;
         }
 
-        match step.sprite {
-            Some(SpriteStep::Reset) => {
-                state.ppu.sprite_render_index = 0;
-                state.ppu.sprite_n = 0;
-                state.ppu.sprite_m = 0;
-                state.ppu.found_sprites = 0;
-                state.ppu.sprite_reads = 0;
-                state.ppu.line_oam_index = 0;
-                state.ppu.in_sprite_render = false;
-                state.ppu.sprite_read_loop = false;
-                state.ppu.block_oam_writes = false;
-                state.ppu.sprite_zero_on_line = state.ppu.sprite_zero_on_next_line;
-                state.ppu.sprite_zero_on_next_line = false;
-                self.init_line_oam(system, state, 0);
+        if state.ppu.is_rendering() {
+            match step.background {
+                Some(BackgroundStep::VertReset) => {
+                    self.vert_reset(system, state);
+                }
+                Some(BackgroundStep::HorzReset) => {
+                    self.horz_reset(system, state);
+                }
+                Some(BackgroundStep::VertIncrement) => {
+                    self.horz_increment(system, state);
+                    self.vert_increment(system, state);
+                }
+                Some(BackgroundStep::HorzIncrement) => {
+                    self.load_bg_shifters(state);
+                    self.horz_increment(system, state);
+                }
+                Some(BackgroundStep::ShiftedHorzIncrement) => {
+                    state.ppu.low_bg_shift <<= 8;
+                    state.ppu.high_bg_shift <<= 8;
+                    state.ppu.low_attr_shift <<= 8;
+                    state.ppu.high_attr_shift <<= 8;
+                    self.load_bg_shifters(state);
+                    self.horz_increment(system, state);
+                }
+                Some(BackgroundStep::Nametable) => {
+                    self.fetch_nametable(system, state);
+                }
+                Some(BackgroundStep::Attribute) => {
+                    self.fetch_attribute(system, state);
+                }
+                Some(BackgroundStep::LowPattern) => {
+                    self.fetch_low_bg_pattern(system, state);
+                }
+                Some(BackgroundStep::HighPattern) => {
+                    self.fetch_high_bg_pattern(system, state);
+                }
+                None => (),
             }
-            Some(SpriteStep::Clear) => {
-                state.ppu.in_sprite_render = false;
-                self.init_line_oam(system, state, step.dot / 2);
+
+            match step.sprite {
+                Some(SpriteStep::Reset) => {
+                    state.ppu.in_sprite_render = false;
+                    self.init_line_oam(system, state, 0);
+                }
+                Some(SpriteStep::Clear) => {
+                    state.ppu.in_sprite_render = false;
+                    self.init_line_oam(system, state, step.dot / 2);
+                }
+                Some(SpriteStep::Eval) => {
+                    self.sprite_eval(system, state, step.scanline);
+                }
+                Some(SpriteStep::Read) => {
+                    state.ppu.in_sprite_render = false;
+                    self.sprite_read(system, state);
+                }
+                Some(SpriteStep::Hblank) => {
+                    state.ppu.sprite_n = 0;
+                    self.sprite_eval(system, state, step.scanline);
+                }
+                Some(SpriteStep::Fetch(0)) => self.sprite_oam_read(state, 0),
+                Some(SpriteStep::Fetch(1)) => {
+                    self.sprite_oam_read(state, 1);
+                    self.fetch_nametable(system, state);
+                }
+                Some(SpriteStep::Fetch(2)) => self.sprite_oam_read(state, 2),
+                Some(SpriteStep::Fetch(3)) => {
+                    self.sprite_oam_read(state, 3);
+                    self.fetch_attribute(system, state);
+                }
+                Some(SpriteStep::Fetch(4)) => self.sprite_oam_read(state, 3),
+                Some(SpriteStep::Fetch(5)) => {
+                    self.sprite_oam_read(state, 3);
+                    self.sprite_fetch(system, state, step.scanline, false);
+                }
+                Some(SpriteStep::Fetch(6)) => self.sprite_oam_read(state, 3),
+                Some(SpriteStep::Fetch(7)) => {
+                    self.sprite_oam_read(state, 3);
+                    self.sprite_fetch(system, state, step.scanline, true);
+                }
+                Some(SpriteStep::BackgroundWait) => {
+                    state.ppu.next_sprite_byte = state.ppu.line_oam_data[0];
+                }
+                None => (),
+                _ => unreachable!(),
             }
-            Some(SpriteStep::Eval) => {
-                self.sprite_eval(system, state, step.scanline);
-            }
-            Some(SpriteStep::Read) => {
-                state.ppu.in_sprite_render = false;
-                self.sprite_read(system, state);
-            }
-            Some(SpriteStep::Hblank) => {
-                state.ppu.sprite_n = 0;
-                self.sprite_eval(system, state, step.scanline);
-            }
-            Some(SpriteStep::Nametable) => {
-                self.fetch_nametable(system, state);
-            }
-            Some(SpriteStep::Attribute) => {
-                self.fetch_attribute(system, state);
-            }
-            Some(SpriteStep::LowPattern) => {
-                self.sprite_fetch(system, state, step.scanline, false);
-            }
-            Some(SpriteStep::HighPattern) => {
-                self.sprite_fetch(system, state, step.scanline, true);
-            }
-            None => (),
         }
 
         if step.scanline < self.region.vblank_line() && step.dot < 256 {
@@ -806,9 +828,6 @@ impl Ppu {
     }
 
     fn sprite_fetch(&self, system: &System, state: &mut SystemState, scanline: u32, high: bool) {
-        if !state.ppu.is_rendering() {
-            return;
-        }
         let index = state.ppu.sprite_render_index;
         let sprite_y = state.ppu.line_oam_data[(index * 4)];
         let sprite_tile = state.ppu.line_oam_data[(index * 4) + 1] as u16;
@@ -856,17 +875,20 @@ impl Ppu {
     }
 
     fn sprite_read(&self, system: &System, state: &mut SystemState) {
-        if !state.ppu.is_rendering() {
-            return;
-        }
+        self.sprite_oam_read(state, state.ppu.sprite_m);
+    }
+
+    fn sprite_oam_read(&self, state: &mut SystemState, offset: u32) {
         state.ppu.next_sprite_byte =
-            state.ppu.oam_data[((state.ppu.sprite_n * 4) + state.ppu.sprite_m) as usize];
+            state.ppu.oam_data[((state.ppu.sprite_n * 4) + offset) as usize];
+
+        // OAM byte 2 bits 2-4 dont exist in hardware are read back as 0
+        if offset == 2 {
+            state.ppu.next_sprite_byte &= 0xe3;
+        }
     }
 
     fn sprite_eval(&self, system: &System, state: &mut SystemState, scanline: u32) {
-        if !state.ppu.is_rendering() {
-            return;
-        }
         if state.ppu.sprite_read_loop {
             return;
         }
@@ -935,19 +957,14 @@ impl Ppu {
     }
 
     fn init_line_oam(&self, system: &System, state: &mut SystemState, addr: u32) {
-        if !state.ppu.is_sprites_enabled() {
-            return;
-        }
         state.ppu.in_sprite_render = true;
-        state.ppu.line_oam_data[addr as usize] = 0xff;
+        state.ppu.next_sprite_byte = 0xff;
+        state.ppu.line_oam_data[addr as usize] = state.ppu.next_sprite_byte;
     }
 
     fn horz_increment(&self, system: &System, state: &mut SystemState) {
-        if !state.ppu.is_rendering() {
-            return;
-        }
         let mut addr = state.ppu.vram_addr;
-        if addr & 0x001f == 31 {
+        if addr & 0x001f == 0x1f {
             addr &= !0x001f;
             addr ^= 0x0400;
         } else {
@@ -957,9 +974,6 @@ impl Ppu {
     }
 
     fn vert_increment(&self, system: &System, state: &mut SystemState) {
-        if !state.ppu.is_rendering() {
-            return;
-        }
         let mut addr = state.ppu.vram_addr;
         if (addr & 0x7000) != 0x7000 {
             addr += 0x1000;
@@ -981,9 +995,6 @@ impl Ppu {
     }
 
     fn horz_reset(&self, system: &System, state: &mut SystemState) {
-        if !state.ppu.is_rendering() {
-            return;
-        }
         let mut addr = state.ppu.vram_addr;
         let addr_t = state.ppu.vram_addr_temp;
 
@@ -993,9 +1004,6 @@ impl Ppu {
     }
 
     fn vert_reset(&self, system: &System, state: &mut SystemState) {
-        if !state.ppu.is_rendering() {
-            return;
-        }
         let mut addr = state.ppu.vram_addr;
         let addr_t = state.ppu.vram_addr_temp;
 
@@ -1005,9 +1013,6 @@ impl Ppu {
     }
 
     fn load_bg_shifters(&self, state: &mut SystemState) {
-        if !state.ppu.is_rendering() {
-            return;
-        }
         state.ppu.low_bg_shift &= 0xff00;
         state.ppu.low_bg_shift |= state.ppu.pattern_low as u16;
         state.ppu.high_bg_shift &= 0xff00;
@@ -1020,17 +1025,11 @@ impl Ppu {
     }
 
     fn fetch_nametable(&self, system: &System, state: &mut SystemState) {
-        if !state.ppu.is_rendering() {
-            return;
-        }
         let nt_addr = 0x2000 | (state.ppu.vram_addr & 0xfff);
         state.ppu.nametable_tile = self.bus.read(system, state, nt_addr);
     }
 
     fn fetch_attribute(&self, system: &System, state: &mut SystemState) {
-        if !state.ppu.is_rendering() {
-            return;
-        }
         let v = state.ppu.vram_addr;
         let at_addr = 0x23c0 | (v & 0x0c00) | ((v >> 4) & 0x38) | ((v >> 2) & 0x07);
         let attr = self.bus.read(system, state, at_addr);
@@ -1062,9 +1061,6 @@ impl Ppu {
     }
 
     fn fetch_low_bg_pattern(&self, system: &System, state: &mut SystemState) {
-        if !state.ppu.is_rendering() {
-            return;
-        }
         let v = state.ppu.vram_addr;
         let tile_addr = ((v >> 12) & 0x07)
             | ((state.ppu.nametable_tile as u16) << 4)
@@ -1073,9 +1069,6 @@ impl Ppu {
     }
 
     fn fetch_high_bg_pattern(&self, system: &System, state: &mut SystemState) {
-        if !state.ppu.is_rendering() {
-            return;
-        }
         let v = state.ppu.vram_addr;
         let tile_addr = ((v >> 12) & 0x07)
             | ((state.ppu.nametable_tile as u16) << 4)

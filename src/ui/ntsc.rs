@@ -66,7 +66,12 @@ impl Filter for NtscFilter {
         .to_string()
     }
 
-    fn process(&self, display: &glium::Display, screen: &[u16]) -> FilterUniforms {
+    fn process(
+        &self,
+        display: &glium::Display,
+        render_size: (f64, f64),
+        screen: &[u16],
+    ) -> FilterUniforms {
         let mut unis = FilterUniforms::new();
         let mut out = vec![0; (self.height * self.width) as usize];
         self.phase.set(self.phase.get() ^ 1);
