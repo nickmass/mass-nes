@@ -3,15 +3,13 @@
 
 #[macro_use]
 extern crate stdweb;
-extern crate nes;
 
-use stdweb::{UnsafeTypedArray};
+use stdweb::UnsafeTypedArray;
 
 use nes::{Cartridge, Controller, Machine, Region, UserInput};
 use std::cell::RefCell;
 
 thread_local!(static MACHINE: RefCell<Option<Machine>> = RefCell::new(None));
-
 
 #[js_export]
 pub fn main() {

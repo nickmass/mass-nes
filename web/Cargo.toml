@@ -2,6 +2,7 @@
 authors = ["Nick Massey <nickmass@nickmass.com>"]
 name = "web"
 version = "0.1.0"
+edition = "2018"
 
 [lib]
 crate-type = ["cdylib"]
