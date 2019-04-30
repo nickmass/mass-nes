@@ -13,7 +13,7 @@ dist: trusty
 script:
     - cargo build --verbose
 after_script:
-    - cargo test --verbose --release --no-fail-fast
+    - cargo test --verbose --release --no-fail-fast -p nes
 before_deploy:
     - cargo build --release
     - cd target/release
