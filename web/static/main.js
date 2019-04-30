@@ -1,5 +1,5 @@
 
-((canvas, romlist, romUpload, enableAudio, pauseMsg, loadMsg) => {
+((canvas, romlist, romUpload, enableAudio, pauseMsg, loadMsg, dropZone, dropMessage) => {
   let gfxCtx = canvas.getContext("2d");
   let audioCtx = new window.AudioContext();
   let keys = [];
@@ -32,6 +32,10 @@
     populatList(romList, emu);
     romUpload.addEventListener("change", (evt) => uploadChange(evt, emu));
     romUpload.removeAttribute("disabled");
+    dropZone.addEventListener("dragenter", (evt) => {evt.stopPropagation(); evt.preventDefault(); dropMessage.removeAttribute("hidden"); });
+    dropMessage.addEventListener("dragover", (evt) => {evt.stopPropagation(); evt.preventDefault(); });
+    dropMessage.addEventListener("dragleave", (evt) => { evt.stopPropagation(); evt.preventDefault(); dropMessage.setAttribute("hidden", "hidden");});
+    dropMessage.addEventListener("drop", (evt) => dropFile(evt, emu));
   });
 
   function mapKey(key) {
@@ -87,6 +91,23 @@
   async function uploadChange(evt, emu) {
     try {
       let file = evt.target.files[0];
+      if (file) {
+        loadMsg.innerHTML = "Loading...";
+        await loadBlob(file, emu);
+      } else {
+        loadMsg.innerHTML = "";
+      }
+    } catch (error) {
+      loadMsg.innerHTML = `Error: ${error}`;
+    }
+  }
+
+  async function dropFile(evt, emu) {
+    evt.preventDefault();
+    evt.stopPropagation();
+    dropMessage.setAttribute("hidden", "hidden");
+    try {
+      let file = evt.dataTransfer.files[0];
       if (file) {
         loadMsg.innerHTML = "Loading...";
         await loadBlob(file, emu);
@@ -173,4 +194,6 @@
    document.getElementById("rom-upload"),
    document.getElementById("enable-audio"),
    document.getElementById("pause-message"),
-   document.getElementById("load-message"));
+   document.getElementById("load-message"),
+   document.body,
+   document.getElementById("drag-message"));

@@ -1,37 +1,43 @@
 <!DOCTYPE html>
-<html>
+<html style="padding: 0; margin: 0; height: 100%; font-family: sans-serif;">
     <head>
         <title>NES</title>
         <script src="./web.js" defer></script>
         <script src="./main.js" defer></script>
     </head>
-    <body>
-        <canvas id="canvas" width="256" height="240" style="width:512px;height:480px;image-rendering:pixelated;" hidden></canvas>
-        <p>
-            <input id="enable-audio" type="checkbox" /><label for="enable-audio">Enable Audio</label>
-            <br/>
-            <select id="rom-list">
-                <option>Loading....</option>
-            </select>
-            or
-            <input id="rom-upload" type="file" disabled />
-            <span id="pause-message"></span>
-            <span id="load-message"></span>
-            <br/>
-            <table>
-                <tr><td><strong>Controls</strong></td></tr>
-                <tr><td>Up</td><td>Up Arrow</td></tr>
-                <tr><td>Down</td><td>Down Arrow</td></tr>
-                <tr><td>Left</td><td>Left Arrow</td></tr>
-                <tr><td>Right</td><td>Right Arrow</td></tr>
-                <tr><td>A</td><td>Z</td></tr>
-                <tr><td>B</td><td>X</td></tr>
-                <tr><td>Select</td><td>Shift</td></tr>
-                <tr><td>Start</td><td>Enter</td></tr>
-                <tr><td>Pause</td><td>Space</td></tr>
-            </table>
-            <br/>
-            <a href="https://github.com/nickmass/mass-nes/tree/master/web">Code</a>
-        </p>
+    <body style="position: absolute; margin:0; top: 0; width: 100%; min-height: 100%;">
+        <div id="drag-message" style="position: absolute; width: 100%; height: 100%; top: 0; left: 0; background-color: rgba(0,0,0,0.3);" hidden></div>
+        <div style="margin: 50px auto; width: 512px;">
+            <canvas id="canvas" width="256" height="240" style="width: 512px; height: 480px; image-rendering: pixelated; margin: 5px auto;" hidden></canvas>
+            <p>
+                <input id="enable-audio" type="checkbox" /><label for="enable-audio">Enable Audio</label>
+                <br/>
+                <br/>
+                <select id="rom-list">
+                    <option>Loading....</option>
+                </select>
+                or
+                <input id="rom-upload" type="file" disabled />
+                <br/>
+                <br/>
+                <span id="pause-message"></span>
+                <span id="load-message"></span>
+                <br/>
+                <table>
+                    <tr><td><strong>Controls</strong></td></tr>
+                    <tr><td>Up</td><td>Up Arrow</td></tr>
+                    <tr><td>Down</td><td>Down Arrow</td></tr>
+                    <tr><td>Left</td><td>Left Arrow</td></tr>
+                    <tr><td>Right</td><td>Right Arrow</td></tr>
+                    <tr><td>A</td><td>Z</td></tr>
+                    <tr><td>B</td><td>X</td></tr>
+                    <tr><td>Select</td><td>Shift</td></tr>
+                    <tr><td>Start</td><td>Enter</td></tr>
+                    <tr><td>Pause</td><td>Space</td></tr>
+                </table>
+                <br/>
+                <a href="https://github.com/nickmass/mass-nes/tree/master/web">Code</a>
+            </p>
+        </div>
     </body>
 </html>
