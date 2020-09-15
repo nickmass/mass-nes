@@ -41,7 +41,7 @@ impl Axrom {
         }
     }
 
-    fn write_cpu(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
+    fn write_cpu(&self, system: &System, state: &mut SystemState, _addr: u16, value: u8) {
         let mut rom = self.state.borrow_mut();
         rom.prg.map(0x8000, 32, (value & 7) as usize, BankKind::Rom);
         let nt = if value & 0x10 == 0 {
@@ -98,20 +98,4 @@ impl Mapper for Axrom {
             BusKind::Ppu => self.write_ppu(system, state, addr, value),
         }
     }
-
-    fn tick(&self, system: &System, state: &mut SystemState) {}
-
-    fn nt_peek(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
-        system.ppu.nametables.read(state, addr)
-    }
-
-    fn nt_read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
-        system.ppu.nametables.read(state, addr)
-    }
-
-    fn nt_write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
-        system.ppu.nametables.write(state, addr, value);
-    }
-
-    fn update_ppu_addr(&self, system: &System, state: &mut SystemState, addr: u16) {}
 }

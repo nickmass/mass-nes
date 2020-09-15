@@ -92,7 +92,6 @@ pub struct CpuDebugState {
 
 pub struct Cpu {
     current_tick: u64,
-    ops: &'static [Op; 0x100],
     power_up_pc: Option<u16>,
     pin_in: CpuPinIn,
     reg_a: u32,
@@ -124,7 +123,6 @@ impl Cpu {
     pub fn new() -> Cpu {
         Cpu {
             current_tick: 0,
-            ops: Op::load(),
             power_up_pc: None,
             pin_in: Default::default(),
             reg_a: 0,
@@ -274,13 +272,10 @@ impl Cpu {
         match self.pending_dmc {
             Some(PendingDmcRead::Pending(addr, count)) => {
                 let mut was_read = false;
-                match self.last_tick {
-                    TickResult::Read(addr) => {
-                        self.dmc_hold = self.pin_in.data;
-                        self.dmc_hold_addr = addr;
-                        was_read = true;
-                    }
-                    _ => (),
+                if let TickResult::Read(addr) = self.last_tick {
+                    self.dmc_hold = self.pin_in.data;
+                    self.dmc_hold_addr = addr;
+                    was_read = true;
                 }
 
                 if count == 0 {
@@ -482,7 +477,7 @@ impl Cpu {
     }
 
     fn decode(&mut self) -> TickResult {
-        let op = self.ops[self.pin_in.data as usize];
+        let op = super::ops::OPS[self.pin_in.data as usize];
         self.addressing(op.addressing, op.instruction)
     }
 
@@ -665,7 +660,7 @@ impl Cpu {
                 Next(self.read_pc(), next)
             }
             ReadDummy => {
-                let addr = (self.pin_in.data.wrapping_add(self.reg_x as u8) & 0xff) as u16;
+                let addr = self.pin_in.data.wrapping_add(self.reg_x as u8) as u16;
                 let next = Addressing::IndirectX(ReadIndirectLow(addr));
                 Next(TickResult::Read(self.pin_in.data as u16), next)
             }
@@ -981,11 +976,12 @@ impl Cpu {
             WriteRegP => {
                 let reg_p = self.reg_p() | 0x30;
                 self.flag_i = 1;
-                let jump = if self.pending_nmi.get().is_some() {
-                    self.pending_nmi.set(None);
-                    ReadHighJump(0xfffa)
-                } else {
-                    ReadHighJump(0xfffe)
+                let jump = match self.pending_nmi.get() {
+                    Some(_) => {
+                        self.pending_nmi.set(None);
+                        ReadHighJump(0xfffa)
+                    }
+                    _ => ReadHighJump(0xfffe),
                 };
                 Next(self.push_stack(reg_p), Instruction::Brk(jump))
             }
@@ -1802,25 +1798,13 @@ impl Cpu {
     fn ill_inst_shx(&mut self, addr: u16) -> ExecResult {
         let temp_addr = addr as u32;
         let value = (self.reg_x & ((temp_addr >> 8).wrapping_add(1))) & 0xff;
-        let temp = temp_addr.wrapping_sub(self.reg_y) & 0xff;
-        if self.reg_y.wrapping_add(temp) <= 0xff {
-            ExecResult::Tick(TickResult::Write(addr, value as u8))
-        } else {
-            // let value = self.bus.peek(system, state, addr);
-            ExecResult::Tick(TickResult::Write(addr, value as u8))
-        }
+        ExecResult::Tick(TickResult::Write(addr, value as u8))
     }
 
     fn ill_inst_shy(&mut self, addr: u16) -> ExecResult {
         let temp_addr = addr as u32;
         let value = (self.reg_y & ((temp_addr >> 8).wrapping_add(1))) & 0xff;
-        let temp = temp_addr.wrapping_sub(self.reg_x) & 0xff;
-        if self.reg_x.wrapping_add(temp) <= 0xff {
-            ExecResult::Tick(TickResult::Write(addr, value as u8))
-        } else {
-            // let value = self.bus.peek(system, state, addr);
-            ExecResult::Tick(TickResult::Write(addr, value as u8))
-        }
+        ExecResult::Tick(TickResult::Write(addr, value as u8))
     }
 
     fn ill_inst_slo(&mut self, addr: u16, step: ReadDummyExec) -> ExecResult {

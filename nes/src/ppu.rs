@@ -291,13 +291,11 @@ impl Ppu {
     pub fn new(state: &mut SystemState, region: Region) -> Ppu {
         state.ppu.region = region;
         state.ppu.ppu_steps = generate_steps(region);
-        let ppu = Ppu {
+        Ppu {
             bus: AddressBus::new(BusKind::Ppu, state, 0, 0x3fff),
             nametables: Nametables::new(state),
-            region: region,
-        };
-
-        ppu
+            region,
+        }
     }
 
     pub fn power(&self, system: &System, state: &mut SystemState) {
@@ -346,7 +344,7 @@ impl Ppu {
         self.bus.register_write(state, device, addr);
     }
 
-    pub fn peek(&self, system: &System, state: &SystemState, address: u16) -> u8 {
+    pub fn peek(&self, _system: &System, state: &SystemState, address: u16) -> u8 {
         match address {
             0x2000 => state.ppu.last_write,
             0x2001 => state.ppu.last_write,
@@ -358,7 +356,7 @@ impl Ppu {
             0x2007 => {
                 //PPUDATA
                 let addr = state.ppu.vram_addr;
-                let result = if addr & 0x3f00 == 0x3f00 {
+                if addr & 0x3f00 == 0x3f00 {
                     let addr = if addr & 0x03 != 0 {
                         addr & 0x1f
                     } else {
@@ -371,8 +369,7 @@ impl Ppu {
                     }
                 } else {
                     state.ppu.data_read_buffer
-                };
-                result
+                }
             }
             _ => unreachable!(),
         }
@@ -557,7 +554,7 @@ impl Ppu {
                 }
             }
             _ => {
-                println!("{:4X} Address", address);
+                eprintln!("{:4X} Address", address);
                 unreachable!()
             }
         }
@@ -760,10 +757,8 @@ impl Ppu {
                 }
             }
             for x in 0..8 {
-                if state.ppu.sprite_active[x] == 0 {
-                    if state.ppu.sprite_x[x] != 0 {
-                        state.ppu.sprite_x[x] -= 1;
-                    }
+                if state.ppu.sprite_active[x] == 0 && state.ppu.sprite_x[x] != 0 {
+                    state.ppu.sprite_x[x] -= 1;
                 }
             }
         }
@@ -822,7 +817,7 @@ impl Ppu {
 
     fn sprite_on_line(
         &self,
-        system: &System,
+        _system: &System,
         state: &SystemState,
         sprite_y: u8,
         scanline: u32,
@@ -884,7 +879,7 @@ impl Ppu {
         }
     }
 
-    fn sprite_read(&self, system: &System, state: &mut SystemState) {
+    fn sprite_read(&self, _system: &System, state: &mut SystemState) {
         self.sprite_oam_read(state, state.ppu.sprite_m);
     }
 
@@ -919,20 +914,18 @@ impl Ppu {
                     }
                 }
                 state.ppu.sprite_reads -= 1;
+            } else if self.sprite_on_line(system, state, state.ppu.next_sprite_byte, scanline) {
+                state.ppu.sprite_overflow = true;
+                state.ppu.sprite_m += 1;
+                state.ppu.sprite_m &= 3;
+                state.ppu.sprite_reads = 3;
             } else {
-                if self.sprite_on_line(system, state, state.ppu.next_sprite_byte, scanline) {
-                    state.ppu.sprite_overflow = true;
-                    state.ppu.sprite_m += 1;
-                    state.ppu.sprite_m &= 3;
-                    state.ppu.sprite_reads = 3;
-                } else {
-                    state.ppu.sprite_n += 1;
-                    state.ppu.sprite_m += 1;
-                    state.ppu.sprite_m &= 3;
-                    if state.ppu.sprite_n == 64 {
-                        state.ppu.sprite_read_loop = true;
-                        state.ppu.sprite_n = 0;
-                    }
+                state.ppu.sprite_n += 1;
+                state.ppu.sprite_m += 1;
+                state.ppu.sprite_m &= 3;
+                if state.ppu.sprite_n == 64 {
+                    state.ppu.sprite_read_loop = true;
+                    state.ppu.sprite_n = 0;
                 }
             }
         } else {
@@ -966,13 +959,13 @@ impl Ppu {
         }
     }
 
-    fn init_line_oam(&self, system: &System, state: &mut SystemState, addr: u32) {
+    fn init_line_oam(&self, _system: &System, state: &mut SystemState, addr: u32) {
         state.ppu.in_sprite_render = true;
         state.ppu.next_sprite_byte = 0xff;
         state.ppu.line_oam_data[addr as usize] = state.ppu.next_sprite_byte;
     }
 
-    fn horz_increment(&self, system: &System, state: &mut SystemState) {
+    fn horz_increment(&self, _system: &System, state: &mut SystemState) {
         let mut addr = state.ppu.vram_addr;
         if addr & 0x001f == 0x1f {
             addr &= !0x001f;
@@ -983,7 +976,7 @@ impl Ppu {
         state.ppu.vram_addr = addr;
     }
 
-    fn vert_increment(&self, system: &System, state: &mut SystemState) {
+    fn vert_increment(&self, _system: &System, state: &mut SystemState) {
         let mut addr = state.ppu.vram_addr;
         if (addr & 0x7000) != 0x7000 {
             addr += 0x1000;
@@ -1004,7 +997,7 @@ impl Ppu {
         state.ppu.vram_addr = addr;
     }
 
-    fn horz_reset(&self, system: &System, state: &mut SystemState) {
+    fn horz_reset(&self, _system: &System, state: &mut SystemState) {
         let mut addr = state.ppu.vram_addr;
         let addr_t = state.ppu.vram_addr_temp;
 
@@ -1013,7 +1006,7 @@ impl Ppu {
         state.ppu.vram_addr = addr;
     }
 
-    fn vert_reset(&self, system: &System, state: &mut SystemState) {
+    fn vert_reset(&self, _system: &System, state: &mut SystemState) {
         let mut addr = state.ppu.vram_addr;
         let addr_t = state.ppu.vram_addr_temp;
 

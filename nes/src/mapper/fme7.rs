@@ -9,7 +9,6 @@ use crate::system::{System, SystemState};
 use std::cell::RefCell;
 
 pub struct Fme7State {
-    current_tick: u64,
     prg: MappedMemory,
     chr: MappedMemory,
     command: u8,
@@ -38,9 +37,8 @@ impl Fme7 {
             BankKind::Rom,
         );
         let rom_state = Fme7State {
-            current_tick: 0,
-            prg: prg,
-            chr: chr,
+            prg,
+            chr,
             command: 0,
             parameter: 0,
             irq_enable: false,
@@ -50,10 +48,10 @@ impl Fme7 {
             ram_protect: false,
             ram_enable: false,
         };
-        let rom = Fme7 {
+
+        Fme7 {
             state: RefCell::new(rom_state),
-        };
-        rom
+        }
     }
 
     fn read_cpu(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
@@ -96,7 +94,7 @@ impl Fme7 {
 
     fn sync(&self, rom: &mut Fme7State, system: &System, state: &mut SystemState) {
         match rom.command {
-            0...7 => rom.chr.map(
+            0..=7 => rom.chr.map(
                 0x400 * rom.command as u16,
                 1,
                 rom.parameter as usize,
@@ -150,7 +148,7 @@ impl Mapper for Fme7 {
         state: &mut SystemState,
         cpu: &mut AddressBus,
         ppu: &mut Ppu,
-        cart: &Cartridge,
+        _cart: &Cartridge,
     ) {
         cpu.register_read(
             state,
@@ -189,7 +187,7 @@ impl Mapper for Fme7 {
         }
     }
 
-    fn tick(&self, system: &System, state: &mut SystemState) {
+    fn tick(&self, _system: &System, _state: &mut SystemState) {
         let mut rom = self.state.borrow_mut();
         if rom.irq_counter_enable {
             rom.irq_counter = rom.irq_counter.wrapping_sub(1);
@@ -203,18 +201,4 @@ impl Mapper for Fme7 {
         let rom = self.state.borrow();
         rom.irq
     }
-
-    fn nt_peek(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
-        system.ppu.nametables.read(state, addr)
-    }
-
-    fn nt_read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
-        system.ppu.nametables.read(state, addr)
-    }
-
-    fn nt_write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
-        system.ppu.nametables.write(state, addr, value);
-    }
-
-    fn update_ppu_addr(&self, system: &System, state: &mut SystemState, addr: u16) {}
 }

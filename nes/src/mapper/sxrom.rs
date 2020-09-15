@@ -25,7 +25,7 @@ pub struct Sxrom {
 
 impl Sxrom {
     pub fn new(cartridge: &Cartridge, state: &mut SystemState) -> Sxrom {
-        let chr_type = if cartridge.chr_rom.len() == 0 {
+        let chr_type = if cartridge.chr_rom.is_empty() {
             BankKind::Ram
         } else {
             BankKind::Rom
@@ -38,19 +38,19 @@ impl Sxrom {
         let prg = MappedMemory::new(state, cartridge, 0x6000, 16, 48, MemKind::Prg);
 
         let rom_state = SxromState {
-            prg: prg,
-            chr: chr,
+            prg,
+            chr,
             shift_reg: 0,
             counter: 0,
             regs: [0x0c, 0, 0, 0],
             prg_ram_write_protect: true,
             last: (cartridge.prg_rom.len() / 0x4000) - 1,
         };
-        let rom = Sxrom {
+
+        Sxrom {
             state: RefCell::new(rom_state),
-            chr_type: chr_type,
-        };
-        rom
+            chr_type,
+        }
     }
 
     fn read_cpu(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
@@ -157,7 +157,7 @@ impl Mapper for Sxrom {
         state: &mut SystemState,
         cpu: &mut AddressBus,
         ppu: &mut Ppu,
-        cart: &Cartridge,
+        _cart: &Cartridge,
     ) {
         cpu.register_read(
             state,
@@ -197,20 +197,4 @@ impl Mapper for Sxrom {
             BusKind::Ppu => self.write_ppu(system, state, addr, value),
         }
     }
-
-    fn tick(&self, system: &System, state: &mut SystemState) {}
-
-    fn nt_peek(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
-        system.ppu.nametables.read(state, addr)
-    }
-
-    fn nt_read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
-        system.ppu.nametables.read(state, addr)
-    }
-
-    fn nt_write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
-        system.ppu.nametables.write(state, addr, value);
-    }
-
-    fn update_ppu_addr(&self, system: &System, state: &mut SystemState, addr: u16) {}
 }

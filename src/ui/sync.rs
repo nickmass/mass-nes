@@ -1,4 +1,5 @@
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
 
 pub struct FrameSync {
     frame_ns: u32,
@@ -10,7 +11,7 @@ impl FrameSync {
     pub fn new(refresh_rate: f64) -> FrameSync {
         let frame_ns = ((1.0 / refresh_rate) * 1000000000.0) as u32;
         FrameSync {
-            frame_ns: frame_ns,
+            frame_ns,
             offset_ns: 0,
             compute_start: Instant::now(),
         }
@@ -27,8 +28,8 @@ impl FrameSync {
             delay as u32
         };
         if dur.as_secs() == 0 && delay >= dur.subsec_nanos() {
+            thread::sleep(Duration::new(0, delay - dur.subsec_nanos()));
             while delay > self.compute_start.elapsed().subsec_nanos() {}
-            //::std::thread::sleep(::std::trime::Duration::new(0, delay - dur.subsec_nanos()));
         }
         let dur = self.compute_start.elapsed();
         if dur.as_secs() > 0 {

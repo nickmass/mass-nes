@@ -7,14 +7,12 @@ use crate::system::{System, SystemState};
 
 pub struct Nrom {
     chr_ram: MemoryBlock,
-    prg_ram: MemoryBlock,
 }
 
 impl Nrom {
     pub fn new(cartridge: &Cartridge, state: &mut SystemState) -> Nrom {
         Nrom {
             chr_ram: MemoryBlock::new(cartridge.chr_ram_bytes >> 10, &mut state.mem),
-            prg_ram: MemoryBlock::new(cartridge.prg_ram_bytes >> 10, &mut state.mem),
         }
     }
 }
@@ -77,20 +75,4 @@ impl Mapper for Nrom {
             }
         }
     }
-
-    fn tick(&self, system: &System, state: &mut SystemState) {}
-
-    fn nt_peek(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
-        system.ppu.nametables.read(state, addr)
-    }
-
-    fn nt_read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
-        system.ppu.nametables.read(state, addr)
-    }
-
-    fn nt_write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
-        system.ppu.nametables.write(state, addr, value);
-    }
-
-    fn update_ppu_addr(&self, system: &System, state: &mut SystemState, addr: u16) {}
 }

@@ -1,11 +1,4 @@
-use std::sync::Once;
-
-static mut OPS: [Op; 0x100] = [Op {
-    instruction: Instruction::Nop,
-    addressing: Addressing::None,
-}; 0x100];
-
-static LOAD_OPS: Once = Once::new();
+pub const OPS: [Op; 0x100] = Op::load();
 
 #[derive(Debug, Clone, Copy)]
 pub enum Instruction {
@@ -192,12 +185,6 @@ pub enum ReadExec {
     Exec,
 }
 
-impl Default for ReadExec {
-    fn default() -> Self {
-        ReadExec::Read
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum ReadDummyExec {
     Read,
@@ -205,22 +192,10 @@ pub enum ReadDummyExec {
     Exec(u8),
 }
 
-impl Default for ReadDummyExec {
-    fn default() -> Self {
-        ReadDummyExec::Read
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum Branch {
     Check,
     Branch,
-}
-
-impl Default for Branch {
-    fn default() -> Self {
-        Branch::Check
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -234,12 +209,6 @@ pub enum Break {
     UpdateRegPc(u16),
 }
 
-impl Default for Break {
-    fn default() -> Self {
-        Break::ReadDummy
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum Jsr {
     ReadDummy,
@@ -247,23 +216,11 @@ pub enum Jsr {
     WriteRegPcLow,
 }
 
-impl Default for Jsr {
-    fn default() -> Self {
-        Jsr::ReadDummy
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum DummyReadExec {
     Dummy,
     Read,
     Exec,
-}
-
-impl Default for DummyReadExec {
-    fn default() -> Self {
-        DummyReadExec::Dummy
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -275,12 +232,6 @@ pub enum Rti {
     Exec(u16),
 }
 
-impl Default for Rti {
-    fn default() -> Self {
-        Rti::Dummy
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum Rts {
     Dummy,
@@ -289,22 +240,10 @@ pub enum Rts {
     Exec(u16),
 }
 
-impl Default for Rts {
-    fn default() -> Self {
-        Rts::Dummy
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum ZeroPage {
     Read,
     Decode,
-}
-
-impl Default for ZeroPage {
-    fn default() -> Self {
-        ZeroPage::Read
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -314,12 +253,6 @@ pub enum AbsoluteOffset {
     Decode(u16),
 }
 
-impl Default for AbsoluteOffset {
-    fn default() -> Self {
-        AbsoluteOffset::ReadLow
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum Absolute {
     ReadLow,
@@ -327,22 +260,10 @@ pub enum Absolute {
     Decode(u16),
 }
 
-impl Default for Absolute {
-    fn default() -> Self {
-        Absolute::ReadLow
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum ZeroPageOffset {
     ReadImmediate,
     ApplyOffset,
-}
-
-impl Default for ZeroPageOffset {
-    fn default() -> Self {
-        ZeroPageOffset::ReadImmediate
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -354,22 +275,10 @@ pub enum IndirectAbsolute {
     Decode(u16),
 }
 
-impl Default for IndirectAbsolute {
-    fn default() -> Self {
-        IndirectAbsolute::ReadLow
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum Relative {
     ReadRegPc,
     Decode,
-}
-
-impl Default for Relative {
-    fn default() -> Self {
-        Relative::ReadRegPc
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -381,24 +290,12 @@ pub enum IndirectX {
     Decode(u16),
 }
 
-impl Default for IndirectX {
-    fn default() -> Self {
-        IndirectX::ReadBase
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum IndirectY {
     ReadBase,
     ReadZeroPageLow,
     ReadZeroPageHigh(u16),
     Decode(u16),
-}
-
-impl Default for IndirectY {
-    fn default() -> Self {
-        IndirectY::ReadBase
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -453,1017 +350,1181 @@ pub struct Op {
     pub addressing: Addressing,
 }
 
-impl Op {
-    pub fn load() -> &'static [Op; 0x100] {
-        unsafe {
-            LOAD_OPS.call_once(|| Op::do_load());
-            &OPS
-        }
-    }
+macro_rules! set_op (
+    ($ops:ident, $op:literal, $instruction:expr, $addressing:expr,) => {
+        set_op!($ops, $op, $instruction, $addressing);
+    };
+    ($ops:ident, $op:literal, $instruction:expr, $addressing:expr) => {
+        $ops[$op] = Op {
+            instruction: $instruction,
+            addressing: $addressing
+        };
+    };
+);
 
-    unsafe fn do_load() {
+impl Op {
+    const fn load() -> [Op; 0x100] {
         use self::Addressing as A;
         use self::Instruction as I;
 
-        let mut op_set = ::std::collections::HashSet::new();
-        {
-            let mut o = |o, i, a| {
-                OPS[o] = Op {
-                    instruction: i,
-                    addressing: a,
-                };
+        let mut ops = [Op {
+            instruction: I::Nop,
+            addressing: A::None,
+        }; 0x100];
 
-                op_set.insert(o);
-            };
+        set_op!(ops, 0xa8, I::Tay, A::None);
+        set_op!(ops, 0xaa, I::Tax, A::None);
+        set_op!(ops, 0xba, I::Tsx, A::None);
+        set_op!(ops, 0x98, I::Tya, A::None);
+        set_op!(ops, 0x8a, I::Txa, A::None);
+        set_op!(ops, 0x9a, I::Txs, A::None);
 
-            o(0xa8, I::Tay, A::None);
-            o(0xaa, I::Tax, A::None);
-            o(0xba, I::Tsx, A::None);
-            o(0x98, I::Tya, A::None);
-            o(0x8a, I::Txa, A::None);
-            o(0x9a, I::Txs, A::None);
+        set_op!(ops, 0xa9, I::Lda(ReadExec::Read), A::Immediate);
+        set_op!(
+            ops,
+            0xa5,
+            I::Lda(ReadExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0xb5,
+            I::Lda(ReadExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0xad,
+            I::Lda(ReadExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xbd,
+            I::Lda(ReadExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xb9,
+            I::Lda(ReadExec::Read),
+            A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xa1,
+            I::Lda(ReadExec::Read),
+            A::IndirectX(IndirectX::ReadBase),
+        );
+        set_op!(
+            ops,
+            0xb1,
+            I::Lda(ReadExec::Read),
+            A::IndirectY(DummyRead::OnCarry, IndirectY::ReadBase),
+        );
 
-            o(0xa9, I::Lda(ReadExec::default()), A::Immediate);
-            o(
-                0xa5,
-                I::Lda(ReadExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0xb5,
-                I::Lda(ReadExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0xad,
-                I::Lda(ReadExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0xbd,
-                I::Lda(ReadExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0xb9,
-                I::Lda(ReadExec::default()),
-                A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0xa1,
-                I::Lda(ReadExec::default()),
-                A::IndirectX(IndirectX::default()),
-            );
-            o(
-                0xb1,
-                I::Lda(ReadExec::default()),
-                A::IndirectY(DummyRead::OnCarry, IndirectY::default()),
-            );
+        set_op!(ops, 0xa2, I::Ldx(ReadExec::Read), A::Immediate);
+        set_op!(
+            ops,
+            0xa6,
+            I::Ldx(ReadExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0xb6,
+            I::Ldx(ReadExec::Read),
+            A::ZeroPageOffset(Reg::Y, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0xae,
+            I::Ldx(ReadExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xbe,
+            I::Ldx(ReadExec::Read),
+            A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
 
-            o(0xa2, I::Ldx(ReadExec::default()), A::Immediate);
-            o(
-                0xa6,
-                I::Ldx(ReadExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0xb6,
-                I::Ldx(ReadExec::default()),
-                A::ZeroPageOffset(Reg::Y, ZeroPageOffset::default()),
-            );
-            o(
-                0xae,
-                I::Ldx(ReadExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0xbe,
-                I::Ldx(ReadExec::default()),
-                A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
+        set_op!(ops, 0xa0, I::Ldy(ReadExec::Read), A::Immediate);
+        set_op!(
+            ops,
+            0xa4,
+            I::Ldy(ReadExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0xb4,
+            I::Ldy(ReadExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0xac,
+            I::Ldy(ReadExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xbc,
+            I::Ldy(ReadExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
 
-            o(0xa0, I::Ldy(ReadExec::default()), A::Immediate);
-            o(
-                0xa4,
-                I::Ldy(ReadExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0xb4,
-                I::Ldy(ReadExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0xac,
-                I::Ldy(ReadExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0xbc,
-                I::Ldy(ReadExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
+        set_op!(ops, 0x85, I::Sta, A::ZeroPage(ZeroPage::Read));
+        set_op!(
+            ops,
+            0x95,
+            I::Sta,
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(ops, 0x8d, I::Sta, A::Absolute(Absolute::ReadLow));
+        set_op!(
+            ops,
+            0x9d,
+            I::Sta,
+            A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x99,
+            I::Sta,
+            A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
+        set_op!(ops, 0x81, I::Sta, A::IndirectX(IndirectX::ReadBase));
+        set_op!(
+            ops,
+            0x91,
+            I::Sta,
+            A::IndirectY(DummyRead::Always, IndirectY::ReadBase),
+        );
 
-            o(0x85, I::Sta, A::ZeroPage(ZeroPage::default()));
-            o(
-                0x95,
-                I::Sta,
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(0x8d, I::Sta, A::Absolute(Absolute::default()));
-            o(
-                0x9d,
-                I::Sta,
-                A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::default()),
-            );
-            o(
-                0x99,
-                I::Sta,
-                A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::default()),
-            );
-            o(0x81, I::Sta, A::IndirectX(IndirectX::default()));
-            o(
-                0x91,
-                I::Sta,
-                A::IndirectY(DummyRead::Always, IndirectY::default()),
-            );
+        set_op!(ops, 0x86, I::Stx, A::ZeroPage(ZeroPage::Read));
+        set_op!(
+            ops,
+            0x96,
+            I::Stx,
+            A::ZeroPageOffset(Reg::Y, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(ops, 0x8e, I::Stx, A::Absolute(Absolute::ReadLow));
 
-            o(0x86, I::Stx, A::ZeroPage(ZeroPage::default()));
-            o(
-                0x96,
-                I::Stx,
-                A::ZeroPageOffset(Reg::Y, ZeroPageOffset::default()),
-            );
-            o(0x8e, I::Stx, A::Absolute(Absolute::default()));
+        set_op!(ops, 0x84, I::Sty, A::ZeroPage(ZeroPage::Read));
+        set_op!(
+            ops,
+            0x94,
+            I::Sty,
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(ops, 0x8c, I::Sty, A::Absolute(Absolute::ReadLow));
 
-            o(0x84, I::Sty, A::ZeroPage(ZeroPage::default()));
-            o(
-                0x94,
-                I::Sty,
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(0x8c, I::Sty, A::Absolute(Absolute::default()));
+        set_op!(ops, 0x48, I::Pha, A::None);
+        set_op!(ops, 0x08, I::Php, A::None);
+        set_op!(ops, 0x68, I::Pla(DummyReadExec::Dummy), A::None);
+        set_op!(ops, 0x28, I::Plp(DummyReadExec::Dummy), A::None);
 
-            o(0x48, I::Pha, A::None);
-            o(0x08, I::Php, A::None);
-            o(0x68, I::Pla(DummyReadExec::default()), A::None);
-            o(0x28, I::Plp(DummyReadExec::default()), A::None);
+        set_op!(ops, 0x69, I::Adc(ReadExec::Read), A::Immediate);
+        set_op!(
+            ops,
+            0x65,
+            I::Adc(ReadExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0x75,
+            I::Adc(ReadExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0x6d,
+            I::Adc(ReadExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x7d,
+            I::Adc(ReadExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x79,
+            I::Adc(ReadExec::Read),
+            A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x61,
+            I::Adc(ReadExec::Read),
+            A::IndirectX(IndirectX::ReadBase),
+        );
+        set_op!(
+            ops,
+            0x71,
+            I::Adc(ReadExec::Read),
+            A::IndirectY(DummyRead::OnCarry, IndirectY::ReadBase),
+        );
 
-            o(0x69, I::Adc(ReadExec::default()), A::Immediate);
-            o(
-                0x65,
-                I::Adc(ReadExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0x75,
-                I::Adc(ReadExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0x6d,
-                I::Adc(ReadExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0x7d,
-                I::Adc(ReadExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0x79,
-                I::Adc(ReadExec::default()),
-                A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0x61,
-                I::Adc(ReadExec::default()),
-                A::IndirectX(IndirectX::default()),
-            );
-            o(
-                0x71,
-                I::Adc(ReadExec::default()),
-                A::IndirectY(DummyRead::OnCarry, IndirectY::default()),
-            );
+        set_op!(ops, 0xe9, I::Sbc(ReadExec::Read), A::Immediate);
+        set_op!(
+            ops,
+            0xe5,
+            I::Sbc(ReadExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0xf5,
+            I::Sbc(ReadExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0xed,
+            I::Sbc(ReadExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xfd,
+            I::Sbc(ReadExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xf9,
+            I::Sbc(ReadExec::Read),
+            A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xe1,
+            I::Sbc(ReadExec::Read),
+            A::IndirectX(IndirectX::ReadBase),
+        );
+        set_op!(
+            ops,
+            0xf1,
+            I::Sbc(ReadExec::Read),
+            A::IndirectY(DummyRead::OnCarry, IndirectY::ReadBase),
+        );
 
-            o(0xe9, I::Sbc(ReadExec::default()), A::Immediate);
-            o(
-                0xe5,
-                I::Sbc(ReadExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0xf5,
-                I::Sbc(ReadExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0xed,
-                I::Sbc(ReadExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0xfd,
-                I::Sbc(ReadExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0xf9,
-                I::Sbc(ReadExec::default()),
-                A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0xe1,
-                I::Sbc(ReadExec::default()),
-                A::IndirectX(IndirectX::default()),
-            );
-            o(
-                0xf1,
-                I::Sbc(ReadExec::default()),
-                A::IndirectY(DummyRead::OnCarry, IndirectY::default()),
-            );
+        set_op!(ops, 0x29, I::And(ReadExec::Read), A::Immediate);
+        set_op!(
+            ops,
+            0x25,
+            I::And(ReadExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0x35,
+            I::And(ReadExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0x2d,
+            I::And(ReadExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x3d,
+            I::And(ReadExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x39,
+            I::And(ReadExec::Read),
+            A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x21,
+            I::And(ReadExec::Read),
+            A::IndirectX(IndirectX::ReadBase),
+        );
+        set_op!(
+            ops,
+            0x31,
+            I::And(ReadExec::Read),
+            A::IndirectY(DummyRead::OnCarry, IndirectY::ReadBase),
+        );
 
-            o(0x29, I::And(ReadExec::default()), A::Immediate);
-            o(
-                0x25,
-                I::And(ReadExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0x35,
-                I::And(ReadExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0x2d,
-                I::And(ReadExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0x3d,
-                I::And(ReadExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0x39,
-                I::And(ReadExec::default()),
-                A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0x21,
-                I::And(ReadExec::default()),
-                A::IndirectX(IndirectX::default()),
-            );
-            o(
-                0x31,
-                I::And(ReadExec::default()),
-                A::IndirectY(DummyRead::OnCarry, IndirectY::default()),
-            );
+        set_op!(ops, 0x49, I::Eor(ReadExec::Read), A::Immediate);
+        set_op!(
+            ops,
+            0x45,
+            I::Eor(ReadExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0x55,
+            I::Eor(ReadExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0x4d,
+            I::Eor(ReadExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x5d,
+            I::Eor(ReadExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x59,
+            I::Eor(ReadExec::Read),
+            A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x41,
+            I::Eor(ReadExec::Read),
+            A::IndirectX(IndirectX::ReadBase),
+        );
+        set_op!(
+            ops,
+            0x51,
+            I::Eor(ReadExec::Read),
+            A::IndirectY(DummyRead::OnCarry, IndirectY::ReadBase),
+        );
 
-            o(0x49, I::Eor(ReadExec::default()), A::Immediate);
-            o(
-                0x45,
-                I::Eor(ReadExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0x55,
-                I::Eor(ReadExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0x4d,
-                I::Eor(ReadExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0x5d,
-                I::Eor(ReadExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0x59,
-                I::Eor(ReadExec::default()),
-                A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0x41,
-                I::Eor(ReadExec::default()),
-                A::IndirectX(IndirectX::default()),
-            );
-            o(
-                0x51,
-                I::Eor(ReadExec::default()),
-                A::IndirectY(DummyRead::OnCarry, IndirectY::default()),
-            );
+        set_op!(ops, 0x09, I::Ora(ReadExec::Read), A::Immediate);
+        set_op!(
+            ops,
+            0x05,
+            I::Ora(ReadExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0x15,
+            I::Ora(ReadExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0x0d,
+            I::Ora(ReadExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x1d,
+            I::Ora(ReadExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x19,
+            I::Ora(ReadExec::Read),
+            A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x01,
+            I::Ora(ReadExec::Read),
+            A::IndirectX(IndirectX::ReadBase),
+        );
+        set_op!(
+            ops,
+            0x11,
+            I::Ora(ReadExec::Read),
+            A::IndirectY(DummyRead::OnCarry, IndirectY::ReadBase),
+        );
 
-            o(0x09, I::Ora(ReadExec::default()), A::Immediate);
-            o(
-                0x05,
-                I::Ora(ReadExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0x15,
-                I::Ora(ReadExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0x0d,
-                I::Ora(ReadExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0x1d,
-                I::Ora(ReadExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0x19,
-                I::Ora(ReadExec::default()),
-                A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0x01,
-                I::Ora(ReadExec::default()),
-                A::IndirectX(IndirectX::default()),
-            );
-            o(
-                0x11,
-                I::Ora(ReadExec::default()),
-                A::IndirectY(DummyRead::OnCarry, IndirectY::default()),
-            );
+        set_op!(ops, 0xc9, I::Cmp(ReadExec::Read), A::Immediate);
+        set_op!(
+            ops,
+            0xc5,
+            I::Cmp(ReadExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0xd5,
+            I::Cmp(ReadExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0xcd,
+            I::Cmp(ReadExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xdd,
+            I::Cmp(ReadExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xd9,
+            I::Cmp(ReadExec::Read),
+            A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xc1,
+            I::Cmp(ReadExec::Read),
+            A::IndirectX(IndirectX::ReadBase),
+        );
+        set_op!(
+            ops,
+            0xd1,
+            I::Cmp(ReadExec::Read),
+            A::IndirectY(DummyRead::OnCarry, IndirectY::ReadBase),
+        );
 
-            o(0xc9, I::Cmp(ReadExec::default()), A::Immediate);
-            o(
-                0xc5,
-                I::Cmp(ReadExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0xd5,
-                I::Cmp(ReadExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0xcd,
-                I::Cmp(ReadExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0xdd,
-                I::Cmp(ReadExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0xd9,
-                I::Cmp(ReadExec::default()),
-                A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0xc1,
-                I::Cmp(ReadExec::default()),
-                A::IndirectX(IndirectX::default()),
-            );
-            o(
-                0xd1,
-                I::Cmp(ReadExec::default()),
-                A::IndirectY(DummyRead::OnCarry, IndirectY::default()),
-            );
+        set_op!(ops, 0xe0, I::Cpx(ReadExec::Read), A::Immediate);
+        set_op!(
+            ops,
+            0xe4,
+            I::Cpx(ReadExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0xec,
+            I::Cpx(ReadExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
 
-            o(0xe0, I::Cpx(ReadExec::default()), A::Immediate);
-            o(
-                0xe4,
-                I::Cpx(ReadExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0xec,
-                I::Cpx(ReadExec::default()),
-                A::Absolute(Absolute::default()),
-            );
+        set_op!(ops, 0xc0, I::Cpy(ReadExec::Read), A::Immediate);
+        set_op!(
+            ops,
+            0xc4,
+            I::Cpy(ReadExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0xcc,
+            I::Cpy(ReadExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
 
-            o(0xc0, I::Cpy(ReadExec::default()), A::Immediate);
-            o(
-                0xc4,
-                I::Cpy(ReadExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0xcc,
-                I::Cpy(ReadExec::default()),
-                A::Absolute(Absolute::default()),
-            );
+        set_op!(
+            ops,
+            0x24,
+            I::Bit(ReadExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0x2c,
+            I::Bit(ReadExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
 
-            o(
-                0x24,
-                I::Bit(ReadExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0x2c,
-                I::Bit(ReadExec::default()),
-                A::Absolute(Absolute::default()),
-            );
+        set_op!(
+            ops,
+            0xe6,
+            I::Inc(ReadDummyExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0xf6,
+            I::Inc(ReadDummyExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0xee,
+            I::Inc(ReadDummyExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xfe,
+            I::Inc(ReadDummyExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
 
-            o(
-                0xe6,
-                I::Inc(ReadDummyExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0xf6,
-                I::Inc(ReadDummyExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0xee,
-                I::Inc(ReadDummyExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0xfe,
-                I::Inc(ReadDummyExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::default()),
-            );
+        set_op!(ops, 0xe8, I::Inx, A::None);
+        set_op!(ops, 0xc8, I::Iny, A::None);
 
-            o(0xe8, I::Inx, A::None);
-            o(0xc8, I::Iny, A::None);
+        set_op!(
+            ops,
+            0xc6,
+            I::Dec(ReadDummyExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0xd6,
+            I::Dec(ReadDummyExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0xce,
+            I::Dec(ReadDummyExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xde,
+            I::Dec(ReadDummyExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
 
-            o(
-                0xc6,
-                I::Dec(ReadDummyExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0xd6,
-                I::Dec(ReadDummyExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0xce,
-                I::Dec(ReadDummyExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0xde,
-                I::Dec(ReadDummyExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::default()),
-            );
+        set_op!(ops, 0xca, I::Dex, A::None);
+        set_op!(ops, 0x88, I::Dey, A::None);
 
-            o(0xca, I::Dex, A::None);
-            o(0x88, I::Dey, A::None);
+        set_op!(ops, 0x0a, I::Asla, A::Accumulator);
+        set_op!(
+            ops,
+            0x06,
+            I::Asl(ReadDummyExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0x16,
+            I::Asl(ReadDummyExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0x0e,
+            I::Asl(ReadDummyExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x1e,
+            I::Asl(ReadDummyExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
 
-            o(0x0a, I::Asla, A::Accumulator);
-            o(
-                0x06,
-                I::Asl(ReadDummyExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0x16,
-                I::Asl(ReadDummyExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0x0e,
-                I::Asl(ReadDummyExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0x1e,
-                I::Asl(ReadDummyExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::default()),
-            );
+        set_op!(ops, 0x4a, I::Lsra, A::Accumulator);
+        set_op!(
+            ops,
+            0x46,
+            I::Lsr(ReadDummyExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0x56,
+            I::Lsr(ReadDummyExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0x4e,
+            I::Lsr(ReadDummyExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x5e,
+            I::Lsr(ReadDummyExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
 
-            o(0x4a, I::Lsra, A::Accumulator);
-            o(
-                0x46,
-                I::Lsr(ReadDummyExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0x56,
-                I::Lsr(ReadDummyExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0x4e,
-                I::Lsr(ReadDummyExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0x5e,
-                I::Lsr(ReadDummyExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::default()),
-            );
+        set_op!(ops, 0x2a, I::Rola, A::Accumulator);
+        set_op!(
+            ops,
+            0x26,
+            I::Rol(ReadDummyExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0x36,
+            I::Rol(ReadDummyExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0x2e,
+            I::Rol(ReadDummyExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x3e,
+            I::Rol(ReadDummyExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
 
-            o(0x2a, I::Rola, A::Accumulator);
-            o(
-                0x26,
-                I::Rol(ReadDummyExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0x36,
-                I::Rol(ReadDummyExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0x2e,
-                I::Rol(ReadDummyExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0x3e,
-                I::Rol(ReadDummyExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::default()),
-            );
+        set_op!(ops, 0x6a, I::Rora, A::Accumulator);
+        set_op!(
+            ops,
+            0x66,
+            I::Ror(ReadDummyExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0x76,
+            I::Ror(ReadDummyExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0x6e,
+            I::Ror(ReadDummyExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x7e,
+            I::Ror(ReadDummyExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
 
-            o(0x6a, I::Rora, A::Accumulator);
-            o(
-                0x66,
-                I::Ror(ReadDummyExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0x76,
-                I::Ror(ReadDummyExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0x6e,
-                I::Ror(ReadDummyExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0x7e,
-                I::Ror(ReadDummyExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::default()),
-            );
+        set_op!(ops, 0x4c, I::Jmp, A::Absolute(Absolute::ReadLow));
+        set_op!(
+            ops,
+            0x6c,
+            I::Jmp,
+            A::IndirectAbsolute(IndirectAbsolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x20,
+            I::Jsr(Jsr::ReadDummy),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(ops, 0x40, I::Rti(Rti::Dummy), A::None);
+        set_op!(ops, 0x60, I::Rts(Rts::Dummy), A::None);
 
-            o(0x4c, I::Jmp, A::Absolute(Absolute::default()));
-            o(
-                0x6c,
-                I::Jmp,
-                A::IndirectAbsolute(IndirectAbsolute::default()),
-            );
-            o(
-                0x20,
-                I::Jsr(Jsr::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(0x40, I::Rti(Rti::default()), A::None);
-            o(0x60, I::Rts(Rts::default()), A::None);
+        set_op!(
+            ops,
+            0x10,
+            I::Bpl(Branch::Check),
+            A::Relative(Relative::ReadRegPc),
+        );
+        set_op!(
+            ops,
+            0x30,
+            I::Bmi(Branch::Check),
+            A::Relative(Relative::ReadRegPc),
+        );
+        set_op!(
+            ops,
+            0x50,
+            I::Bvc(Branch::Check),
+            A::Relative(Relative::ReadRegPc),
+        );
+        set_op!(
+            ops,
+            0x70,
+            I::Bvs(Branch::Check),
+            A::Relative(Relative::ReadRegPc),
+        );
+        set_op!(
+            ops,
+            0x90,
+            I::Bcc(Branch::Check),
+            A::Relative(Relative::ReadRegPc),
+        );
+        set_op!(
+            ops,
+            0xb0,
+            I::Bcs(Branch::Check),
+            A::Relative(Relative::ReadRegPc),
+        );
+        set_op!(
+            ops,
+            0xd0,
+            I::Bne(Branch::Check),
+            A::Relative(Relative::ReadRegPc),
+        );
+        set_op!(
+            ops,
+            0xf0,
+            I::Beq(Branch::Check),
+            A::Relative(Relative::ReadRegPc),
+        );
 
-            o(
-                0x10,
-                I::Bpl(Branch::default()),
-                A::Relative(Relative::default()),
-            );
-            o(
-                0x30,
-                I::Bmi(Branch::default()),
-                A::Relative(Relative::default()),
-            );
-            o(
-                0x50,
-                I::Bvc(Branch::default()),
-                A::Relative(Relative::default()),
-            );
-            o(
-                0x70,
-                I::Bvs(Branch::default()),
-                A::Relative(Relative::default()),
-            );
-            o(
-                0x90,
-                I::Bcc(Branch::default()),
-                A::Relative(Relative::default()),
-            );
-            o(
-                0xb0,
-                I::Bcs(Branch::default()),
-                A::Relative(Relative::default()),
-            );
-            o(
-                0xd0,
-                I::Bne(Branch::default()),
-                A::Relative(Relative::default()),
-            );
-            o(
-                0xf0,
-                I::Beq(Branch::default()),
-                A::Relative(Relative::default()),
-            );
+        set_op!(ops, 0x00, I::Brk(Break::ReadDummy), A::Immediate);
 
-            o(0x00, I::Brk(Break::default()), A::Immediate);
+        set_op!(ops, 0x18, I::Clc, A::None);
+        set_op!(ops, 0x58, I::Cli, A::None);
+        set_op!(ops, 0xd8, I::Cld, A::None);
+        set_op!(ops, 0xb8, I::Clv, A::None);
+        set_op!(ops, 0x38, I::Sec, A::None);
+        set_op!(ops, 0x78, I::Sei, A::None);
+        set_op!(ops, 0xf8, I::Sed, A::None);
 
-            o(0x18, I::Clc, A::None);
-            o(0x58, I::Cli, A::None);
-            o(0xd8, I::Cld, A::None);
-            o(0xb8, I::Clv, A::None);
-            o(0x38, I::Sec, A::None);
-            o(0x78, I::Sei, A::None);
-            o(0xf8, I::Sed, A::None);
+        set_op!(ops, 0xea, I::Nop, A::None);
 
-            o(0xea, I::Nop, A::None);
+        //Illegals
+        set_op!(ops, 0x87, I::IllSax, A::ZeroPage(ZeroPage::Read));
+        set_op!(
+            ops,
+            0x97,
+            I::IllSax,
+            A::ZeroPageOffset(Reg::Y, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(ops, 0x8f, I::IllSax, A::Absolute(Absolute::ReadLow));
+        set_op!(ops, 0x83, I::IllSax, A::IndirectX(IndirectX::ReadBase));
 
-            //Illegals
-            o(0x87, I::IllSax, A::ZeroPage(ZeroPage::default()));
-            o(
-                0x97,
-                I::IllSax,
-                A::ZeroPageOffset(Reg::Y, ZeroPageOffset::default()),
-            );
-            o(0x8f, I::IllSax, A::Absolute(Absolute::default()));
-            o(0x83, I::IllSax, A::IndirectX(IndirectX::default()));
+        set_op!(
+            ops,
+            0xa7,
+            I::IllLax(ReadExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0xb7,
+            I::IllLax(ReadExec::Read),
+            A::ZeroPageOffset(Reg::Y, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0xaf,
+            I::IllLax(ReadExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xbf,
+            I::IllLax(ReadExec::Read),
+            A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xa3,
+            I::IllLax(ReadExec::Read),
+            A::IndirectX(IndirectX::ReadBase),
+        );
+        set_op!(
+            ops,
+            0xb3,
+            I::IllLax(ReadExec::Read),
+            A::IndirectY(DummyRead::OnCarry, IndirectY::ReadBase),
+        );
 
-            o(
-                0xa7,
-                I::IllLax(ReadExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0xb7,
-                I::IllLax(ReadExec::default()),
-                A::ZeroPageOffset(Reg::Y, ZeroPageOffset::default()),
-            );
-            o(
-                0xaf,
-                I::IllLax(ReadExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0xbf,
-                I::IllLax(ReadExec::default()),
-                A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0xa3,
-                I::IllLax(ReadExec::default()),
-                A::IndirectX(IndirectX::default()),
-            );
-            o(
-                0xb3,
-                I::IllLax(ReadExec::default()),
-                A::IndirectY(DummyRead::OnCarry, IndirectY::default()),
-            );
+        set_op!(
+            ops,
+            0x07,
+            I::IllSlo(ReadDummyExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0x17,
+            I::IllSlo(ReadDummyExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0x0f,
+            I::IllSlo(ReadDummyExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x1f,
+            I::IllSlo(ReadDummyExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x1b,
+            I::IllSlo(ReadDummyExec::Read),
+            A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x03,
+            I::IllSlo(ReadDummyExec::Read),
+            A::IndirectX(IndirectX::ReadBase),
+        );
+        set_op!(
+            ops,
+            0x13,
+            I::IllSlo(ReadDummyExec::Read),
+            A::IndirectY(DummyRead::Always, IndirectY::ReadBase),
+        );
 
-            o(
-                0x07,
-                I::IllSlo(ReadDummyExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0x17,
-                I::IllSlo(ReadDummyExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0x0f,
-                I::IllSlo(ReadDummyExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0x1f,
-                I::IllSlo(ReadDummyExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::default()),
-            );
-            o(
-                0x1b,
-                I::IllSlo(ReadDummyExec::default()),
-                A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::default()),
-            );
-            o(
-                0x03,
-                I::IllSlo(ReadDummyExec::default()),
-                A::IndirectX(IndirectX::default()),
-            );
-            o(
-                0x13,
-                I::IllSlo(ReadDummyExec::default()),
-                A::IndirectY(DummyRead::Always, IndirectY::default()),
-            );
+        set_op!(
+            ops,
+            0x27,
+            I::IllRla(ReadDummyExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0x37,
+            I::IllRla(ReadDummyExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0x2f,
+            I::IllRla(ReadDummyExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x3f,
+            I::IllRla(ReadDummyExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x3b,
+            I::IllRla(ReadDummyExec::Read),
+            A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x23,
+            I::IllRla(ReadDummyExec::Read),
+            A::IndirectX(IndirectX::ReadBase),
+        );
+        set_op!(
+            ops,
+            0x33,
+            I::IllRla(ReadDummyExec::Read),
+            A::IndirectY(DummyRead::Always, IndirectY::ReadBase),
+        );
 
-            o(
-                0x27,
-                I::IllRla(ReadDummyExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0x37,
-                I::IllRla(ReadDummyExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0x2f,
-                I::IllRla(ReadDummyExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0x3f,
-                I::IllRla(ReadDummyExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::default()),
-            );
-            o(
-                0x3b,
-                I::IllRla(ReadDummyExec::default()),
-                A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::default()),
-            );
-            o(
-                0x23,
-                I::IllRla(ReadDummyExec::default()),
-                A::IndirectX(IndirectX::default()),
-            );
-            o(
-                0x33,
-                I::IllRla(ReadDummyExec::default()),
-                A::IndirectY(DummyRead::Always, IndirectY::default()),
-            );
+        set_op!(
+            ops,
+            0x47,
+            I::IllSre(ReadDummyExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0x57,
+            I::IllSre(ReadDummyExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0x4f,
+            I::IllSre(ReadDummyExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x5f,
+            I::IllSre(ReadDummyExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x5b,
+            I::IllSre(ReadDummyExec::Read),
+            A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x43,
+            I::IllSre(ReadDummyExec::Read),
+            A::IndirectX(IndirectX::ReadBase),
+        );
+        set_op!(
+            ops,
+            0x53,
+            I::IllSre(ReadDummyExec::Read),
+            A::IndirectY(DummyRead::Always, IndirectY::ReadBase),
+        );
 
-            o(
-                0x47,
-                I::IllSre(ReadDummyExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0x57,
-                I::IllSre(ReadDummyExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0x4f,
-                I::IllSre(ReadDummyExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0x5f,
-                I::IllSre(ReadDummyExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::default()),
-            );
-            o(
-                0x5b,
-                I::IllSre(ReadDummyExec::default()),
-                A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::default()),
-            );
-            o(
-                0x43,
-                I::IllSre(ReadDummyExec::default()),
-                A::IndirectX(IndirectX::default()),
-            );
-            o(
-                0x53,
-                I::IllSre(ReadDummyExec::default()),
-                A::IndirectY(DummyRead::Always, IndirectY::default()),
-            );
+        set_op!(
+            ops,
+            0x67,
+            I::IllRra(ReadDummyExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0x77,
+            I::IllRra(ReadDummyExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0x6f,
+            I::IllRra(ReadDummyExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x7f,
+            I::IllRra(ReadDummyExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x7b,
+            I::IllRra(ReadDummyExec::Read),
+            A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x63,
+            I::IllRra(ReadDummyExec::Read),
+            A::IndirectX(IndirectX::ReadBase),
+        );
+        set_op!(
+            ops,
+            0x73,
+            I::IllRra(ReadDummyExec::Read),
+            A::IndirectY(DummyRead::Always, IndirectY::ReadBase),
+        );
 
-            o(
-                0x67,
-                I::IllRra(ReadDummyExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0x77,
-                I::IllRra(ReadDummyExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0x6f,
-                I::IllRra(ReadDummyExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0x7f,
-                I::IllRra(ReadDummyExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::default()),
-            );
-            o(
-                0x7b,
-                I::IllRra(ReadDummyExec::default()),
-                A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::default()),
-            );
-            o(
-                0x63,
-                I::IllRra(ReadDummyExec::default()),
-                A::IndirectX(IndirectX::default()),
-            );
-            o(
-                0x73,
-                I::IllRra(ReadDummyExec::default()),
-                A::IndirectY(DummyRead::Always, IndirectY::default()),
-            );
+        set_op!(
+            ops,
+            0xc7,
+            I::IllDcp(ReadDummyExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0xd7,
+            I::IllDcp(ReadDummyExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0xcf,
+            I::IllDcp(ReadDummyExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xdf,
+            I::IllDcp(ReadDummyExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xdb,
+            I::IllDcp(ReadDummyExec::Read),
+            A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xc3,
+            I::IllDcp(ReadDummyExec::Read),
+            A::IndirectX(IndirectX::ReadBase),
+        );
+        set_op!(
+            ops,
+            0xd3,
+            I::IllDcp(ReadDummyExec::Read),
+            A::IndirectY(DummyRead::Always, IndirectY::ReadBase),
+        );
 
-            o(
-                0xc7,
-                I::IllDcp(ReadDummyExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0xd7,
-                I::IllDcp(ReadDummyExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0xcf,
-                I::IllDcp(ReadDummyExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0xdf,
-                I::IllDcp(ReadDummyExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::default()),
-            );
-            o(
-                0xdb,
-                I::IllDcp(ReadDummyExec::default()),
-                A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::default()),
-            );
-            o(
-                0xc3,
-                I::IllDcp(ReadDummyExec::default()),
-                A::IndirectX(IndirectX::default()),
-            );
-            o(
-                0xd3,
-                I::IllDcp(ReadDummyExec::default()),
-                A::IndirectY(DummyRead::Always, IndirectY::default()),
-            );
+        set_op!(
+            ops,
+            0xe7,
+            I::IllIsc(ReadDummyExec::Read),
+            A::ZeroPage(ZeroPage::Read),
+        );
+        set_op!(
+            ops,
+            0xf7,
+            I::IllIsc(ReadDummyExec::Read),
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0xef,
+            I::IllIsc(ReadDummyExec::Read),
+            A::Absolute(Absolute::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xff,
+            I::IllIsc(ReadDummyExec::Read),
+            A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xfb,
+            I::IllIsc(ReadDummyExec::Read),
+            A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xe3,
+            I::IllIsc(ReadDummyExec::Read),
+            A::IndirectX(IndirectX::ReadBase),
+        );
+        set_op!(
+            ops,
+            0xf3,
+            I::IllIsc(ReadDummyExec::Read),
+            A::IndirectY(DummyRead::Always, IndirectY::ReadBase),
+        );
 
-            o(
-                0xe7,
-                I::IllIsc(ReadDummyExec::default()),
-                A::ZeroPage(ZeroPage::default()),
-            );
-            o(
-                0xf7,
-                I::IllIsc(ReadDummyExec::default()),
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0xef,
-                I::IllIsc(ReadDummyExec::default()),
-                A::Absolute(Absolute::default()),
-            );
-            o(
-                0xff,
-                I::IllIsc(ReadDummyExec::default()),
-                A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::default()),
-            );
-            o(
-                0xfb,
-                I::IllIsc(ReadDummyExec::default()),
-                A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::default()),
-            );
-            o(
-                0xe3,
-                I::IllIsc(ReadDummyExec::default()),
-                A::IndirectX(IndirectX::default()),
-            );
-            o(
-                0xf3,
-                I::IllIsc(ReadDummyExec::default()),
-                A::IndirectY(DummyRead::Always, IndirectY::default()),
-            );
+        set_op!(ops, 0x0b, I::IllAnc(ReadExec::Read), A::Immediate);
+        set_op!(ops, 0x2b, I::IllAnc(ReadExec::Read), A::Immediate);
+        set_op!(ops, 0x4b, I::IllAlr(ReadExec::Read), A::Immediate);
+        set_op!(ops, 0x6b, I::IllArr(ReadExec::Read), A::Immediate);
+        set_op!(ops, 0x8b, I::IllXaa(ReadExec::Read), A::Immediate);
+        set_op!(ops, 0xab, I::IllLax(ReadExec::Read), A::Immediate);
+        set_op!(ops, 0xcb, I::IllAxs(ReadExec::Read), A::Immediate);
+        set_op!(ops, 0xeb, I::IllSbc(ReadExec::Read), A::Immediate);
+        set_op!(
+            ops,
+            0x93,
+            I::IllAhx,
+            A::IndirectY(DummyRead::Always, IndirectY::ReadBase),
+        );
+        set_op!(
+            ops,
+            0x9f,
+            I::IllAhx,
+            A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x9c,
+            I::IllShy,
+            A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x9e,
+            I::IllShx,
+            A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x9b,
+            I::IllTas,
+            A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xbb,
+            I::IllLas,
+            A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
 
-            o(0x0b, I::IllAnc(ReadExec::default()), A::Immediate);
-            o(0x2b, I::IllAnc(ReadExec::default()), A::Immediate);
-            o(0x4b, I::IllAlr(ReadExec::default()), A::Immediate);
-            o(0x6b, I::IllArr(ReadExec::default()), A::Immediate);
-            o(0x8b, I::IllXaa(ReadExec::default()), A::Immediate);
-            o(0xab, I::IllLax(ReadExec::default()), A::Immediate);
-            o(0xcb, I::IllAxs(ReadExec::default()), A::Immediate);
-            o(0xeb, I::IllSbc(ReadExec::default()), A::Immediate);
-            o(
-                0x93,
-                I::IllAhx,
-                A::IndirectY(DummyRead::Always, IndirectY::default()),
-            );
-            o(
-                0x9f,
-                I::IllAhx,
-                A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::default()),
-            );
-            o(
-                0x9c,
-                I::IllShy,
-                A::AbsoluteOffset(Reg::X, DummyRead::Always, AbsoluteOffset::default()),
-            );
-            o(
-                0x9e,
-                I::IllShx,
-                A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::default()),
-            );
-            o(
-                0x9b,
-                I::IllTas,
-                A::AbsoluteOffset(Reg::Y, DummyRead::Always, AbsoluteOffset::default()),
-            );
-            o(
-                0xbb,
-                I::IllLas,
-                A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
+        set_op!(ops, 0x1a, I::IllNop, A::None);
+        set_op!(ops, 0x3a, I::IllNop, A::None);
+        set_op!(ops, 0x5a, I::IllNop, A::None);
+        set_op!(ops, 0x7a, I::IllNop, A::None);
+        set_op!(ops, 0xda, I::IllNop, A::None);
+        set_op!(ops, 0xfa, I::IllNop, A::None);
 
-            o(0x1a, I::IllNop, A::None);
-            o(0x3a, I::IllNop, A::None);
-            o(0x5a, I::IllNop, A::None);
-            o(0x7a, I::IllNop, A::None);
-            o(0xda, I::IllNop, A::None);
-            o(0xfa, I::IllNop, A::None);
+        set_op!(ops, 0x80, I::IllNopAddr, A::Immediate);
+        set_op!(ops, 0x82, I::IllNopAddr, A::Immediate);
+        set_op!(ops, 0x89, I::IllNopAddr, A::Immediate);
+        set_op!(ops, 0xc2, I::IllNopAddr, A::Immediate);
+        set_op!(ops, 0xe2, I::IllNopAddr, A::Immediate);
 
-            o(0x80, I::IllNopAddr, A::Immediate);
-            o(0x82, I::IllNopAddr, A::Immediate);
-            o(0x89, I::IllNopAddr, A::Immediate);
-            o(0xc2, I::IllNopAddr, A::Immediate);
-            o(0xe2, I::IllNopAddr, A::Immediate);
+        set_op!(ops, 0x04, I::IllNopAddr, A::ZeroPage(ZeroPage::Read));
+        set_op!(ops, 0x44, I::IllNopAddr, A::ZeroPage(ZeroPage::Read));
+        set_op!(ops, 0x64, I::IllNopAddr, A::ZeroPage(ZeroPage::Read));
 
-            o(0x04, I::IllNopAddr, A::ZeroPage(ZeroPage::default()));
-            o(0x44, I::IllNopAddr, A::ZeroPage(ZeroPage::default()));
-            o(0x64, I::IllNopAddr, A::ZeroPage(ZeroPage::default()));
+        set_op!(
+            ops,
+            0x14,
+            I::IllNopAddr,
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0x34,
+            I::IllNopAddr,
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0x54,
+            I::IllNopAddr,
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0x74,
+            I::IllNopAddr,
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0xd4,
+            I::IllNopAddr,
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
+        set_op!(
+            ops,
+            0xf4,
+            I::IllNopAddr,
+            A::ZeroPageOffset(Reg::X, ZeroPageOffset::ReadImmediate),
+        );
 
-            o(
-                0x14,
-                I::IllNopAddr,
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0x34,
-                I::IllNopAddr,
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0x54,
-                I::IllNopAddr,
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0x74,
-                I::IllNopAddr,
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0xd4,
-                I::IllNopAddr,
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
-            o(
-                0xf4,
-                I::IllNopAddr,
-                A::ZeroPageOffset(Reg::X, ZeroPageOffset::default()),
-            );
+        set_op!(ops, 0x0c, I::IllNopAddr, A::Absolute(Absolute::ReadLow));
 
-            o(0x0c, I::IllNopAddr, A::Absolute(Absolute::default()));
+        set_op!(
+            ops,
+            0x1c,
+            I::IllNopAddr,
+            A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x3c,
+            I::IllNopAddr,
+            A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x5c,
+            I::IllNopAddr,
+            A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0x7c,
+            I::IllNopAddr,
+            A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xdc,
+            I::IllNopAddr,
+            A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
+        set_op!(
+            ops,
+            0xfc,
+            I::IllNopAddr,
+            A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
+        );
 
-            o(
-                0x1c,
-                I::IllNopAddr,
-                A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0x3c,
-                I::IllNopAddr,
-                A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0x5c,
-                I::IllNopAddr,
-                A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0x7c,
-                I::IllNopAddr,
-                A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0xdc,
-                I::IllNopAddr,
-                A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
-            o(
-                0xfc,
-                I::IllNopAddr,
-                A::AbsoluteOffset(Reg::X, DummyRead::OnCarry, AbsoluteOffset::default()),
-            );
+        set_op!(ops, 0x02, I::IllKil, A::None);
+        set_op!(ops, 0x12, I::IllKil, A::None);
+        set_op!(ops, 0x22, I::IllKil, A::None);
+        set_op!(ops, 0x32, I::IllKil, A::None);
+        set_op!(ops, 0x42, I::IllKil, A::None);
+        set_op!(ops, 0x52, I::IllKil, A::None);
+        set_op!(ops, 0x62, I::IllKil, A::None);
+        set_op!(ops, 0x72, I::IllKil, A::None);
+        set_op!(ops, 0x92, I::IllKil, A::None);
+        set_op!(ops, 0xb2, I::IllKil, A::None);
+        set_op!(ops, 0xd2, I::IllKil, A::None);
+        set_op!(ops, 0xf2, I::IllKil, A::None);
 
-            o(0x02, I::IllKil, A::None);
-            o(0x12, I::IllKil, A::None);
-            o(0x22, I::IllKil, A::None);
-            o(0x32, I::IllKil, A::None);
-            o(0x42, I::IllKil, A::None);
-            o(0x52, I::IllKil, A::None);
-            o(0x62, I::IllKil, A::None);
-            o(0x72, I::IllKil, A::None);
-            o(0x92, I::IllKil, A::None);
-            o(0xb2, I::IllKil, A::None);
-            o(0xd2, I::IllKil, A::None);
-            o(0xf2, I::IllKil, A::None);
-        }
-
-        for i in 0..0x100 {
-            if !op_set.contains(&i) {
-                panic!("Missing instruction: {}", i);
-            }
-        }
+        ops
     }
 }

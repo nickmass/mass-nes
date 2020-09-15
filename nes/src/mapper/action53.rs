@@ -13,17 +13,15 @@ pub struct Action53State {
     chr: MappedMemory,
     regs: [u8; 4],
     reg_index: usize,
-    last: usize,
 }
 
 pub struct Action53 {
     state: RefCell<Action53State>,
-    chr_type: BankKind,
 }
 
 impl Action53 {
     pub fn new(cartridge: &Cartridge, state: &mut SystemState) -> Action53 {
-        let chr_type = if cartridge.chr_rom.len() == 0 {
+        let chr_type = if cartridge.chr_rom.is_empty() {
             BankKind::Ram
         } else {
             BankKind::Rom
@@ -42,17 +40,15 @@ impl Action53 {
         let regs = [0x00, 0x00, 0x02, 0xff];
 
         let rom_state = Action53State {
-            prg: prg,
-            chr: chr,
-            regs: regs,
+            prg,
+            chr,
+            regs,
             reg_index: 0,
-            last,
         };
-        let rom = Action53 {
+
+        Action53 {
             state: RefCell::new(rom_state),
-            chr_type: chr_type,
-        };
-        rom
+        }
     }
 
     fn read_cpu(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
@@ -179,7 +175,7 @@ impl Mapper for Action53 {
         state: &mut SystemState,
         cpu: &mut AddressBus,
         ppu: &mut Ppu,
-        cart: &Cartridge,
+        _cart: &Cartridge,
     ) {
         cpu.register_write(
             state,
@@ -214,20 +210,4 @@ impl Mapper for Action53 {
             BusKind::Ppu => self.write_ppu(system, state, addr, value),
         }
     }
-
-    fn tick(&self, system: &System, state: &mut SystemState) {}
-
-    fn nt_peek(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
-        system.ppu.nametables.read(state, addr)
-    }
-
-    fn nt_read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
-        system.ppu.nametables.read(state, addr)
-    }
-
-    fn nt_write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
-        system.ppu.nametables.write(state, addr, value);
-    }
-
-    fn update_ppu_addr(&self, system: &System, state: &mut SystemState, addr: u16) {}
 }

@@ -1,7 +1,7 @@
 use crate::apu::ApuState;
 use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
-use crate::system::{Region, SystemState};
+use crate::system::SystemState;
 
 use std::cell::RefCell;
 
@@ -51,18 +51,16 @@ impl TriangleState {
 
 pub struct Triangle {
     state: RefCell<TriangleState>,
-    region: Region,
 }
 
 impl Triangle {
-    pub fn new(region: Region) -> Triangle {
+    pub fn new() -> Triangle {
         let state = TriangleState {
             ..Default::default()
         };
 
         Triangle {
             state: RefCell::new(state),
-            region: region,
         }
     }
 
@@ -109,23 +107,22 @@ impl Channel for Triangle {
             channel.timer_counter -= 1;
         }
 
-        if state.is_quarter_frame() || channel.forced_clock {
-            if channel.current_tick & 1 == 0 {
-                if channel.linear_reload {
-                    channel.linear_counter = channel.linear_load();
-                } else if channel.linear_counter != 0 {
-                    channel.linear_counter -= 1;
-                }
-                if !channel.halt() {
-                    channel.linear_reload = false;
-                }
+        if (state.is_quarter_frame() || channel.forced_clock) && channel.current_tick & 1 == 0 {
+            if channel.linear_reload {
+                channel.linear_counter = channel.linear_load();
+            } else if channel.linear_counter != 0 {
+                channel.linear_counter -= 1;
+            }
+            if !channel.halt() {
+                channel.linear_reload = false;
             }
         }
 
-        if state.is_half_frame() || channel.forced_clock {
-            if channel.length_counter != 0 && !channel.halt() {
-                channel.length_counter -= 1;
-            }
+        if (state.is_half_frame() || channel.forced_clock)
+            && channel.length_counter != 0
+            && !channel.halt()
+        {
+            channel.length_counter -= 1;
         }
 
         channel.forced_clock = false;

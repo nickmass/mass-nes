@@ -107,16 +107,16 @@ impl Region {
     }
 }
 
-const FIVE_STEP_SEQ_NTSC: &'static [u32] = &[7457, 14913, 22371, 37281, 37282];
-const FIVE_STEP_SEQ_PAL: &'static [u32] = &[8314, 16628, 24940, 33254, 41566];
+const FIVE_STEP_SEQ_NTSC: &[u32] = &[7457, 14913, 22371, 37281, 37282];
+const FIVE_STEP_SEQ_PAL: &[u32] = &[8314, 16628, 24940, 33254, 41566];
 
-const FOUR_STEP_SEQ_NTSC: &'static [u32] = &[7457, 14913, 22371, 29829, 29830];
-const FOUR_STEP_SEQ_PAL: &'static [u32] = &[8314, 16626, 24940, 33254, 33255];
+const FOUR_STEP_SEQ_NTSC: &[u32] = &[7457, 14913, 22371, 29829, 29830];
+const FOUR_STEP_SEQ_PAL: &[u32] = &[8314, 16626, 24940, 33254, 33255];
 
-const DMC_RATES_NTSC: &'static [u16] = &[
+const DMC_RATES_NTSC: &[u16] = &[
     428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 84, 72, 54,
 ];
-const DMC_RATES_PAL: &'static [u16] = &[
+const DMC_RATES_PAL: &[u16] = &[
     398, 354, 316, 298, 276, 236, 210, 198, 176, 148, 132, 118, 98, 78, 66, 50,
 ];
 
@@ -129,6 +129,7 @@ pub enum EmphMode {
 pub struct Machine {
     pub state: Box<SystemState>,
     pub system: System,
+    region: Region,
     cycle: u64,
 }
 
@@ -140,14 +141,19 @@ impl Machine {
         //system.debug.log_for(&mut state, 10000);
 
         Machine {
-            state: state,
-            system: system,
+            state,
+            system,
+            region,
             cycle: 0,
         }
     }
 
     pub fn force_power_up_pc(&mut self, addr: u16) {
         self.system.cpu.power_up_pc(Some(addr));
+    }
+
+    pub fn region(&self) -> Region {
+        self.region
     }
 
     pub fn run(&mut self) {
@@ -264,16 +270,16 @@ impl System {
         let mapper = cartridge.get_mapper(state, &ppu);
 
         let mut system = System {
-            region: region,
-            ppu: ppu,
-            cpu: cpu,
-            cpu_bus: cpu_bus,
-            cpu_mem: cpu_mem,
-            apu: apu,
-            cartridge: cartridge,
+            region,
+            ppu,
+            cpu,
+            cpu_bus,
+            cpu_mem,
+            apu,
+            cartridge,
             debug: Debug::new(),
             input: Input::new(),
-            mapper: mapper,
+            mapper,
             cpu_pin_in: CpuPinIn::default(),
         };
 

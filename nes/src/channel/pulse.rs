@@ -1,7 +1,7 @@
 use crate::apu::ApuState;
 use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
-use crate::system::{Region, SystemState};
+use crate::system::SystemState;
 
 use std::cell::RefCell;
 
@@ -33,7 +33,6 @@ struct PulseState {
     regs: [u8; 4],
     current_tick: u64,
     forced_clock: bool,
-    last_tick: u64,
 }
 
 impl PulseState {
@@ -143,20 +142,18 @@ impl PulseState {
 pub struct Pulse {
     state: RefCell<PulseState>,
     channel: PulseChannel,
-    region: Region,
 }
 
 impl Pulse {
-    pub fn new(chan: PulseChannel, region: Region) -> Pulse {
+    pub fn new(channel: PulseChannel) -> Pulse {
         let state = PulseState {
-            channel: chan,
+            channel,
             ..Default::default()
         };
 
         Pulse {
             state: RefCell::new(state),
-            channel: chan,
-            region: region,
+            channel,
         }
     }
 
@@ -225,19 +222,17 @@ impl Channel for Pulse {
                 channel.envelope_start = false;
                 channel.decay_counter = 0xf;
                 channel.envelope_divider = channel.envelope_volume();
-            } else {
-                if channel.envelope_divider == 0 {
-                    channel.envelope_divider = channel.envelope_volume();
-                    if channel.decay_counter == 0 {
-                        if channel.halt() {
-                            channel.decay_counter = 0xf
-                        }
-                    } else {
-                        channel.decay_counter -= 1;
+            } else if channel.envelope_divider == 0 {
+                channel.envelope_divider = channel.envelope_volume();
+                if channel.decay_counter == 0 {
+                    if channel.halt() {
+                        channel.decay_counter = 0xf
                     }
                 } else {
-                    channel.envelope_divider -= 1;
+                    channel.decay_counter -= 1;
                 }
+            } else {
+                channel.envelope_divider -= 1;
             }
         }
 

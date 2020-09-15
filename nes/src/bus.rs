@@ -121,13 +121,10 @@ impl AddressBus {
     {
         let mut addr: u32 = 0;
         while addr < 0x10000 {
-            match addr_val.is_valid(addr as u16) {
-                Some(base_addr) => {
-                    state
-                        .mappings
-                        .insert_read_mapping(&self.bus, addr as u16, base_addr, device);
-                }
-                None => {}
+            if let Some(base_addr) = addr_val.is_valid(addr as u16) {
+                state
+                    .mappings
+                    .insert_read_mapping(&self.bus, addr as u16, base_addr, device);
             }
             addr += self.block_size as u32;
         }
@@ -139,13 +136,10 @@ impl AddressBus {
     {
         let mut addr: u32 = 0;
         while addr < 0x10000 {
-            match addr_val.is_valid(addr as u16) {
-                Some(base_addr) => {
-                    state
-                        .mappings
-                        .insert_write_mapping(&self.bus, addr as u16, base_addr, device);
-                }
-                None => {}
+            if let Some(base_addr) = addr_val.is_valid(addr as u16) {
+                state
+                    .mappings
+                    .insert_write_mapping(&self.bus, addr as u16, base_addr, device);
             }
             addr += self.block_size as u32;
         }
@@ -309,11 +303,8 @@ impl<'a, T: AddressValidator> Iterator for AddressIterator<'a, T> {
         let start = self.state + 1;
         for x in start..0x10000 {
             self.state = x;
-            match self.addr_val.is_valid(x as u16) {
-                Some(base) => {
-                    return Some((x as u16, base));
-                }
-                None => {}
+            if let Some(base) = self.addr_val.is_valid(x as u16) {
+                return Some((x as u16, base));
             }
         }
 

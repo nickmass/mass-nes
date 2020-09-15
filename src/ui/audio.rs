@@ -1,5 +1,6 @@
-extern crate cpal;
+use cpal::traits::{DeviceTrait, EventLoopTrait, HostTrait};
 
+use std::collections::VecDeque;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 
@@ -19,6 +20,7 @@ impl Audio for Null {
 }
 
 pub struct CpalAudio {
+    host: cpal::Host,
     device: cpal::Device,
     format: cpal::Format,
     tx: Sender<Vec<i16>>,
@@ -31,7 +33,8 @@ impl CpalAudio {
             cpal::SampleRate(44100),
             cpal::SampleRate(96000),
         ];
-        let device = cpal::default_output_device()?;
+        let host = cpal::default_host();
+        let device = host.default_output_device()?;
 
         struct Match {
             rate: cpal::SampleRate,
@@ -47,6 +50,9 @@ impl CpalAudio {
                 .iter()
                 .position(|x| f.min_sample_rate <= *x && f.max_sample_rate >= *x);
             let c = f.channels;
+            if c == 0 {
+                continue;
+            }
             let d = f.data_type;
             if s.is_none() {
                 continue;
@@ -89,17 +95,17 @@ impl CpalAudio {
         };
         let channels = format.channels as usize;
 
-        let event_loop = cpal::EventLoop::new();
+        let event_loop = host.event_loop();
 
         let stream = event_loop.build_output_stream(&device, &format).ok()?;
-        event_loop.play_stream(stream);
+        event_loop.play_stream(stream).ok()?;
 
         let (tx, rx) = channel();
         let mut samples = SamplesIterator::new(rx);
 
         thread::spawn(move || {
             event_loop.run(move |_stream_id, stream_data| {
-                if let cpal::StreamData::Output { buffer } = stream_data {
+                if let Ok(cpal::StreamData::Output { buffer }) = stream_data {
                     match buffer {
                         cpal::UnknownTypeOutputBuffer::U16(mut buffer) => {
                             for (sample, value) in buffer.chunks_mut(channels).zip(&mut samples) {
@@ -131,7 +137,12 @@ impl CpalAudio {
             })
         });
 
-        Some(CpalAudio { device, format, tx })
+        Some(CpalAudio {
+            host,
+            device,
+            format,
+            tx,
+        })
     }
 }
 
@@ -148,8 +159,6 @@ impl Audio for CpalAudio {
     fn close(&mut self) {}
 }
 
-use std::collections::VecDeque;
-
 struct SamplesIterator<T> {
     rx: Receiver<Vec<T>>,
     buf: VecDeque<T>,
@@ -158,7 +167,7 @@ struct SamplesIterator<T> {
 impl<T> SamplesIterator<T> {
     fn new(rx: Receiver<Vec<T>>) -> SamplesIterator<T> {
         SamplesIterator {
-            rx: rx,
+            rx,
             buf: VecDeque::new(),
         }
     }
@@ -168,7 +177,7 @@ impl<T> Iterator for SamplesIterator<T> {
     type Item = T;
 
     fn next(&mut self) -> Option<T> {
-        if self.buf.len() == 0 {
+        if self.buf.is_empty() {
             match self.rx.try_recv() {
                 Ok(r) => {
                     let mut vec = r.into_iter().collect();
@@ -182,8 +191,6 @@ impl<T> Iterator for SamplesIterator<T> {
         }
     }
 }
-
-extern crate rodio;
 
 pub struct RodioAudio {
     sample_rate: u32,
@@ -201,9 +208,9 @@ impl RodioAudio {
 
         let sink = rodio::Sink::new(&device);
         Some(RodioAudio {
-            sample_rate: sample_rate,
-            device: device,
-            sink: sink,
+            sample_rate,
+            device,
+            sink,
         })
     }
 }
@@ -216,7 +223,7 @@ impl Audio for RodioAudio {
     fn add_samples(&mut self, samples: Vec<i16>) {
         let source = RodioSamples {
             sample_rate: self.sample_rate,
-            samples: samples,
+            samples,
             position: 0,
         };
         self.sink.append(source);
@@ -237,7 +244,7 @@ impl Iterator for RodioSamples {
     fn next(&mut self) -> Option<Self::Item> {
         let val = self.samples.get(self.position);
         self.position += 1;
-        val.map(|x| *x)
+        val.copied()
     }
 }
 

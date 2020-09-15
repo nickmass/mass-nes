@@ -1,6 +1,5 @@
 use nes_ntsc::{NesNtsc, NesNtscSetup};
 
-use glium;
 use glium::texture::texture2d::Texture2d;
 use glium::texture::{ClientFormat, RawImage2d};
 
@@ -42,8 +41,8 @@ impl Filter for NtscFilter {
 
             void main() {
                 float line_intensity = mod(v_tex_coords.y * 480.0, 2.0) * 0.1;
-                vec4 col = texture(tex, v_tex_coords).zyxw;
-                color = col - (col * line_intensity);
+                vec3 col = texture(tex, v_tex_coords).zyx;
+                color = vec4(col - (col * line_intensity), 1.0);
             }
         "#
         .to_string()
@@ -69,7 +68,7 @@ impl Filter for NtscFilter {
     fn process(
         &self,
         display: &glium::Display,
-        render_size: (f64, f64),
+        _render_size: (f64, f64),
         screen: &[u16],
     ) -> FilterUniforms {
         let mut unis = FilterUniforms::new();

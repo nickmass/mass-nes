@@ -1,21 +1,11 @@
-#![allow(dead_code)]
-#![allow(unused_variables)]
-
-#[macro_use]
-extern crate glium;
-extern crate blip_buf;
-extern crate clap;
-extern crate nes;
-extern crate nes_ntsc;
-
 use blip_buf::BlipBuf;
 
-use nes::{Cartridge, Controller, Machine, Region, UserInput};
+use nes::{Cartridge, Machine, Region};
 
 mod ui;
 use ui::audio::Audio;
-use ui::gfx::{Key, Renderer};
 use ui::sync::FrameSync;
+use ui::window::{Window, WindowHandle};
 
 use nes_ntsc::NesNtscSetup;
 
@@ -32,14 +22,25 @@ fn main() {
 }
 
 fn run(mut file: File, region: Region) {
-    let pal = region.default_palette();
-    let cart = Cartridge::load(&mut file).unwrap();
+    let _pal = region.default_palette();
 
     let filter = ui::ntsc::NtscFilter::new(NesNtscSetup::composite());
     //let filter = ui::gfx::PalettedFilter::new(NesNtscSetup::composite().generate_palette());
 
-    let window = Renderer::new(filter);
+    let window = Window::new(filter);
+    let handle = window.handle();
 
+    std::thread::spawn(move || {
+        let cart = Cartridge::load(&mut file).unwrap();
+        let machine = Machine::new(region, cart);
+        game_thread(handle, machine);
+    });
+
+    window.run();
+}
+
+fn game_thread(handle: WindowHandle, mut machine: Machine) {
+    let region = machine.region();
     let mut audio: Box<dyn Audio> = ui::audio::RodioAudio::new(48000)
         .map(|a| Box::new(a) as Box<dyn Audio>)
         .or_else(|| ui::audio::CpalAudio::new().map(|a| Box::new(a) as Box<dyn Audio>))
@@ -47,7 +48,7 @@ fn run(mut file: File, region: Region) {
             eprintln!("Unable to load audio device");
             Box::new(ui::audio::Null)
         });
-    //let mut audio = ui::audio::CpalAudio::new();
+    //let mut audio = ui::audio::CpalAudio::new().unwrap();
     //let mut audio = ui::audio::Null;
 
     let sample_rate = audio.sample_rate();
@@ -59,13 +60,10 @@ fn run(mut file: File, region: Region) {
     );
 
     let mut frame_sync = FrameSync::new(region.refresh_rate());
-    let mut close = false;
-    let mut machine = Machine::new(region, cart);
-
-    while !close {
+    while !handle.closed() {
         machine.run();
-        frame_sync.sync_frame();
-        window.add_frame(machine.get_screen());
+        let frame = machine.get_screen();
+        handle.send_frame(frame.into());
         {
             let samples = machine.get_audio();
             let count = samples.len();
@@ -76,45 +74,18 @@ fn run(mut file: File, region: Region) {
             }
             blip.end_frame(count as u32);
             while blip.samples_avail() > 0 {
-                let mut buf = [0i16; 1024];
+                let mut buf = vec![0i16; 1024];
                 let count = blip.read_samples(&mut buf, false);
-                audio.add_samples(buf[0..count].to_vec());
+                buf.truncate(count);
+                audio.add_samples(buf);
             }
         }
-        {
-            let mut r = Vec::new();
-            let input = window.get_input();
-
-            let p1 = Controller {
-                a: *input.get(&Key::Z).unwrap_or(&false),
-                b: *input.get(&Key::X).unwrap_or(&false),
-                select: *input.get(&Key::RShift).unwrap_or(&false),
-                start: *input.get(&Key::Return).unwrap_or(&false),
-                up: *input.get(&Key::Up).unwrap_or(&false),
-                down: *input.get(&Key::Down).unwrap_or(&false),
-                left: *input.get(&Key::Left).unwrap_or(&false),
-                right: *input.get(&Key::Right).unwrap_or(&false),
-            };
-
-            if *input.get(&Key::Delete).unwrap_or(&false) {
-                r.push(UserInput::Power);
-            }
-
-            if *input.get(&Key::Back).unwrap_or(&false) {
-                r.push(UserInput::Reset);
-            }
-
-            if window.is_closed() {
-                close = true;
-            }
-
-            r.push(UserInput::PlayerOne(p1));
-            machine.set_input(r);
-        }
+        frame_sync.sync_frame();
+        let input = handle.input();
+        machine.set_input(input);
     }
 
     audio.close();
-    window.close();
 }
 
 fn bench(mut file: File, region: Region, mut frames: u32) {
@@ -145,7 +116,6 @@ impl Args {
         let arg_file = Arg::with_name("file")
             .help("Provides a rom file to emulate")
             .takes_value(true)
-            .default_value("/home/nickmass/smb.nes")
             .index(1)
             .validator(|f| {
                 if ::std::path::Path::new(&f).exists() {
@@ -170,8 +140,8 @@ impl Args {
             .validator(|f| {
                 let frames: Result<u32, _> = f.parse();
                 frames
-                    .map(|v| ())
-                    .map_err(|e| "Invalid frames value".to_string())
+                    .map(|_| ())
+                    .map_err(|_| "Invalid frames value".to_string())
             });
 
         let matches = App::new("mass-nes")
@@ -182,8 +152,6 @@ impl Args {
             .subcommand(
                 SubCommand::with_name("bench")
                     .about("Benchmark core performance")
-                    .arg(&arg_file)
-                    .arg(&arg_region)
                     .arg(&arg_frames),
             )
             .get_matches();
@@ -206,8 +174,8 @@ impl Args {
         }
 
         match matches.subcommand() {
-            ("bench", Some(matches)) => Args {
-                mode: Mode::Bench(get_frames(matches.value_of("frames"))),
+            ("bench", Some(sub_matches)) => Args {
+                mode: Mode::Bench(get_frames(sub_matches.value_of("frames"))),
                 file: get_file(matches.value_of("file")),
                 region: get_region(matches.value_of("region")),
             },

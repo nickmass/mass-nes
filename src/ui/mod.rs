@@ -1,4 +1,5 @@
-pub mod gfx;
 pub mod audio;
-pub mod sync;
+pub mod gfx;
 pub mod ntsc;
+pub mod sync;
+pub mod window;

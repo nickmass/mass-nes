@@ -1,7 +1,7 @@
 use crate::apu::ApuState;
 use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
-use crate::system::{Region, SystemState};
+use crate::system::SystemState;
 
 use std::cell::RefCell;
 
@@ -72,11 +72,10 @@ impl NoiseState {
 
 pub struct Noise {
     state: RefCell<NoiseState>,
-    region: Region,
 }
 
 impl Noise {
-    pub fn new(region: Region) -> Noise {
+    pub fn new() -> Noise {
         let state = NoiseState {
             shifter: 1,
             ..Default::default()
@@ -84,7 +83,6 @@ impl Noise {
 
         Noise {
             state: RefCell::new(state),
-            region: region,
         }
     }
 
@@ -136,26 +134,25 @@ impl Channel for Noise {
                 channel.envelope_start = false;
                 channel.decay_counter = 0xf;
                 channel.envelope_divider = channel.envelope_volume();
-            } else {
-                if channel.envelope_divider == 0 {
-                    channel.envelope_divider = channel.envelope_volume();
-                    if channel.decay_counter == 0 {
-                        if channel.halt() {
-                            channel.decay_counter = 0xf
-                        }
-                    } else {
-                        channel.decay_counter -= 1;
+            } else if channel.envelope_divider == 0 {
+                channel.envelope_divider = channel.envelope_volume();
+                if channel.decay_counter == 0 {
+                    if channel.halt() {
+                        channel.decay_counter = 0xf
                     }
                 } else {
-                    channel.envelope_divider -= 1;
+                    channel.decay_counter -= 1;
                 }
+            } else {
+                channel.envelope_divider -= 1;
             }
         }
 
-        if state.is_half_frame() || channel.forced_clock {
-            if channel.length_counter != 0 && !channel.halt() {
-                channel.length_counter -= 1;
-            }
+        if (state.is_half_frame() || channel.forced_clock)
+            && channel.length_counter != 0
+            && !channel.halt()
+        {
+            channel.length_counter -= 1;
         }
 
         channel.forced_clock = false;

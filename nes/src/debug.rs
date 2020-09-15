@@ -28,7 +28,7 @@ impl DebugState {
         self.inst_ring.push(inst);
     }
 
-    fn log_iter<'a>(&'a self) -> RingIter<'a, (CpuDebugState, PpuDebugState)> {
+    fn log_iter(&self) -> RingIter<(CpuDebugState, PpuDebugState)> {
         self.inst_ring.iter()
     }
 }
@@ -60,7 +60,7 @@ impl<T> RingBuffer<T> {
         self.ring[self.ring_index] = Some(item);
     }
 
-    fn iter<'a>(&'a self) -> RingIter<'a, T> {
+    fn iter(&self) -> RingIter<T> {
         RingIter {
             ring: &self.ring[..],
             ring_end_index: self.ring_index,
@@ -119,13 +119,11 @@ impl<'a, T> DoubleEndedIterator for RingIter<'a, T> {
     }
 }
 
-pub struct Debug {
-    ops: &'static [Op; 0x100],
-}
+pub struct Debug;
 
 impl Debug {
     pub fn new() -> Debug {
-        Debug { ops: Op::load() }
+        Debug
     }
 
     pub fn peek(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
@@ -182,7 +180,7 @@ impl Debug {
 
             state.debug.log_inst((cpu_state, ppu_state));
 
-            let inst = self.ops[self.peek(system, state, inst_addr) as usize];
+            let inst = super::ops::OPS[self.peek(system, state, inst_addr) as usize];
             if let Instruction::IllKil = inst.instruction {
                 self.log_history(system, state);
                 panic!("KIL");
@@ -200,7 +198,7 @@ impl Debug {
         let addr = cpu_state.instruction_addr.unwrap();
         let instr = self.peek(system, state, addr);
 
-        let op = self.ops[instr as usize];
+        let op = super::ops::OPS[instr as usize];
         let name = op.instruction.name();
         let len = op.addressing.length() as u16;
 
@@ -303,7 +301,7 @@ impl Debug {
                 let a2_low = read(state, a1);
                 let a2_high = read(state, (a1 & 0xff00) | (a1.wrapping_add(1) & 0xff));
                 let a2 = ((a2_high as u16) << 8) | a2_low as u16;
-                let a3 = a2.wrapping_add((cpu_state.reg_y & 0xff) as u16);
+                let a3 = a2.wrapping_add(cpu_state.reg_y as u16);
                 let v = read(state, a3);
                 format!("(${:02X}),Y = {:04X} @ {:04X} = {:02X}", a1, a2, a3, v)
             }

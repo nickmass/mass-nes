@@ -29,12 +29,11 @@ pub struct TxromState {
 
 pub struct Txrom {
     state: RefCell<TxromState>,
-    chr_type: BankKind,
 }
 
 impl Txrom {
     pub fn new(cartridge: &Cartridge, state: &mut SystemState) -> Txrom {
-        let chr_type = if cartridge.chr_rom.len() == 0 {
+        let chr_type = if cartridge.chr_rom.is_empty() {
             BankKind::Ram
         } else {
             BankKind::Rom
@@ -54,9 +53,9 @@ impl Txrom {
         let rom_state = TxromState {
             current_tick: 0,
             last_a12_tick: 0,
-            prg: prg,
-            chr: chr,
-            chr_type: chr_type,
+            prg,
+            chr,
+            chr_type,
             bank_data: [0; 8],
             bank_select: 0,
             ram_protect: false,
@@ -70,11 +69,10 @@ impl Txrom {
             hardwired: false,
             last: (cartridge.prg_rom.len() / 0x2000) - 1,
         };
-        let rom = Txrom {
+
+        Txrom {
             state: RefCell::new(rom_state),
-            chr_type: chr_type,
-        };
-        rom
+        }
     }
 
     fn read_cpu(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
@@ -111,12 +109,15 @@ impl Txrom {
                 self.sync(&mut rom);
             }
             0xa000 => {
-                if rom.hardwired { return }
+                if rom.hardwired {
+                    return;
+                }
                 match value & 1 {
                     0 => system.ppu.nametables.set_vertical(state),
                     1 => system.ppu.nametables.set_horizontal(state),
                     _ => unreachable!(),
-                }},
+                }
+            }
             0xa001 => {
                 rom.ram_protect = value & 0x40 != 0;
                 rom.ram_enabled = value & 0x80 != 0;
@@ -146,7 +147,7 @@ impl Txrom {
             .write(system, state, addr, value);
     }
 
-    fn irq_tick(&self, system: &System, state: &SystemState, addr: u16) {
+    fn irq_tick(&self, _system: &System, _state: &SystemState, addr: u16) {
         let mut rom = self.state.borrow_mut();
         let a12 = addr & 0x1000 != 0;
         let mut clock = !rom.last_a12 && a12;
@@ -269,7 +270,7 @@ impl Mapper for Txrom {
                 let ext1 = state.mem.alloc_kb(1);
                 let ext2 = state.mem.alloc_kb(1);
                 ppu.nametables.set_four_screen(state, ext1, ext2);
-            },
+            }
         }
 
         self.sync(&mut rom);
@@ -296,7 +297,7 @@ impl Mapper for Txrom {
         }
     }
 
-    fn tick(&self, system: &System, state: &mut SystemState) {
+    fn tick(&self, _system: &System, _state: &mut SystemState) {
         let mut rom = self.state.borrow_mut();
         rom.current_tick += 1;
     }
@@ -304,10 +305,6 @@ impl Mapper for Txrom {
     fn get_irq(&mut self) -> bool {
         let rom = self.state.borrow();
         rom.irq
-    }
-
-    fn nt_peek(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
-        system.ppu.nametables.read(state, addr)
     }
 
     fn nt_read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {

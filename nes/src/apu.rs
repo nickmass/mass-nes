@@ -47,7 +47,7 @@ impl Default for ApuState {
 impl ApuState {
     fn new(region: Region) -> ApuState {
         ApuState {
-            region: region,
+            region,
             ..Default::default()
         }
     }
@@ -101,7 +101,6 @@ pub struct Apu {
     pub dmc: Dmc,
     pulse_table: Vec<i16>,
     tnd_table: Vec<i16>,
-    region: Region,
     state: RefCell<ApuState>,
     samples: Vec<i16>,
     sample_index: usize,
@@ -122,14 +121,13 @@ impl Apu {
         }
 
         Apu {
-            pulse_one: Pulse::new(PulseChannel::InternalOne, region),
-            pulse_two: Pulse::new(PulseChannel::InternalTwo, region),
-            triangle: Triangle::new(region),
-            noise: Noise::new(region),
+            pulse_one: Pulse::new(PulseChannel::InternalOne),
+            pulse_two: Pulse::new(PulseChannel::InternalTwo),
+            triangle: Triangle::new(),
+            noise: Noise::new(),
             dmc: Dmc::new(region),
-            pulse_table: pulse_table,
-            tnd_table: tnd_table,
-            region: region,
+            pulse_table,
+            tnd_table,
             state: RefCell::new(ApuState::new(region)),
             samples: vec![0; 33248], //Max cycles for the longer pal frame
             sample_index: 0,
@@ -322,7 +320,7 @@ impl Apu {
         state.oam_req.take()
     }
 
-    pub fn get_samples<'a>(&'a mut self) -> &[i16] {
+    pub fn get_samples(&mut self) -> &[i16] {
         let index = self.sample_index;
         self.sample_index = 0;
         &self.samples[0..index]

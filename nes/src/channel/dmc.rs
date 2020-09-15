@@ -53,19 +53,17 @@ impl DmcState {
 
 pub struct Dmc {
     state: RefCell<DmcState>,
-    region: Region,
 }
 
 impl Dmc {
     pub fn new(region: Region) -> Dmc {
         let state = DmcState {
-            region: region,
+            region,
             ..Default::default()
         };
 
         Dmc {
             state: RefCell::new(state),
-            region: region,
         }
     }
 
@@ -145,12 +143,10 @@ impl Channel for Dmc {
                     } else {
                         0
                     }
+                } else if channel.output_value >= 2 {
+                    -2
                 } else {
-                    if channel.output_value >= 2 {
-                        -2
-                    } else {
-                        0
-                    }
+                    0
                 };
                 channel.output_value = ((channel.output_value as i32) + offset) as u8;
 
