@@ -1,23 +1,25 @@
 use std::thread;
 use std::time::{Duration, Instant};
 
-pub struct FrameSync {
+pub struct NaiveSync {
     frame_ns: u32,
     offset_ns: i64,
     compute_start: Instant,
 }
 
-impl FrameSync {
-    pub fn new(refresh_rate: f64) -> FrameSync {
+impl NaiveSync {
+    pub fn new(refresh_rate: f64) -> NaiveSync {
         let frame_ns = ((1.0 / refresh_rate) * 1000000000.0) as u32;
-        FrameSync {
+        NaiveSync {
             frame_ns,
             offset_ns: 0,
             compute_start: Instant::now(),
         }
     }
+}
 
-    pub fn sync_frame(&mut self) {
+impl FrameSync for NaiveSync {
+    fn sync_frame(&mut self) {
         let dur = self.compute_start.elapsed();
         let delay = self.frame_ns as i64 + self.offset_ns;
         let delay = if delay < 0 {
@@ -39,4 +41,8 @@ impl FrameSync {
         }
         self.compute_start = Instant::now();
     }
+}
+
+pub trait FrameSync {
+    fn sync_frame(&mut self);
 }

@@ -5,10 +5,10 @@ edition = "2018"
 authors = ["Nick Massey <nickmass@nickmass.com>"]
 
 [dependencies]
-glium = "0.27"
-cpal = "0.11"
 blip_buf = "0.1"
-rodio = "0.11"
 clap = "2.33"
-nes_ntsc = { path = "nes_ntsc", version = "0.1"}
+cpal = "0.12"
+crossbeam = "0.7"
+glium = "0.27"
 nes = { path = "nes" }
+nes_ntsc = { path = "nes_ntsc", version = "0.1"}

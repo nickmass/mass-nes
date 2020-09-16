@@ -3,8 +3,8 @@ use blip_buf::BlipBuf;
 use nes::{Cartridge, Machine, Region};
 
 mod ui;
-use ui::audio::Audio;
-use ui::sync::FrameSync;
+use ui::audio::{Audio, CpalAudio, Null as NullAudio};
+use ui::sync::{FrameSync, NaiveSync};
 use ui::window::{Window, WindowHandle};
 
 use nes_ntsc::NesNtscSetup;
@@ -39,17 +39,22 @@ fn run(mut file: File, region: Region) {
     window.run();
 }
 
-fn game_thread(handle: WindowHandle, mut machine: Machine) {
+fn game_thread(window: WindowHandle, mut machine: Machine) {
     let region = machine.region();
-    let mut audio: Box<dyn Audio> = ui::audio::RodioAudio::new(48000)
-        .map(|a| Box::new(a) as Box<dyn Audio>)
-        .or_else(|| ui::audio::CpalAudio::new().map(|a| Box::new(a) as Box<dyn Audio>))
+    println!("{:?}", region);
+
+    let (mut audio, mut frame_sync) = CpalAudio::new(region.refresh_rate())
+        .map(|(audio, sync)| {
+            (
+                Box::new(audio) as Box<dyn Audio>,
+                Box::new(sync) as Box<dyn FrameSync>,
+            )
+        })
         .unwrap_or_else(|| {
             eprintln!("Unable to load audio device");
-            Box::new(ui::audio::Null)
+            let frame_sync = NaiveSync::new(region.refresh_rate());
+            (Box::new(NullAudio), Box::new(frame_sync))
         });
-    //let mut audio = ui::audio::CpalAudio::new().unwrap();
-    //let mut audio = ui::audio::Null;
 
     let sample_rate = audio.sample_rate();
     let mut delta = 0;
@@ -59,30 +64,31 @@ fn game_thread(handle: WindowHandle, mut machine: Machine) {
         sample_rate as f64,
     );
 
-    let mut frame_sync = FrameSync::new(region.refresh_rate());
-    while !handle.closed() {
+    while !window.closed() {
         machine.run();
-        let frame = machine.get_screen();
-        handle.send_frame(frame.into());
-        {
-            let samples = machine.get_audio();
-            let count = samples.len();
 
-            for (i, v) in samples.iter().enumerate() {
-                blip.add_delta(i as u32, *v as i32 - delta);
-                delta = *v as i32;
-            }
-            blip.end_frame(count as u32);
-            while blip.samples_avail() > 0 {
-                let mut buf = vec![0i16; 1024];
-                let count = blip.read_samples(&mut buf, false);
-                buf.truncate(count);
-                audio.add_samples(buf);
-            }
+        let frame = machine.get_screen();
+        window.send_frame(frame.into());
+
+        let samples = machine.get_audio();
+        let count = samples.len();
+
+        for (i, v) in samples.iter().enumerate() {
+            blip.add_delta(i as u32, *v as i32 - delta);
+            delta = *v as i32;
         }
-        frame_sync.sync_frame();
-        let input = handle.input();
+        blip.end_frame(count as u32);
+        while blip.samples_avail() > 0 {
+            let mut buf = vec![0i16; 1024];
+            let count = blip.read_samples(&mut buf, false);
+            buf.truncate(count);
+            audio.add_samples(buf);
+        }
+
+        let input = window.input();
         machine.set_input(input);
+
+        frame_sync.sync_frame();
     }
 
     audio.close();
