@@ -113,8 +113,8 @@ impl Cartridge {
         };
 
         println!(
-            "PRGROM: {}, CHRROM: {}, Mapper: {}",
-            prg_rom_bytes, chr_rom_bytes, mapper_number
+            "PRGROM: {}, CHRROM: {}, PRGRAM: {}, CHRRAM:{}, Mapper: {}",
+            prg_rom_bytes, chr_rom_bytes, prg_ram_bytes, chr_ram_bytes, mapper_number
         );
         Ok(cartridge)
     }

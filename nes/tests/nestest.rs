@@ -7,7 +7,7 @@ const DIR: &'static str = "nestest/";
 fn nestest_no_ppu() {
     helper::run(
         format!("{}nestest.nes", DIR),
-        1,
+        helper::RunUntil::Frame(1),
         helper::Condition::PowerUpPc(0xc000),
     );
 }

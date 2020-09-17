@@ -6,7 +6,7 @@ const DIR: &'static str = "sprite_overflow_tests/";
 fn basics() {
     helper::run(
         format!("{}1.Basics.nes", DIR),
-        30,
+        helper::RunUntil::Frame(30),
         helper::Condition::Equals(0xf8, 0x01),
     );
 }
@@ -15,7 +15,7 @@ fn basics() {
 fn details() {
     helper::run(
         format!("{}2.Details.nes", DIR),
-        20,
+        helper::RunUntil::Frame(20),
         helper::Condition::Equals(0xf8, 0x01),
     );
 }
@@ -24,7 +24,7 @@ fn details() {
 fn timing() {
     helper::run(
         format!("{}3.Timing.nes", DIR),
-        150,
+        helper::RunUntil::Frame(150),
         helper::Condition::Equals(0xf8, 0x01),
     );
 }
@@ -33,7 +33,7 @@ fn timing() {
 fn obscure() {
     helper::run(
         format!("{}4.Obscure.nes", DIR),
-        20,
+        helper::RunUntil::Frame(20),
         helper::Condition::Equals(0xf8, 0x01),
     );
 }
@@ -42,7 +42,7 @@ fn obscure() {
 fn emulator() {
     helper::run(
         format!("{}5.Emulator.nes", DIR),
-        20,
+        helper::RunUntil::Frame(20),
         helper::Condition::Equals(0xf8, 0x01),
     );
 }

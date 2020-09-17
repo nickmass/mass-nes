@@ -11,7 +11,12 @@ pub enum Condition {
     PowerUpPc(u16),
 }
 
-pub fn run<T>(rom: T, frames: u32, condition: Condition)
+pub enum RunUntil {
+    Frame(u32),
+    NotEqual(u16, u8),
+}
+
+pub fn run<T>(rom: T, run_until: RunUntil, condition: Condition)
 where
     T: AsRef<str>,
 {
@@ -41,28 +46,32 @@ where
 
         r.push(UserInput::PlayerOne(p1));
         machine.set_input(r);
-
-        {
-            let (system, state) = machine.get_debug();
-            let nes_frame = system.debug.frame(state);
-            if nes_frame >= frames {
-                match condition {
-                    Condition::Equals(a, v) => {
-                        let nes_val = system.debug.peek(system, state, a);
-                        assert!(
-                            v == nes_val,
-                            "Expected '0x{:04X}' to be '0x{:02X}', found '0x{:02X}'.",
-                            a,
-                            v,
-                            nes_val
-                        );
-                    }
-                    _ => (),
-                }
-                break;
-            }
-        }
-
         machine.run();
+
+        let (system, state) = machine.get_debug();
+        let nes_frame = system.debug.frame(state);
+        let done = match run_until {
+            RunUntil::Frame(frame) => nes_frame >= frame,
+            RunUntil::NotEqual(address, value) => {
+                let nes_val = system.debug.peek(system, state, address);
+                value != nes_val
+            }
+        };
+        if done {
+            match condition {
+                Condition::Equals(a, v) => {
+                    let nes_val = system.debug.peek(system, state, a);
+                    assert!(
+                        v == nes_val,
+                        "Expected '0x{:04X}' to be '0x{:02X}', found '0x{:02X}'.",
+                        a,
+                        v,
+                        nes_val,
+                    );
+                }
+                _ => (),
+            }
+            break;
+        }
     }
 }
