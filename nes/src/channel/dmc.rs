@@ -74,7 +74,7 @@ impl Dmc {
         channel.sample_buffer_empty = false;
         channel.address_counter = channel.address_counter.wrapping_add(1);
         channel.address_counter |= 0x8000;
-        channel.bytes_remaining -= 1;
+        channel.bytes_remaining = channel.bytes_remaining.saturating_sub(1);
         if channel.bytes_remaining == 0 {
             if channel.loop_enabled() {
                 channel.bytes_remaining = channel.sample_length();

@@ -10,6 +10,7 @@ use crate::ppu::{Ppu, PpuState};
 
 pub use crate::input::{Controller, InputDevice};
 
+#[derive(Debug, Copy, Clone)]
 pub enum UserInput {
     PlayerOne(Controller),
     Power,
@@ -29,77 +30,77 @@ impl Default for Region {
 }
 
 impl Region {
-    pub fn frame_ticks(&self) -> f64 {
+    pub const fn frame_ticks(&self) -> f64 {
         match *self {
             Region::Ntsc => 29780.5,
             Region::Pal => 33247.5,
         }
     }
 
-    pub fn default_palette(&self) -> &'static [u8; 1536] {
+    pub const fn default_palette(&self) -> &'static [u8; 1536] {
         match *self {
             Region::Ntsc => include_bytes!("default.pal"),
             Region::Pal => include_bytes!("default.pal"),
         }
     }
 
-    pub fn vblank_line(&self) -> u32 {
+    pub const fn vblank_line(&self) -> u32 {
         match *self {
             Region::Ntsc => 240,
             Region::Pal => 239,
         }
     }
 
-    pub fn prerender_line(&self) -> u32 {
+    pub const fn prerender_line(&self) -> u32 {
         match *self {
             Region::Ntsc => 261,
             Region::Pal => 310,
         }
     }
 
-    pub fn uneven_frames(&self) -> bool {
+    pub const fn uneven_frames(&self) -> bool {
         match *self {
             Region::Ntsc => true,
             Region::Pal => false,
         }
     }
 
-    pub fn emph_bits(&self) -> EmphMode {
+    pub const fn emph_bits(&self) -> EmphMode {
         match *self {
             Region::Ntsc => EmphMode::Bgr,
             Region::Pal => EmphMode::Brg,
         }
     }
 
-    pub fn extra_ppu_tick(&self) -> bool {
+    pub const fn extra_ppu_tick(&self) -> bool {
         match *self {
             Region::Ntsc => false,
             Region::Pal => true,
         }
     }
 
-    pub fn refresh_rate(&self) -> f64 {
+    pub const fn refresh_rate(&self) -> f64 {
         match *self {
             Region::Ntsc => 60.0988,
             Region::Pal => 50.007,
         }
     }
 
-    pub fn five_step_seq(&self) -> &'static [u32] {
+    pub const fn five_step_seq(&self) -> &'static [u32] {
         match *self {
             Region::Ntsc => FIVE_STEP_SEQ_NTSC,
             Region::Pal => FIVE_STEP_SEQ_PAL,
         }
     }
 
-    pub fn four_step_seq(&self) -> &'static [u32] {
+    pub const fn four_step_seq(&self) -> &'static [u32] {
         match *self {
             Region::Ntsc => FOUR_STEP_SEQ_NTSC,
             Region::Pal => FOUR_STEP_SEQ_PAL,
         }
     }
 
-    pub fn dmc_rates(&self) -> &'static [u16] {
+    pub const fn dmc_rates(&self) -> &'static [u16] {
         match *self {
             Region::Ntsc => DMC_RATES_NTSC,
             Region::Pal => DMC_RATES_PAL,
@@ -138,7 +139,8 @@ impl Machine {
         let mut state = Box::new(SystemState::default());
         let system = System::new(region, cartridge, &mut state);
 
-        //system.debug.log_for(&mut state, 10000);
+        //system.debug.log_for(&mut state, 1000);
+        //system.debug.log_range(&mut state, 0xe345, 0xe358);
 
         Machine {
             state,
@@ -158,7 +160,7 @@ impl Machine {
 
     pub fn run(&mut self) {
         let last_frame = self.state.ppu.frame;
-        //self.system.debug.log_for(&mut self.state, 100000);
+        //self.system.debug.log_for(&mut self.state, 1000);
         while self.state.ppu.frame == last_frame {
             let tick_result = self.system.cpu.tick(self.system.cpu_pin_in);
 
@@ -167,6 +169,17 @@ impl Machine {
             self.system
                 .debug
                 .trace(&self.system, &mut self.state, cpu_state, ppu_state);
+
+            if self.state.debug.logging_range {
+                eprintln!("{:2x?}   {}", tick_result, self.system.cpu_pin_in.data);
+            }
+
+            self.system.apu.tick();
+
+            self.system.mapper.tick(&self.system, &mut self.state);
+
+            let apu_irq = self.system.apu.get_irq();
+            let mapper_irq = self.system.mapper.get_irq();
 
             match tick_result {
                 TickResult::Read(addr) => {
@@ -186,20 +199,25 @@ impl Machine {
                 TickResult::DmcRead(value) => self.system.apu.dmc.dmc_read(value),
             }
 
-            self.system.apu.tick();
-
-            self.system.mapper.tick(&self.system, &mut self.state);
-
-            let apu_irq = self.system.apu.get_irq();
-            let mapper_irq = self.system.mapper.get_irq();
-
             self.system.cpu_pin_in.irq = apu_irq | mapper_irq;
             self.system.cpu_pin_in.dmc_req = self.system.apu.get_dmc_req();
             self.system.cpu_pin_in.oam_req = self.system.apu.get_oam_req();
 
             self.system.ppu.tick(&self.system, &mut self.state);
+            let ppu_state = self.system.ppu.debug_state(&mut self.state);
+            self.system
+                .debug
+                .trace_ppu(&self.system, &mut self.state, cpu_state, ppu_state);
             self.system.ppu.tick(&self.system, &mut self.state);
+            let ppu_state = self.system.ppu.debug_state(&mut self.state);
+            self.system
+                .debug
+                .trace_ppu(&self.system, &mut self.state, cpu_state, ppu_state);
             self.system.ppu.tick(&self.system, &mut self.state);
+            let ppu_state = self.system.ppu.debug_state(&mut self.state);
+            self.system
+                .debug
+                .trace_ppu(&self.system, &mut self.state, cpu_state, ppu_state);
             if self.system.region.extra_ppu_tick() && self.cycle % 5 == 0 {
                 self.system.ppu.tick(&self.system, &mut self.state);
             }
@@ -229,7 +247,7 @@ impl Machine {
         }
     }
 
-    fn handle_input(&mut self, input: UserInput) {
+    pub fn handle_input(&mut self, input: UserInput) {
         match input {
             UserInput::PlayerOne(c) => self.system.input.set_input(c.to_byte()),
             UserInput::Power => self.system.power(&mut self.state),

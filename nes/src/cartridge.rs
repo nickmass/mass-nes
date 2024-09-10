@@ -72,7 +72,12 @@ impl Cartridge {
             return Err(CartridgeError::CorruptedFile);
         }
 
-        let prg_rom_bytes = (rom[4] as u32) * 2u32.pow(14);
+        let nes2 = rom[7] & 0xc == 0x8;
+        let prg_rom_bytes = if !nes2 {
+            (rom[4] as u32) * 2u32.pow(14)
+        } else {
+            (rom[4] as u32 | ((rom[9] as u32 & 0xf) << 8)) * 2u32.pow(14)
+        };
         let chr_rom_bytes = (rom[5] as u32) * 2u32.pow(13);
 
         let chr_ram_bytes = if chr_rom_bytes == 0 { 0x2000 } else { 0 };

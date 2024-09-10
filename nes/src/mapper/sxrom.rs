@@ -63,6 +63,7 @@ impl Sxrom {
 
     fn write_cpu(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
         let mut rom = self.state.borrow_mut();
+
         if addr & 0x8000 == 0 {
             //prg ram
             if !rom.prg_ram_write_protect {
@@ -71,9 +72,10 @@ impl Sxrom {
             return;
         }
         if value & 0x80 != 0 {
+            rom.regs[0] |= 0x0c;
+            self.sync(&mut *rom, &system.ppu, state);
             rom.shift_reg = 0;
             rom.counter = 0;
-            self.sync(&mut *rom, &system.ppu, state);
         } else {
             rom.shift_reg |= ((value as u32 & 1) << rom.counter) as u32;
             rom.counter += 1;
@@ -128,12 +130,6 @@ impl Sxrom {
         }
 
         rom.prg_ram_write_protect = rom.regs[3] & 0x10 != 0;
-
-        if rom.counter == 0 {
-            rom.prg
-                .map(0x8000, 16, (rom.regs[3] & 0xf) as usize, BankKind::Rom);
-            rom.prg.map(0x8000, 16, rom.last, BankKind::Rom);
-        }
 
         match rom.regs[0] & 0x10 {
             0x0 => {

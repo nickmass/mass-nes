@@ -3,6 +3,27 @@ use crate::nametables::{Nametables, NametablesState};
 use crate::ppu_step::*;
 use crate::system::{EmphMode, Region, System, SystemState};
 
+#[derive(Copy, Clone)]
+struct SpriteData {
+    active: u8,
+    x: u8,
+    attributes: u8,
+    pattern_high: u8,
+    pattern_low: u8,
+}
+
+impl Default for SpriteData {
+    fn default() -> Self {
+        SpriteData {
+            active: 0,
+            x: 0,
+            attributes: 0,
+            pattern_high: 0,
+            pattern_low: 0,
+        }
+    }
+}
+
 pub struct PpuState {
     current_tick: u64,
     last_status_read: u64,
@@ -58,12 +79,9 @@ pub struct PpuState {
     line_oam_index: usize,
     sprite_zero_on_line: bool,
     sprite_zero_on_next_line: bool,
+    sprite_any_on_line: bool,
 
-    sprite_active: [u8; 8],
-    sprite_x: [u8; 8],
-    sprite_attr: [u8; 8],
-    sprite_pattern_high: [u8; 8],
-    sprite_pattern_low: [u8; 8],
+    sprite_data: [SpriteData; 8],
     sprite_render_index: usize,
 
     pub nametables: NametablesState,
@@ -73,6 +91,8 @@ pub struct PpuState {
 
     ppu_steps: PpuSteps,
     step: PpuStep,
+
+    triggered_nmi: bool,
 }
 
 impl Default for PpuState {
@@ -132,12 +152,9 @@ impl Default for PpuState {
             line_oam_index: 0,
             sprite_zero_on_line: false,
             sprite_zero_on_next_line: false,
+            sprite_any_on_line: false,
 
-            sprite_active: [0; 8],
-            sprite_x: [0; 8],
-            sprite_attr: [0; 8],
-            sprite_pattern_high: [0; 8],
-            sprite_pattern_low: [0; 8],
+            sprite_data: [SpriteData::default(); 8],
             sprite_render_index: 0,
 
             nametables: Default::default(),
@@ -147,6 +164,8 @@ impl Default for PpuState {
 
             ppu_steps: generate_steps(Region::default()),
             step: PpuStep::default(),
+
+            triggered_nmi: false,
         }
     }
 }
@@ -279,6 +298,8 @@ pub struct PpuDebugState {
     pub tick: u64,
     pub scanline: u32,
     pub dot: u32,
+    pub vblank: bool,
+    pub triggered_nmi: bool,
 }
 
 pub struct Ppu {
@@ -327,6 +348,8 @@ impl Ppu {
             tick,
             scanline,
             dot,
+            vblank: state.ppu.vblank,
+            triggered_nmi: state.ppu.triggered_nmi,
         }
     }
 
@@ -561,6 +584,7 @@ impl Ppu {
     }
 
     pub fn tick(&self, system: &System, state: &mut SystemState) {
+        state.ppu.triggered_nmi = false;
         if state.ppu.reset_delay != 0 {
             state.ppu.reset_delay -= 1;
         }
@@ -575,13 +599,18 @@ impl Ppu {
                     step = state.ppu.ppu_steps.step();
                 }
             }
+            Some(StateChange::SetNmi) => {
+                if state.ppu.current_tick > state.ppu.last_status_read {
+                    if state.ppu.is_nmi_enabled() {
+                        system.cpu.nmi_req(1);
+                        state.ppu.triggered_nmi = true;
+                        state.ppu.last_nmi_set = state.ppu.current_tick;
+                    }
+                }
+            }
             Some(StateChange::SetVblank) => {
                 if state.ppu.current_tick > state.ppu.last_status_read + 1 {
                     state.ppu.vblank = true;
-                    if state.ppu.is_nmi_enabled() {
-                        system.cpu.nmi_req(1);
-                        state.ppu.last_nmi_set = state.ppu.current_tick;
-                    }
                 }
             }
             Some(StateChange::ClearFlags) => {
@@ -670,6 +699,7 @@ impl Ppu {
                 Some(SpriteStep::Hblank) => {
                     state.ppu.sprite_n = 0;
                     self.sprite_eval(system, state, step.scanline);
+                    state.ppu.sprite_any_on_line = false;
                 }
                 Some(SpriteStep::Fetch(0)) => self.sprite_oam_read(state, 0),
                 Some(SpriteStep::Fetch(1)) => {
@@ -719,15 +749,16 @@ impl Ppu {
         let mut sprite_zero = false;
         let mut sprite_pixel = 0;
         let mut behind_bg = false;
-        if state.ppu.is_sprites_enabled() {
-            for x in 0..8 {
-                if state.ppu.sprite_x[x] == 0 {
-                    state.ppu.sprite_active[x] = 1;
+        let left_sprites = state.ppu.is_left_sprites();
+        if state.ppu.is_sprites_enabled() && state.ppu.sprite_any_on_line {
+            for (idx, sprite) in state.ppu.sprite_data.iter_mut().enumerate() {
+                if sprite.x == 0 {
+                    sprite.active = 1;
                 }
-                if state.ppu.sprite_active[x] > 0 && state.ppu.sprite_active[x] <= 8 {
-                    let attr = state.ppu.sprite_attr[x];
-                    let high = state.ppu.sprite_pattern_high[x];
-                    let low = state.ppu.sprite_pattern_low[x];
+                if sprite.active > 0 && sprite.active <= 8 {
+                    let attr = sprite.attributes;
+                    let high = sprite.pattern_high;
+                    let low = sprite.pattern_low;
                     let flip_horz = attr & 0x40 != 0;
                     let pal = (attr & 0x3) << 2;
 
@@ -735,30 +766,29 @@ impl Ppu {
                     let mut color = if high & pal_bit != 0 { 2 } else { 0 }
                         | if low & pal_bit != 0 { 1 } else { 0 };
 
-                    if !state.ppu.is_left_sprites() && dot < 8 {
+                    if !left_sprites && dot < 8 {
                         color = 0;
                     }
 
                     if color != 0 && sprite_pixel == 0 {
-                        sprite_zero = x == 0 && state.ppu.sprite_zero_on_line && dot < 255;
+                        sprite_zero = idx == 0 && state.ppu.sprite_zero_on_line && dot < 255;
                         sprite_pixel = color | pal;
                         behind_bg = attr & 0x20 != 0;
                     }
 
-                    state.ppu.sprite_active[x] += 1;
+                    sprite.active += 1;
 
                     if flip_horz {
-                        state.ppu.sprite_pattern_high[x] >>= 1;
-                        state.ppu.sprite_pattern_low[x] >>= 1;
+                        sprite.pattern_high >>= 1;
+                        sprite.pattern_low >>= 1;
                     } else {
-                        state.ppu.sprite_pattern_high[x] <<= 1;
-                        state.ppu.sprite_pattern_low[x] <<= 1;
+                        sprite.pattern_high <<= 1;
+                        sprite.pattern_low <<= 1;
                     }
                 }
-            }
-            for x in 0..8 {
-                if state.ppu.sprite_active[x] == 0 && state.ppu.sprite_x[x] != 0 {
-                    state.ppu.sprite_x[x] -= 1;
+
+                if sprite.active == 0 && sprite.x != 0 {
+                    sprite.x -= 1;
                 }
             }
         }
@@ -834,7 +864,7 @@ impl Ppu {
 
     fn sprite_fetch(&self, system: &System, state: &mut SystemState, scanline: u32, high: bool) {
         let index = state.ppu.sprite_render_index;
-        let sprite_y = state.ppu.line_oam_data[(index * 4)];
+        let sprite_y = state.ppu.line_oam_data[index * 4];
         let sprite_tile = state.ppu.line_oam_data[(index * 4) + 1] as u16;
         let sprite_attr = state.ppu.line_oam_data[(index * 4) + 2];
         let sprite_x = state.ppu.line_oam_data[(index * 4) + 3];
@@ -862,19 +892,25 @@ impl Ppu {
             ((sprite_tile << 4) | state.ppu.sprite_pattern_table()) + line
         };
 
-        state.ppu.sprite_x[index] = sprite_x;
-        state.ppu.sprite_attr[index] = sprite_attr;
-        state.ppu.sprite_active[index] = 0;
+        let pattern_addr = if high { tile_addr | 0x08 } else { tile_addr };
+        let pattern_byte = self.bus.read(system, state, pattern_addr);
+        let sprite_on_line = self.sprite_on_line(system, state, sprite_y, scanline);
+        state.ppu.sprite_any_on_line |= sprite_on_line;
+
+        let sprite = &mut state.ppu.sprite_data[index];
+        sprite.x = sprite_x;
+        sprite.attributes = sprite_attr;
+        sprite.active = 0;
         if high {
-            state.ppu.sprite_pattern_high[index] = self.bus.read(system, state, tile_addr | 0x08);
-            if !self.sprite_on_line(system, state, sprite_y, scanline) {
-                state.ppu.sprite_pattern_high[index] = 0;
+            sprite.pattern_high = pattern_byte;
+            if !sprite_on_line {
+                sprite.pattern_high = 0;
             }
             state.ppu.sprite_render_index += 1;
         } else {
-            state.ppu.sprite_pattern_low[index] = self.bus.read(system, state, tile_addr);
-            if !self.sprite_on_line(system, state, sprite_y, scanline) {
-                state.ppu.sprite_pattern_low[index] = 0;
+            sprite.pattern_low = pattern_byte;
+            if !sprite_on_line {
+                sprite.pattern_low = 0;
             }
         }
     }

@@ -2,6 +2,7 @@ use glium::texture;
 use glium::texture::integral_texture2d::IntegralTexture2d;
 use glium::texture::texture2d::Texture2d;
 use glium::texture::{ClientFormat, RawImage2d};
+use glium::uniforms::UniformValue;
 
 pub enum FilterScaling {
     Nearest,
@@ -13,7 +14,15 @@ enum FilterTexture {
     IntegralTexture2d(IntegralTexture2d),
 }
 
-pub struct FilterUniform {
+enum FilterUniform {
+    Sampler(FilterSampler),
+    Simple {
+        name: String,
+        value: UniformValue<'static>,
+    },
+}
+
+pub struct FilterSampler {
     name: String,
     texture: FilterTexture,
     scaling: FilterScaling,
@@ -31,55 +40,77 @@ impl FilterUniforms {
     }
 
     pub fn add_2d_uniform(&mut self, name: String, tex: Texture2d, scale: FilterScaling) {
-        let uni = FilterUniform {
+        let uni = FilterSampler {
             name,
             texture: FilterTexture::Texture2d(tex),
             scaling: scale,
         };
 
-        self.uniforms.push(uni);
+        self.uniforms.push(FilterUniform::Sampler(uni));
     }
 
     pub fn add_i2d_uniform(&mut self, name: String, tex: IntegralTexture2d, scale: FilterScaling) {
-        let uni = FilterUniform {
+        let uni = FilterSampler {
             name,
             texture: FilterTexture::IntegralTexture2d(tex),
             scaling: scale,
         };
 
-        self.uniforms.push(uni);
+        self.uniforms.push(FilterUniform::Sampler(uni));
+    }
+
+    pub fn add<S: Into<String>, T: ToUniform>(&mut self, name: S, value: T) {
+        self.uniforms.push(FilterUniform::Simple {
+            name: name.into(),
+            value: value.to_uniform(),
+        })
     }
 }
 
 impl glium::uniforms::Uniforms for FilterUniforms {
     fn visit_values<'b, F: FnMut(&str, glium::uniforms::UniformValue<'b>)>(&'b self, mut visit: F) {
-        use glium::uniforms::{MagnifySamplerFilter, MinifySamplerFilter, UniformValue};
+        use glium::uniforms::{MagnifySamplerFilter, MinifySamplerFilter};
         for uni in self.uniforms.iter() {
-            let (mag_scale, min_scale) = match uni.scaling {
-                FilterScaling::Nearest => {
-                    (MagnifySamplerFilter::Nearest, MinifySamplerFilter::Nearest)
-                }
-                FilterScaling::Linear => {
-                    (MagnifySamplerFilter::Linear, MinifySamplerFilter::Linear)
-                }
-            };
+            match uni {
+                FilterUniform::Simple { name, value } => visit(&*name, value.clone()),
+                FilterUniform::Sampler(uni) => {
+                    let (mag_scale, min_scale) = match uni.scaling {
+                        FilterScaling::Nearest => {
+                            (MagnifySamplerFilter::Nearest, MinifySamplerFilter::Nearest)
+                        }
+                        FilterScaling::Linear => {
+                            (MagnifySamplerFilter::Linear, MinifySamplerFilter::Linear)
+                        }
+                    };
 
-            let mut sampler = glium::uniforms::SamplerBehavior::default();
-            sampler.magnify_filter = mag_scale;
-            sampler.minify_filter = min_scale;
+                    let mut sampler = glium::uniforms::SamplerBehavior::default();
+                    sampler.magnify_filter = mag_scale;
+                    sampler.minify_filter = min_scale;
 
-            match uni.texture {
-                FilterTexture::Texture2d(ref tex) => {
-                    visit(&*uni.name, UniformValue::Texture2d(&tex, Some(sampler)));
-                }
-                FilterTexture::IntegralTexture2d(ref tex) => {
-                    visit(
-                        &*uni.name,
-                        UniformValue::IntegralTexture2d(&tex, Some(sampler)),
-                    );
+                    match uni.texture {
+                        FilterTexture::Texture2d(ref tex) => {
+                            visit(&*uni.name, UniformValue::Texture2d(&tex, Some(sampler)));
+                        }
+                        FilterTexture::IntegralTexture2d(ref tex) => {
+                            visit(
+                                &*uni.name,
+                                UniformValue::IntegralTexture2d(&tex, Some(sampler)),
+                            );
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+pub trait ToUniform {
+    fn to_uniform(self) -> UniformValue<'static>;
+}
+
+impl ToUniform for (f32, f32) {
+    fn to_uniform(self) -> UniformValue<'static> {
+        UniformValue::Vec2([self.0, self.1])
     }
 }
 
@@ -87,9 +118,9 @@ pub trait Filter {
     fn get_dimensions(&self) -> (u32, u32);
     fn get_fragment_shader(&self) -> String;
     fn get_vertex_shader(&self) -> String;
-    fn process(
+    fn process<F: glium::backend::Facade>(
         &self,
-        display: &glium::Display,
+        display: &F,
         render_size: (f64, f64),
         screen: &[u16],
     ) -> FilterUniforms;
@@ -145,9 +176,9 @@ impl Filter for PalettedFilter {
         .to_string()
     }
 
-    fn process(
+    fn process<F: glium::backend::Facade>(
         &self,
-        display: &glium::Display,
+        display: &F,
         _render_size: (f64, f64),
         screen: &[u16],
     ) -> FilterUniforms {

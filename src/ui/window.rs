@@ -1,66 +1,35 @@
-use glium::glutin::event::Event;
-use glium::glutin::event::VirtualKeyCode as Key;
-use glium::glutin::event::WindowEvent;
-use glium::glutin::event_loop::{EventLoop, EventLoopProxy};
+use gilrs::{Axis, Button};
+use glium::glutin::config::ConfigTemplateBuilder;
 use glium::implement_vertex;
-use glium::Display;
-use glium::Surface;
+use glium::winit::keyboard::{KeyCode, PhysicalKey};
+use glium::{glutin, winit};
+use glium::{Display, Surface};
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 
+use super::audio::Audio;
+use super::gamepad::{GamepadEvent, GilrsInput};
 use super::gfx::Filter;
+use super::sync::FrameSync;
 
 use nes::{Controller, UserInput};
 
 enum UserEvent {
     Frame(Frame),
+    Samples(Samples),
+    Gamepad(GamepadEvent),
+    Sync,
+}
+
+impl From<GamepadEvent> for UserEvent {
+    fn from(value: GamepadEvent) -> Self {
+        UserEvent::Gamepad(value)
+    }
 }
 
 struct Frame(Vec<u16>);
 
-pub struct WindowHandle {
-    proxy: EventLoopProxy<UserEvent>,
-    input: Arc<Mutex<HashMap<Key, bool>>>,
-    closed: Arc<AtomicBool>,
-}
-
-impl WindowHandle {
-    pub fn send_frame(&self, frame: Vec<u16>) {
-        let _ = self.proxy.send_event(UserEvent::Frame(Frame(frame)));
-    }
-
-    pub fn input(&self) -> Vec<UserInput> {
-        let mut r = Vec::new();
-        let input = self.input.lock().unwrap();
-        let p1 = Controller {
-            a: *input.get(&Key::Z).unwrap_or(&false),
-            b: *input.get(&Key::X).unwrap_or(&false),
-            select: *input.get(&Key::RShift).unwrap_or(&false),
-            start: *input.get(&Key::Return).unwrap_or(&false),
-            up: *input.get(&Key::Up).unwrap_or(&false),
-            down: *input.get(&Key::Down).unwrap_or(&false),
-            left: *input.get(&Key::Left).unwrap_or(&false),
-            right: *input.get(&Key::Right).unwrap_or(&false),
-        };
-
-        if *input.get(&Key::Delete).unwrap_or(&false) {
-            r.push(UserInput::Power);
-        }
-
-        if *input.get(&Key::Back).unwrap_or(&false) {
-            r.push(UserInput::Reset);
-        }
-
-        r.push(UserInput::PlayerOne(p1));
-        r
-    }
-
-    pub fn closed(&self) -> bool {
-        self.closed.load(Ordering::Relaxed)
-    }
-}
+struct Samples(Vec<i16>);
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -70,31 +39,210 @@ struct Vertex {
 
 implement_vertex!(Vertex, position, tex_coords);
 
-pub struct Window<T: Filter + 'static> {
+pub struct App<F, A, S> {
+    audio: A,
+    sync: Option<S>,
+    gfx: Gfx<F>,
+    gamepad: Option<GilrsInput<UserEvent>>,
+    window: winit::window::Window,
+    event_loop: Option<winit::event_loop::EventLoop<UserEvent>>,
+    input: InputMap,
+    input_tx: Option<std::sync::mpsc::Sender<UserInput>>,
+}
+
+impl<F: Filter, A: Audio, S: FrameSync> App<F, A, S> {
+    pub fn new(filter: F, audio: A, sync: S) -> Self {
+        let event_loop = winit::event_loop::EventLoop::with_user_event()
+            .build()
+            .unwrap();
+
+        let dims = filter.get_dimensions();
+
+        let (window, display) = glium::backend::glutin::SimpleWindowBuilder::new()
+            .with_config_template_builder(
+                ConfigTemplateBuilder::new().with_swap_interval(None, None),
+            )
+            .with_inner_size(dims.0, dims.1)
+            .with_title("Mass NES")
+            .build(&event_loop);
+
+        let gfx = Gfx::new(display, filter);
+
+        event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
+        window.set_cursor_visible(false);
+
+        let gamepad = GilrsInput::new(event_loop.create_proxy()).unwrap();
+
+        Self {
+            audio,
+            sync: Some(sync),
+            window,
+            gfx,
+            event_loop: Some(event_loop),
+            input: InputMap::new(),
+            input_tx: None,
+            gamepad: Some(gamepad),
+        }
+    }
+
+    fn proxy(&self) -> winit::event_loop::EventLoopProxy<UserEvent> {
+        let Some(event_loop) = self.event_loop.as_ref() else {
+            panic!("no event loop created");
+        };
+
+        event_loop.create_proxy()
+    }
+
+    pub fn nes_io(&mut self) -> (NesInputs, NesOutputs) {
+        let output = NesOutputs {
+            proxy: self.proxy(),
+        };
+
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        self.input_tx = Some(tx);
+
+        let input = NesInputs { rx };
+
+        (input, output)
+    }
+
+    pub fn run(mut self) -> ! {
+        if let Some(mut sync) = self.sync.take() {
+            let sync_proxy = self.proxy();
+            std::thread::Builder::new()
+                .name("sync".into())
+                .spawn(move || loop {
+                    sync.sync_frame();
+                    let _ = sync_proxy.send_event(UserEvent::Sync);
+                })
+                .unwrap();
+        } else {
+            panic!("no frame sync provided");
+        }
+
+        if let Some(gamepad) = self.gamepad.take() {
+            gamepad.run();
+        }
+
+        let Some(event_loop) = self.event_loop.take() else {
+            panic!("no event loop created");
+        };
+
+        let Err(err) = event_loop.run_app(&mut self) else {
+            std::process::exit(0)
+        };
+
+        panic!("{:?}", err)
+    }
+}
+
+impl<F: Filter, A: Audio, S: FrameSync> winit::application::ApplicationHandler<UserEvent>
+    for App<F, A, S>
+{
+    fn resumed(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {}
+
+    fn window_event(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        _window_id: winit::window::WindowId,
+        event: winit::event::WindowEvent,
+    ) {
+        match event {
+            winit::event::WindowEvent::Resized(size) => {
+                self.gfx.resize(size.into());
+                self.window.request_redraw();
+            }
+            winit::event::WindowEvent::CloseRequested => {
+                event_loop.exit();
+            }
+            winit::event::WindowEvent::KeyboardInput {
+                device_id: _,
+                event,
+                is_synthetic: _,
+            } => {
+                if let PhysicalKey::Code(key) = event.physical_key {
+                    if event.state.is_pressed() {
+                        self.input.press(key);
+                    } else {
+                        self.input.release(key);
+                    }
+                }
+            }
+            winit::event::WindowEvent::ScaleFactorChanged {
+                scale_factor: _,
+                inner_size_writer: _,
+            } => {
+                self.window.request_redraw();
+            }
+            winit::event::WindowEvent::RedrawRequested => {
+                if self.window.is_visible() != Some(false) {
+                    self.gfx.render();
+                }
+            }
+            _ => (),
+        }
+    }
+
+    fn user_event(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop, event: UserEvent) {
+        match event {
+            UserEvent::Frame(frame) => {
+                self.gfx.update_frame(frame);
+                self.window.request_redraw();
+            }
+            UserEvent::Samples(Samples(samples)) => self.audio.add_samples(samples),
+            UserEvent::Sync => {
+                if let Some(tx) = self.input_tx.as_ref() {
+                    let p1 = self.input.controller();
+
+                    if self.input.reset() {
+                        let _ = tx.send(UserInput::Reset);
+                    }
+
+                    if self.input.power() {
+                        let _ = tx.send(UserInput::Power);
+                    }
+
+                    let _ = tx.send(UserInput::PlayerOne(p1));
+                }
+            }
+            UserEvent::Gamepad(ev) => match ev {
+                GamepadEvent::Button {
+                    gamepad_id: _,
+                    state,
+                    button,
+                } => {
+                    if state.is_pressed() {
+                        self.input.press(button);
+                    } else {
+                        self.input.release(button);
+                    }
+                }
+                _ => (),
+            },
+        }
+    }
+}
+
+struct Gfx<T> {
     filter: T,
-    event_loop: Option<EventLoop<UserEvent>>,
-    proxy: EventLoopProxy<UserEvent>,
-    display: Display,
+    display: Display<glutin::surface::WindowSurface>,
     indicies: glium::index::NoIndices,
     program: glium::Program,
     vertex_buffer: glium::VertexBuffer<Vertex>,
-    closed: Arc<AtomicBool>,
-    input: Arc<Mutex<HashMap<Key, bool>>>,
     size: (f64, f64),
+    frame: Option<Vec<u16>>,
 }
 
-impl<T: Filter> Window<T> {
-    pub fn new(filter: T) -> Window<T> {
-        let dims = filter.get_dimensions();
-        let event_loop = glium::glutin::event_loop::EventLoop::with_user_event();
-        let window = glium::glutin::window::WindowBuilder::new()
-            .with_inner_size(glium::glutin::dpi::PhysicalSize::new(dims.0, dims.1))
-            .with_title("Mass NES");
-
-        let context = glium::glutin::ContextBuilder::new();
-
-        let display = glium::Display::new(window, context, &event_loop)
-            .expect("Could not initialize display");
+impl<T: Filter> Gfx<T> {
+    fn new(display: Display<glutin::surface::WindowSurface>, filter: T) -> Self {
+        eprintln!(
+            "OpenGL: ver: {}, glsl: {:?}, vendor: {}, renderer: {}",
+            display.get_opengl_version_string(),
+            display.get_supported_glsl_version(),
+            display.get_opengl_vendor_string(),
+            display.get_opengl_renderer_string()
+        );
 
         let top_right = Vertex {
             position: [1.0, 1.0],
@@ -123,75 +271,44 @@ impl<T: Filter> Window<T> {
             &*filter.get_vertex_shader(),
             &*filter.get_fragment_shader(),
             None,
-        )
-        .unwrap();
+        );
 
-        let closed = Arc::new(AtomicBool::new(false));
-        let input = Arc::new(Mutex::new(HashMap::new()));
-        let proxy = event_loop.create_proxy();
+        let program = match program {
+            Ok(p) => p,
+            Err(glium::CompilationError(msg, kind)) => {
+                panic!("Shader Compilation Errror '{kind:?}':\n{msg}")
+            }
+            Err(e) => panic!("{e:?}"),
+        };
 
-        Window {
+        let size = filter.get_dimensions();
+        let size = (size.0 as f64, size.1 as f64);
+
+        Self {
             filter,
-            event_loop: Some(event_loop),
-            proxy,
             display,
             indicies,
             program,
             vertex_buffer,
-            closed,
-            input,
-            size: (dims.0 as f64, dims.1 as f64),
+            size,
+            frame: None,
         }
     }
 
-    pub fn handle(&self) -> WindowHandle {
-        WindowHandle {
-            proxy: self.proxy.clone(),
-            input: self.input.clone(),
-            closed: self.closed.clone(),
-        }
+    pub fn resize(&mut self, size: (u32, u32)) {
+        self.display.resize(size);
+        let size = (size.0 as f64, size.1 as f64);
+        self.size = size;
     }
 
-    pub fn run(mut self) {
-        let mut frame = None;
-        let event_loop = self.event_loop.take().unwrap();
-        event_loop.run(move |event, _window_id, control_flow| match event {
-            Event::WindowEvent { event, .. } => match event {
-                WindowEvent::Resized(new_size) => {
-                    self.size = new_size.into();
-                }
-                WindowEvent::CloseRequested => {
-                    self.closed.store(true, Ordering::SeqCst);
-                    *control_flow = glium::glutin::event_loop::ControlFlow::Exit;
-                }
-                WindowEvent::KeyboardInput { input, .. } => {
-                    let pressed = input.state == glium::glutin::event::ElementState::Pressed;
-                    if let Some(key) = input.virtual_keycode {
-                        let mut input = self.input.lock().unwrap();
-                        input.insert(key, pressed);
-                    }
-                }
-                _ => (),
-            },
-            Event::UserEvent(event) => match event {
-                UserEvent::Frame(next_frame) => {
-                    frame = Some(next_frame.0);
-                    self.display.gl_window().window().request_redraw();
-                }
-            },
-            Event::MainEventsCleared => {
-                *control_flow = glium::glutin::event_loop::ControlFlow::Wait;
-            }
-            Event::RedrawRequested(_) => {
-                if let Some(frame) = &frame {
-                    self.render(frame);
-                }
-            }
-            _ => (),
-        });
+    pub fn update_frame(&mut self, Frame(frame): Frame) {
+        self.frame = Some(frame);
     }
 
-    pub fn render(&self, screen: &[u16]) {
+    pub fn render(&self) {
+        let Some(screen) = self.frame.as_ref() else {
+            return;
+        };
         let uniforms = self.filter.process(&self.display, self.size, screen);
         let mut target = self.display.draw();
 
@@ -233,6 +350,7 @@ impl<T: Filter> Window<T> {
             }),
             ..Default::default()
         };
+
         target.clear_color(0.0, 0.0, 0.0, 1.0);
         target
             .draw(
@@ -244,5 +362,100 @@ impl<T: Filter> Window<T> {
             )
             .unwrap();
         target.finish().unwrap();
+    }
+}
+
+pub struct NesInputs {
+    rx: std::sync::mpsc::Receiver<UserInput>,
+}
+
+impl NesInputs {
+    pub fn inputs(self) -> impl Iterator<Item = UserInput> {
+        self.rx.into_iter()
+    }
+}
+
+pub struct NesOutputs {
+    proxy: winit::event_loop::EventLoopProxy<UserEvent>,
+}
+
+impl NesOutputs {
+    pub fn send_frame(&self, frame: Vec<u16>) {
+        let _ = self.proxy.send_event(UserEvent::Frame(Frame(frame)));
+    }
+
+    pub fn send_samples(&self, samples: Vec<i16>) {
+        let _ = self.proxy.send_event(UserEvent::Samples(Samples(samples)));
+    }
+}
+
+struct InputMap {
+    map: HashMap<InputType, bool>,
+}
+
+impl InputMap {
+    fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+        }
+    }
+
+    fn is_pressed(&self, key: impl Into<InputType>) -> bool {
+        self.map.get(&key.into()).cloned().unwrap_or(false)
+    }
+
+    fn press(&mut self, key: impl Into<InputType>) {
+        self.map
+            .entry(key.into())
+            .and_modify(|e| *e = true)
+            .or_insert(true);
+    }
+
+    fn release(&mut self, key: impl Into<InputType>) {
+        self.map
+            .entry(key.into())
+            .and_modify(|e| *e = false)
+            .or_insert(false);
+    }
+
+    fn controller(&self) -> Controller {
+        Controller {
+            a: self.is_pressed(KeyCode::KeyZ)
+                || self.is_pressed(Button::East)
+                || self.is_pressed(Button::West),
+            b: self.is_pressed(KeyCode::KeyX) || self.is_pressed(Button::South),
+            select: self.is_pressed(KeyCode::ShiftRight) || self.is_pressed(Button::Select),
+            start: self.is_pressed(KeyCode::Enter) || self.is_pressed(Button::Start),
+            up: self.is_pressed(KeyCode::ArrowUp) || self.is_pressed(Button::DPadUp),
+            down: self.is_pressed(KeyCode::ArrowDown) || self.is_pressed(Button::DPadDown),
+            left: self.is_pressed(KeyCode::ArrowLeft) || self.is_pressed(Button::DPadLeft),
+            right: self.is_pressed(KeyCode::ArrowRight) || self.is_pressed(Button::DPadRight),
+        }
+    }
+
+    fn power(&self) -> bool {
+        self.is_pressed(KeyCode::Delete)
+    }
+
+    fn reset(&self) -> bool {
+        self.is_pressed(KeyCode::Backspace)
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+enum InputType {
+    Key(KeyCode),
+    Button(Button),
+}
+
+impl From<KeyCode> for InputType {
+    fn from(value: KeyCode) -> Self {
+        InputType::Key(value)
+    }
+}
+
+impl From<Button> for InputType {
+    fn from(value: Button) -> Self {
+        InputType::Button(value)
     }
 }

@@ -20,37 +20,26 @@ pub enum SpriteStep {
     Read,
     Reset,
     Hblank,
-    Fetch(u32),
+    Fetch(u8),
     BackgroundWait,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum StateChange {
     SkippedTick,
+    SetNmi,
     SetVblank,
     ClearVblank,
     ClearFlags,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct PpuStep {
     pub background: Option<BackgroundStep>,
     pub sprite: Option<SpriteStep>,
     pub state: Option<StateChange>,
     pub scanline: u32,
     pub dot: u32,
-}
-
-impl Default for PpuStep {
-    fn default() -> Self {
-        PpuStep {
-            background: None,
-            sprite: None,
-            state: None,
-            scanline: 0,
-            dot: 0,
-        }
-    }
 }
 
 pub struct PpuSteps {
@@ -74,7 +63,6 @@ impl PpuSteps {
     }
 }
 
-// Someday this will all be const
 pub fn generate_steps(region: Region) -> PpuSteps {
     let prerender = region.prerender_line();
     let vblank = region.vblank_line();
@@ -91,6 +79,8 @@ pub fn generate_steps(region: Region) -> PpuSteps {
             Some(StateChange::ClearFlags)
         } else if scanline == prerender && dot == 340 && skip {
             Some(StateChange::SkippedTick)
+        } else if dot == 0 && scanline == vblank + 1 {
+            Some(StateChange::SetNmi)
         } else if dot == 1 && scanline == vblank + 1 {
             Some(StateChange::SetVblank)
         } else {
@@ -134,7 +124,7 @@ pub fn generate_steps(region: Region) -> PpuSteps {
                     }
                 }
                 256 => Some(SpriteStep::Hblank),
-                d if d >= 257 && d < 320 => Some(SpriteStep::Fetch(d % 8)),
+                d if d >= 257 && d < 320 => Some(SpriteStep::Fetch((d % 8) as u8)),
                 d if d >= 321 && d < 340 => Some(SpriteStep::BackgroundWait),
                 _ => None,
             }

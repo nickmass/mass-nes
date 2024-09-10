@@ -9,6 +9,8 @@ pub struct DebugState {
     trace_instrs: u32,
     color_dots: u32,
     log_once: bool,
+    log_range: Option<(u16, u16)>,
+    pub logging_range: bool,
     inst_ring: RingBuffer<(CpuDebugState, PpuDebugState)>,
 }
 
@@ -18,6 +20,8 @@ impl Default for DebugState {
             trace_instrs: 0,
             color_dots: 0,
             log_once: false,
+            log_range: None,
+            logging_range: false,
             inst_ring: RingBuffer::new(INST_HISTORY_BUF_SIZE),
         }
     }
@@ -157,6 +161,10 @@ impl Debug {
         state.debug.trace_instrs = count;
     }
 
+    pub fn log_range(&self, state: &mut SystemState, start_addr: u16, end_addr: u16) {
+        state.debug.log_range = Some((start_addr, end_addr));
+    }
+
     pub fn log_history(&self, system: &System, state: &SystemState) {
         for (cpu_state, ppu_state) in state.debug.log_iter().rev() {
             let log = self.trace_instruction(system, state, cpu_state, ppu_state);
@@ -172,10 +180,18 @@ impl Debug {
         ppu_state: PpuDebugState,
     ) {
         if let Some(inst_addr) = cpu_state.instruction_addr {
-            if state.debug.trace_instrs != 0 {
+            if Some(inst_addr) == state.debug.log_range.as_ref().map(|r| r.0) {
+                state.debug.logging_range = true;
+            }
+            if state.debug.trace_instrs != 0 || state.debug.logging_range {
                 let log = self.trace_instruction(system, state, &cpu_state, &ppu_state);
                 eprintln!("{}", log);
-                state.debug.trace_instrs -= 1;
+                if state.debug.trace_instrs != 0 {
+                    state.debug.trace_instrs -= 1;
+                }
+            }
+            if Some(inst_addr) == state.debug.log_range.as_ref().map(|r| r.1) {
+                state.debug.logging_range = false;
             }
 
             state.debug.log_inst((cpu_state, ppu_state));
@@ -185,6 +201,18 @@ impl Debug {
                 self.log_history(system, state);
                 panic!("KIL");
             }
+        }
+    }
+
+    pub fn trace_ppu(
+        &self,
+        system: &System,
+        state: &mut SystemState,
+        cpu_state: CpuDebugState,
+        ppu_state: PpuDebugState,
+    ) {
+        if state.debug.logging_range {
+            eprintln!("{:?}", ppu_state);
         }
     }
 

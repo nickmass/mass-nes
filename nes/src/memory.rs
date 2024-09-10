@@ -97,7 +97,7 @@ enum Mapped {
     Bank(usize),
 }
 
-#[derive(PartialEq, Eq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum BankKind {
     Ram,
     Rom,
