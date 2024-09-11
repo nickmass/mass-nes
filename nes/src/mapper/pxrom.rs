@@ -1,11 +1,11 @@
-use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind, NotAndMask};
-use crate::cartridge::{Cartridge, Mirroring};
+use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind};
+use crate::cartridge::Cartridge;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind};
-use crate::ppu::Ppu;
-use crate::system::{System, SystemState};
 
 use std::cell::RefCell;
+
+use super::SimpleMirroring;
 
 pub struct PxromState {
     prg_bank_count: usize,
@@ -51,16 +51,18 @@ impl PxromState {
 }
 
 pub struct Pxrom {
+    cartridge: Cartridge,
     state: RefCell<PxromState>,
+    mirroring: SimpleMirroring,
 }
 
 impl Pxrom {
-    pub fn new(cartridge: &Cartridge, state: &mut SystemState) -> Self {
+    pub fn new(cartridge: Cartridge) -> Self {
         let mut rom_state = PxromState {
             prg_bank_count: cartridge.prg_rom.len() / 0x2000,
             chr_bank_count: cartridge.chr_rom.len() / 0x1000,
-            prg: MappedMemory::new(state, cartridge, 0x8000, 0, 32, MemKind::Prg),
-            chr: MappedMemory::new(state, cartridge, 0x0000, 0, 8, MemKind::Chr),
+            prg: MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg),
+            chr: MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr),
             prg_bank: 0,
             chr_banks: [0; 4],
             chr_latches: [0xfd; 2],
@@ -70,16 +72,18 @@ impl Pxrom {
 
         Self {
             state: RefCell::new(rom_state),
+            mirroring: SimpleMirroring::new(cartridge.mirroring.into()),
+            cartridge,
         }
     }
 
-    fn read_cpu(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
-        self.state.borrow().prg.read(system, state, addr)
+    fn read_cpu(&self, addr: u16) -> u8 {
+        self.state.borrow().prg.read(&self.cartridge, addr)
     }
 
-    fn read_ppu(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
+    fn read_ppu(&self, addr: u16) -> u8 {
         let mut rom = self.state.borrow_mut();
-        let val = rom.chr.read(system, state, addr);
+        let val = rom.chr.read(&self.cartridge, addr);
 
         match addr {
             0x0fd8 => rom.chr_latches[0] = 0xfd,
@@ -93,7 +97,12 @@ impl Pxrom {
         val
     }
 
-    fn write_cpu(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
+    fn peek_ppu(&self, addr: u16) -> u8 {
+        let rom = self.state.borrow();
+        rom.chr.read(&self.cartridge, addr)
+    }
+
+    fn write_cpu(&self, addr: u16, value: u8) {
         let mut rom = self.state.borrow_mut();
         match addr {
             0xa000 => rom.prg_bank = value,
@@ -101,9 +110,12 @@ impl Pxrom {
             0xc000 => rom.chr_banks[1] = value,
             0xd000 => rom.chr_banks[2] = value,
             0xe000 => rom.chr_banks[3] = value,
-            0xf000 if value & 1 == 0 => system.ppu.nametables.set_vertical(state),
-            0xf000 if value & 1 == 1 => system.ppu.nametables.set_horizontal(state),
+            0xf000 if value & 1 == 0 => self.mirroring.vertical(),
+            0xf000 if value & 1 == 1 => self.mirroring.horizontal(),
             _ => return,
+        }
+        match addr {
+            _ => (),
         }
 
         rom.sync();
@@ -111,41 +123,33 @@ impl Pxrom {
 }
 
 impl Mapper for Pxrom {
-    fn register(
-        &self,
-        state: &mut SystemState,
-        cpu: &mut AddressBus,
-        ppu: &mut Ppu,
-        cart: &Cartridge,
-    ) {
-        cpu.register_read(state, DeviceKind::Mapper, AndAndMask(0x8000, 0xffff));
-        cpu.register_write(state, DeviceKind::Mapper, AndAndMask(0x8000, 0xf000));
-        ppu.register_read(state, DeviceKind::Mapper, NotAndMask(0x1fff));
-        match cart.mirroring {
-            Mirroring::Horizontal => ppu.nametables.set_horizontal(state),
-            Mirroring::Vertical => ppu.nametables.set_vertical(state),
-            Mirroring::FourScreen => unimplemented!(),
+    fn register(&self, cpu: &mut AddressBus) {
+        cpu.register_read(DeviceKind::Mapper, AndAndMask(0x8000, 0xffff));
+        cpu.register_write(DeviceKind::Mapper, AndAndMask(0x8000, 0xf000));
+    }
+
+    fn peek(&self, bus: BusKind, addr: u16) -> u8 {
+        match bus {
+            BusKind::Cpu => self.read_cpu(addr),
+            BusKind::Ppu => self.peek_ppu(addr),
         }
     }
 
-    fn peek(&self, bus: BusKind, system: &System, state: &SystemState, addr: u16) -> u8 {
+    fn read(&self, bus: BusKind, addr: u16) -> u8 {
         match bus {
-            BusKind::Cpu => self.read_cpu(system, state, addr),
-            BusKind::Ppu => self.read_ppu(system, state, addr),
+            BusKind::Cpu => self.read_cpu(addr),
+            BusKind::Ppu => self.read_ppu(addr),
         }
     }
 
-    fn read(&self, bus: BusKind, system: &System, state: &mut SystemState, addr: u16) -> u8 {
+    fn write(&self, bus: BusKind, addr: u16, value: u8) {
         match bus {
-            BusKind::Cpu => self.read_cpu(system, state, addr),
-            BusKind::Ppu => self.read_ppu(system, state, addr),
-        }
-    }
-
-    fn write(&self, bus: BusKind, system: &System, state: &mut SystemState, addr: u16, value: u8) {
-        match bus {
-            BusKind::Cpu => self.write_cpu(system, state, addr, value),
+            BusKind::Cpu => self.write_cpu(addr, value),
             BusKind::Ppu => (),
         }
+    }
+
+    fn ppu_fetch(&self, address: u16) -> super::Nametable {
+        self.mirroring.ppu_fetch(address)
     }
 }

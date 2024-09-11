@@ -1,7 +1,6 @@
 use crate::apu::ApuState;
 use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
-use crate::system::SystemState;
 
 use std::cell::RefCell;
 
@@ -71,12 +70,8 @@ impl Triangle {
 }
 
 impl Channel for Triangle {
-    fn register(&self, state: &mut SystemState, cpu: &mut AddressBus) {
-        cpu.register_write(
-            state,
-            DeviceKind::Triangle,
-            AndEqualsAndMask(0xfffc, 0x4008, 0x3),
-        );
+    fn register(&self, cpu: &mut AddressBus) {
+        cpu.register_write(DeviceKind::Triangle, AndEqualsAndMask(0xfffc, 0x4008, 0x3));
     }
 
     fn write(&self, addr: u16, value: u8) {

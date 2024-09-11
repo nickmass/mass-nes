@@ -1,5 +1,7 @@
 use std::cell::RefCell;
 
+use crate::bus::{Address, AddressBus, DeviceKind};
+
 #[derive(Default)]
 pub struct InputState {
     read_counter: u32,
@@ -80,6 +82,12 @@ impl Input {
         Input {
             state: RefCell::new(InputState::default()),
         }
+    }
+
+    pub fn register(&self, cpu: &mut AddressBus) {
+        cpu.register_read(DeviceKind::Input, Address(0x4016));
+        cpu.register_read(DeviceKind::Input, Address(0x4017));
+        cpu.register_write(DeviceKind::Input, Address(0x4016));
     }
 
     pub fn peek(&self, addr: u16, open_bus: u8) -> u8 {

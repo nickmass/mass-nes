@@ -1,16 +1,12 @@
-use crate::mapper;
-use crate::mapper::Mapper;
-use crate::ppu::Ppu;
-use crate::system::SystemState;
-use std::convert::From;
-use std::fmt;
-use std::io;
+use crate::mapper::{self, Mapper};
+
+use std::rc::Rc;
+use std::{fmt, io};
 
 #[derive(Debug)]
 pub enum CartridgeError {
     InvalidFileType,
     NotSupported,
-    CorruptedFile,
     IoError(io::Error),
 }
 
@@ -19,7 +15,6 @@ impl fmt::Display for CartridgeError {
         match *self {
             CartridgeError::InvalidFileType => write!(f, "Unrecognized rom file format"),
             CartridgeError::NotSupported => write!(f, "Rom file format not supported"),
-            CartridgeError::CorruptedFile => write!(f, "Rom file is corrupt"),
             CartridgeError::IoError(ref x) => write!(f, "Cartridge io error: {}", x),
         }
     }
@@ -31,16 +26,28 @@ impl From<io::Error> for CartridgeError {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 enum RomType {
     Ines,
     Fds,
     Unif,
 }
 
-pub enum Mirroring {
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum CartMirroring {
     Horizontal,
     Vertical,
     FourScreen,
+}
+
+impl From<CartMirroring> for mapper::Mirroring {
+    fn from(value: CartMirroring) -> Self {
+        match value {
+            CartMirroring::Horizontal => mapper::Mirroring::Horizontal,
+            CartMirroring::Vertical => mapper::Mirroring::Vertical,
+            CartMirroring::FourScreen => mapper::Mirroring::Custom,
+        }
+    }
 }
 
 pub struct Cartridge {
@@ -48,88 +55,91 @@ pub struct Cartridge {
     pub prg_ram_bytes: usize,
     pub prg_rom: Vec<u8>,
     pub chr_rom: Vec<u8>,
-    pub mirroring: Mirroring,
+    pub mirroring: CartMirroring,
     mapper_number: u8,
 }
 
 impl Cartridge {
     pub fn load<T: io::Read>(file: &mut T) -> Result<Cartridge, CartridgeError> {
-        let mut buf = Vec::new();
+        let mut ident = [0; 4];
+        file.read_exact(&mut ident)?;
 
-        let _file_size = file.read_to_end(&mut buf)?;
-
-        match Cartridge::get_rom_type(&buf) {
-            Some(RomType::Ines) => Cartridge::load_ines(&buf),
-            Some(RomType::Fds) => Cartridge::load_fds(&buf),
-            Some(RomType::Unif) => Cartridge::load_unif(&buf),
+        match Cartridge::get_rom_type(&ident) {
+            Some(RomType::Ines) => Cartridge::load_ines(file),
+            Some(RomType::Fds) => Cartridge::load_fds(file),
+            Some(RomType::Unif) => Cartridge::load_unif(file),
             None => Err(CartridgeError::InvalidFileType),
         }
     }
 
-    fn load_ines(rom: &[u8]) -> Result<Cartridge, CartridgeError> {
-        println!("INES");
-        if rom.len() < 16 {
-            return Err(CartridgeError::CorruptedFile);
-        }
+    fn load_ines<T: io::Read>(file: &mut T) -> Result<Cartridge, CartridgeError> {
+        let mut header = [0; 16];
+        file.read_exact(&mut header[4..])?;
 
-        let nes2 = rom[7] & 0xc == 0x8;
-        let prg_rom_bytes = if !nes2 {
-            (rom[4] as u32) * 2u32.pow(14)
+        let nes_2 = header[7] & 0xc == 0x8;
+
+        let prg_hi = if nes_2 { header[9] as usize & 0xf } else { 0 };
+        let prg_rom_bytes = (header[4] as usize | (prg_hi << 8)) << 14;
+
+        let chr_hi = if nes_2 {
+            (header[9] as usize >> 4) & 0xf
         } else {
-            (rom[4] as u32 | ((rom[9] as u32 & 0xf) << 8)) * 2u32.pow(14)
+            0
         };
-        let chr_rom_bytes = (rom[5] as u32) * 2u32.pow(13);
+        let chr_rom_bytes = (header[5] as usize | (chr_hi << 8)) << 13;
 
         let chr_ram_bytes = if chr_rom_bytes == 0 { 0x2000 } else { 0 };
 
-        let mapper_number = (rom[6] >> 4) | (rom[7] & 0xF0);
+        let mapper_number = (header[6] >> 4) | (header[7] & 0xF0);
 
-        let mut data_start: usize = 16;
-
-        if rom[6] & 0x04 != 0 {
-            data_start += 512;
+        if header[6] & 0x04 != 0 {
+            // skip trainer
+            file.read_exact(&mut [0; 512])?;
         }
 
-        let mut mirroring = Mirroring::Horizontal;
-        if rom[6] & 0x08 != 0 {
-            mirroring = Mirroring::FourScreen;
-        } else if rom[6] & 0x01 != 0 {
-            mirroring = Mirroring::Vertical;
-        }
+        let mirroring = if header[6] & 0x08 != 0 {
+            CartMirroring::FourScreen
+        } else if header[6] & 0x01 != 0 {
+            CartMirroring::Vertical
+        } else {
+            CartMirroring::Horizontal
+        };
 
         let mut prg_ram_bytes = 0;
-        if rom[6] & 0x02 != 0 {
+        if header[6] & 0x02 != 0 {
             prg_ram_bytes = 0x2000;
         }
 
-        let prg_rom_end: usize = data_start + prg_rom_bytes as usize;
-        let chr_rom_end: usize = prg_rom_end + chr_rom_bytes as usize;
-        if rom.len() < chr_rom_end {
-            return Err(CartridgeError::CorruptedFile);
-        }
+        let mut prg_rom = vec![0; prg_rom_bytes];
+        let mut chr_rom = vec![0; chr_rom_bytes];
+
+        file.read_exact(&mut prg_rom)?;
+        file.read_exact(&mut chr_rom)?;
 
         let cartridge = Cartridge {
             chr_ram_bytes,
             prg_ram_bytes,
-            prg_rom: rom[data_start..prg_rom_end].to_vec(),
-            chr_rom: rom[prg_rom_end..chr_rom_end].to_vec(),
+            prg_rom,
+            chr_rom,
             mirroring,
             mapper_number,
         };
 
-        println!(
-            "PRGROM: {}, CHRROM: {}, PRGRAM: {}, CHRRAM:{}, Mapper: {}",
-            prg_rom_bytes, chr_rom_bytes, prg_ram_bytes, chr_ram_bytes, mapper_number
+        let format = if nes_2 { "NES 2.0" } else { "iNES" };
+
+        eprintln!(
+            "{} PRGROM: {}, CHRROM: {}, PRGRAM: {}, CHRRAM:{}, Mapper: {}",
+            format, prg_rom_bytes, chr_rom_bytes, prg_ram_bytes, chr_ram_bytes, mapper_number
         );
         Ok(cartridge)
     }
 
-    fn load_fds(_rom: &[u8]) -> Result<Cartridge, CartridgeError> {
+    fn load_fds<T: std::io::Read>(_file: &mut T) -> Result<Cartridge, CartridgeError> {
         println!("FDS");
         Err(CartridgeError::NotSupported)
     }
 
-    fn load_unif(_rom: &[u8]) -> Result<Cartridge, CartridgeError> {
+    fn load_unif<T: std::io::Read>(_file: &mut T) -> Result<Cartridge, CartridgeError> {
         println!("UNIF");
         Err(CartridgeError::NotSupported)
     }
@@ -153,12 +163,7 @@ impl Cartridge {
         None
     }
 
-    pub fn get_mapper(&self, state: &mut SystemState, ppu: &Ppu) -> Box<dyn Mapper> {
-        match self.mirroring {
-            Mirroring::Horizontal => ppu.nametables.set_horizontal(state),
-            Mirroring::Vertical => ppu.nametables.set_vertical(state),
-            _ => {}
-        }
-        mapper::ines(self.mapper_number, state, self)
+    pub fn build_mapper(self) -> Rc<dyn Mapper> {
+        mapper::ines(self.mapper_number, self)
     }
 }

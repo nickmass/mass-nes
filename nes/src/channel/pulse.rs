@@ -1,7 +1,6 @@
 use crate::apu::ApuState;
 use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
-use crate::system::SystemState;
 
 use std::cell::RefCell;
 
@@ -164,21 +163,13 @@ impl Pulse {
 }
 
 impl Channel for Pulse {
-    fn register(&self, state: &mut SystemState, cpu: &mut AddressBus) {
+    fn register(&self, cpu: &mut AddressBus) {
         match self.channel {
             PulseChannel::InternalOne => {
-                cpu.register_write(
-                    state,
-                    DeviceKind::PulseOne,
-                    AndEqualsAndMask(0xfffc, 0x4000, 0x3),
-                );
+                cpu.register_write(DeviceKind::PulseOne, AndEqualsAndMask(0xfffc, 0x4000, 0x3));
             }
             PulseChannel::InternalTwo => {
-                cpu.register_write(
-                    state,
-                    DeviceKind::PulseTwo,
-                    AndEqualsAndMask(0xfffc, 0x4004, 0x3),
-                );
+                cpu.register_write(DeviceKind::PulseTwo, AndEqualsAndMask(0xfffc, 0x4004, 0x3));
             }
         }
     }

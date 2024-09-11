@@ -1,4 +1,4 @@
-use gilrs::{EventType, Gilrs, GilrsBuilder};
+use gilrs::{EventType, Gilrs};
 use glium::winit;
 use winit::event::ElementState;
 use winit::event_loop::EventLoopProxy;

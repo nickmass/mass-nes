@@ -1,78 +1,72 @@
-use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind, NotAndMask};
-use crate::cartridge::{Cartridge, Mirroring};
-use crate::mapper::Mapper;
+use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind};
+use crate::cartridge::Cartridge;
+use crate::mapper::{Mapper, SimpleMirroring};
 use crate::memory::MemoryBlock;
-use crate::ppu::Ppu;
-use crate::system::{System, SystemState};
 
 pub struct Nrom {
+    cartridge: Cartridge,
     chr_ram: MemoryBlock,
+    mirroring: SimpleMirroring,
+    prg_len: usize,
 }
 
 impl Nrom {
-    pub fn new(cartridge: &Cartridge, state: &mut SystemState) -> Nrom {
+    pub fn new(cartridge: Cartridge) -> Nrom {
         Nrom {
-            chr_ram: MemoryBlock::new(cartridge.chr_ram_bytes >> 10, &mut state.mem),
+            chr_ram: MemoryBlock::new(cartridge.chr_ram_bytes >> 10),
+            mirroring: SimpleMirroring::new(cartridge.mirroring.into()),
+            prg_len: cartridge.prg_rom.len(),
+            cartridge,
         }
     }
 }
 
 impl Mapper for Nrom {
-    fn register(
-        &self,
-        state: &mut SystemState,
-        cpu: &mut AddressBus,
-        ppu: &mut Ppu,
-        cart: &Cartridge,
-    ) {
+    fn register(&self, cpu: &mut AddressBus) {
         cpu.register_read(
-            state,
             DeviceKind::Mapper,
-            AndAndMask(0x8000, (cart.prg_rom.len() - 1) as u16),
+            AndAndMask(0x8000, (self.prg_len - 1) as u16),
         );
-        ppu.register_read(state, DeviceKind::Mapper, NotAndMask(0x1fff));
-        ppu.register_write(state, DeviceKind::Mapper, NotAndMask(0x1fff));
-        match cart.mirroring {
-            Mirroring::Horizontal => ppu.nametables.set_horizontal(state),
-            Mirroring::Vertical => ppu.nametables.set_vertical(state),
-            Mirroring::FourScreen => unimplemented!(),
-        }
     }
 
-    fn peek(&self, bus: BusKind, system: &System, state: &SystemState, addr: u16) -> u8 {
+    fn peek(&self, bus: BusKind, addr: u16) -> u8 {
         match bus {
-            BusKind::Cpu => system.cartridge.prg_rom[addr as usize],
+            BusKind::Cpu => self.cartridge.prg_rom[addr as usize],
             BusKind::Ppu => {
-                if system.cartridge.chr_ram_bytes > 0 {
-                    self.chr_ram.peek(state, addr)
+                if self.cartridge.chr_ram_bytes > 0 {
+                    self.chr_ram.read(addr)
                 } else {
-                    system.cartridge.chr_rom[addr as usize]
+                    self.cartridge.chr_rom[addr as usize]
                 }
             }
         }
     }
 
-    fn read(&self, bus: BusKind, system: &System, state: &mut SystemState, addr: u16) -> u8 {
+    fn read(&self, bus: BusKind, addr: u16) -> u8 {
         match bus {
-            BusKind::Cpu => system.cartridge.prg_rom[addr as usize],
+            BusKind::Cpu => self.cartridge.prg_rom[addr as usize],
             BusKind::Ppu => {
-                if system.cartridge.chr_ram_bytes > 0 {
-                    self.chr_ram.read(state, addr)
+                if self.cartridge.chr_ram_bytes > 0 {
+                    self.chr_ram.read(addr)
                 } else {
-                    system.cartridge.chr_rom[addr as usize]
+                    self.cartridge.chr_rom[addr as usize]
                 }
             }
         }
     }
 
-    fn write(&self, bus: BusKind, system: &System, state: &mut SystemState, addr: u16, value: u8) {
+    fn write(&self, bus: BusKind, addr: u16, value: u8) {
         match bus {
-            BusKind::Cpu => {}
+            BusKind::Cpu => (),
             BusKind::Ppu => {
-                if system.cartridge.chr_ram_bytes > 0 {
-                    self.chr_ram.write(state, addr, value);
+                if self.cartridge.chr_ram_bytes > 0 {
+                    self.chr_ram.write(addr, value);
                 }
             }
         }
+    }
+
+    fn ppu_fetch(&self, address: u16) -> super::Nametable {
+        self.mirroring.ppu_fetch(address)
     }
 }

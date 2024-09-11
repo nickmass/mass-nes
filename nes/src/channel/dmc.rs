@@ -1,7 +1,7 @@
 use crate::apu::ApuState;
 use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
-use crate::system::{Region, SystemState};
+use crate::region::Region;
 
 use std::cell::RefCell;
 
@@ -97,12 +97,8 @@ impl Dmc {
 }
 
 impl Channel for Dmc {
-    fn register(&self, state: &mut SystemState, cpu: &mut AddressBus) {
-        cpu.register_write(
-            state,
-            DeviceKind::Dmc,
-            AndEqualsAndMask(0xfffc, 0x4010, 0x3),
-        );
+    fn register(&self, cpu: &mut AddressBus) {
+        cpu.register_write(DeviceKind::Dmc, AndEqualsAndMask(0xfffc, 0x4010, 0x3));
     }
 
     fn write(&self, addr: u16, value: u8) {

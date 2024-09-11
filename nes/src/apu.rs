@@ -1,6 +1,6 @@
-use crate::bus::AddressBus;
+use crate::bus::{Address, AddressBus, DeviceKind};
 use crate::channel::{Channel, Dmc, Noise, Pulse, PulseChannel, Triangle};
-use crate::system::{Region, SystemState};
+use crate::region::Region;
 
 use std::cell::RefCell;
 
@@ -326,11 +326,16 @@ impl Apu {
         &self.samples[0..index]
     }
 
-    pub fn register(&self, state: &mut SystemState, cpu: &mut AddressBus) {
-        self.pulse_one.register(state, cpu);
-        self.pulse_two.register(state, cpu);
-        self.triangle.register(state, cpu);
-        self.noise.register(state, cpu);
-        self.dmc.register(state, cpu);
+    pub fn register(&self, cpu: &mut AddressBus) {
+        cpu.register_read(DeviceKind::Apu, Address(0x4015));
+        cpu.register_write(DeviceKind::Apu, Address(0x4014));
+        cpu.register_write(DeviceKind::Apu, Address(0x4015));
+        cpu.register_write(DeviceKind::Apu, Address(0x4017));
+
+        self.pulse_one.register(cpu);
+        self.pulse_two.register(cpu);
+        self.triangle.register(cpu);
+        self.noise.register(cpu);
+        self.dmc.register(cpu);
     }
 }

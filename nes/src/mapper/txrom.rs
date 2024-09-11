@@ -1,11 +1,11 @@
-use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind, NotAndMask};
-use crate::cartridge::{Cartridge, Mirroring};
+use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
+use crate::cartridge::{CartMirroring, Cartridge};
 use crate::mapper::Mapper;
-use crate::memory::{BankKind, MappedMemory, MemKind};
-use crate::ppu::Ppu;
-use crate::system::{System, SystemState};
+use crate::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
 
 use std::cell::RefCell;
+
+use super::{Nametable, SimpleMirroring};
 
 pub struct TxromState {
     current_tick: u64,
@@ -23,34 +23,126 @@ pub struct TxromState {
     irq_counter: u8,
     irq_reload_pending: bool,
     last_a12: bool,
-    hardwired: bool,
     last: usize,
+    ext_nt: Option<[MemoryBlock; 2]>,
+}
+
+impl TxromState {
+    fn sync(&mut self) {
+        if self.chr_type == BankKind::Rom {
+            if self.bank_select & 0x80 == 0 {
+                self.chr.map(
+                    0x0000,
+                    1,
+                    (self.bank_data[0] & 0xfe) as usize,
+                    BankKind::Rom,
+                );
+                self.chr
+                    .map(0x0400, 1, (self.bank_data[0] | 0x1) as usize, BankKind::Rom);
+                self.chr.map(
+                    0x0800,
+                    1,
+                    (self.bank_data[1] & 0xfe) as usize,
+                    BankKind::Rom,
+                );
+                self.chr.map(
+                    0x0c00,
+                    1,
+                    (self.bank_data[1] | 0x01) as usize,
+                    BankKind::Rom,
+                );
+                self.chr
+                    .map(0x1000, 1, self.bank_data[2] as usize, BankKind::Rom);
+                self.chr
+                    .map(0x1400, 1, self.bank_data[3] as usize, BankKind::Rom);
+                self.chr
+                    .map(0x1800, 1, self.bank_data[4] as usize, BankKind::Rom);
+                self.chr
+                    .map(0x1c00, 1, self.bank_data[5] as usize, BankKind::Rom);
+            } else {
+                self.chr
+                    .map(0x0000, 1, self.bank_data[2] as usize, BankKind::Rom);
+                self.chr
+                    .map(0x0400, 1, self.bank_data[3] as usize, BankKind::Rom);
+                self.chr
+                    .map(0x0800, 1, self.bank_data[4] as usize, BankKind::Rom);
+                self.chr
+                    .map(0x0c00, 1, self.bank_data[5] as usize, BankKind::Rom);
+                self.chr.map(
+                    0x1000,
+                    1,
+                    (self.bank_data[0] & 0xfe) as usize,
+                    BankKind::Rom,
+                );
+                self.chr
+                    .map(0x1400, 1, (self.bank_data[0] | 0x1) as usize, BankKind::Rom);
+                self.chr.map(
+                    0x1800,
+                    1,
+                    (self.bank_data[1] & 0xfe) as usize,
+                    BankKind::Rom,
+                );
+                self.chr.map(
+                    0x1c00,
+                    1,
+                    (self.bank_data[1] | 0x01) as usize,
+                    BankKind::Rom,
+                );
+            }
+        }
+
+        if self.bank_select & 0x40 == 0 {
+            self.prg
+                .map(0x8000, 8, self.bank_data[6] as usize, BankKind::Rom);
+            self.prg
+                .map(0xa000, 8, self.bank_data[7] as usize, BankKind::Rom);
+            self.prg
+                .map(0xc000, 8, (self.last - 1) as usize, BankKind::Rom);
+            self.prg.map(0xe000, 8, self.last as usize, BankKind::Rom);
+        } else {
+            self.prg
+                .map(0x8000, 8, (self.last - 1) as usize, BankKind::Rom);
+            self.prg
+                .map(0xa000, 8, self.bank_data[7] as usize, BankKind::Rom);
+            self.prg
+                .map(0xc000, 8, self.bank_data[6] as usize, BankKind::Rom);
+            self.prg.map(0xe000, 8, self.last as usize, BankKind::Rom);
+        }
+    }
 }
 
 pub struct Txrom {
+    cartridge: Cartridge,
     state: RefCell<TxromState>,
+    mirroring: SimpleMirroring,
 }
 
 impl Txrom {
-    pub fn new(cartridge: &Cartridge, state: &mut SystemState) -> Txrom {
+    pub fn new(cartridge: Cartridge) -> Txrom {
         let chr_type = if cartridge.chr_rom.is_empty() {
             BankKind::Ram
         } else {
             BankKind::Rom
         };
         let chr = match chr_type {
-            BankKind::Rom => MappedMemory::new(state, cartridge, 0x0000, 0, 8, MemKind::Chr),
+            BankKind::Rom => MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr),
             BankKind::Ram => {
-                let mut mem = MappedMemory::new(state, cartridge, 0x0000, 8, 8, MemKind::Chr);
+                let mut mem = MappedMemory::new(&cartridge, 0x0000, 8, 8, MemKind::Chr);
                 mem.map(0x0000, 8, 0, BankKind::Ram);
                 mem
             }
         };
 
-        let mut prg = MappedMemory::new(state, cartridge, 0x6000, 16, 48, MemKind::Prg);
+        let mut prg = MappedMemory::new(&cartridge, 0x6000, 16, 48, MemKind::Prg);
         prg.map(0x6000, 16, 0, BankKind::Ram);
 
-        let rom_state = TxromState {
+        let ext_nt = if cartridge.mirroring == CartMirroring::FourScreen {
+            Some([MemoryBlock::new(1), MemoryBlock::new(1)])
+        } else {
+            None
+        };
+
+        let mut rom_state = TxromState {
             current_tick: 0,
             last_a12_tick: 0,
             prg,
@@ -66,34 +158,55 @@ impl Txrom {
             irq_counter: 0,
             irq_reload_pending: false,
             last_a12: false,
-            hardwired: false,
+            ext_nt,
             last: (cartridge.prg_rom.len() / 0x2000) - 1,
         };
 
+        rom_state.sync();
+
         Txrom {
             state: RefCell::new(rom_state),
+            mirroring: SimpleMirroring::new(cartridge.mirroring.into()),
+            cartridge,
         }
     }
 
-    fn read_cpu(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
+    fn read_cpu(&self, addr: u16) -> u8 {
         let rom = self.state.borrow();
         if addr & 0xe000 == 0x6000 && !rom.ram_enabled {
             (addr & 0xff) as u8
         } else {
-            self.state.borrow().prg.read(system, state, addr)
+            self.state.borrow().prg.read(&self.cartridge, addr)
         }
     }
 
-    fn read_ppu(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
-        self.irq_tick(system, state, addr);
-        self.state.borrow().chr.read(system, state, addr)
+    fn read_ppu(&self, addr: u16) -> u8 {
+        self.irq_tick(addr);
+        self.peek_ppu(addr)
     }
 
-    fn write_cpu(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
+    fn peek_ppu(&self, addr: u16) -> u8 {
+        let rom = self.state.borrow();
+        if let Some([a, b]) = rom.ext_nt.as_ref() {
+            if addr & 0x2000 != 0 {
+                match addr & 0x400 {
+                    0x0000 => a.read(addr & 0x3ff),
+                    0x0400 => b.read(addr & 0x3ff),
+                    _ => unreachable!(),
+                }
+            } else {
+                rom.chr.read(&self.cartridge, addr)
+            }
+        } else {
+            rom.chr.read(&self.cartridge, addr)
+        }
+    }
+
+    fn write_cpu(&self, addr: u16, value: u8) {
         let mut rom = self.state.borrow_mut();
         if addr & 0xe000 == 0x6000 {
             if rom.ram_enabled && !rom.ram_protect {
-                rom.prg.write(system, state, addr, value);
+                rom.prg.write(addr, value);
             }
             return;
         }
@@ -101,20 +214,21 @@ impl Txrom {
         match addr {
             0x8000 => {
                 rom.bank_select = value;
-                self.sync(&mut rom);
+                rom.sync();
             }
             0x8001 => {
                 let bank_index = rom.bank_select & 0x7;
                 rom.bank_data[bank_index as usize] = value;
-                self.sync(&mut rom);
+                rom.sync();
             }
             0xa000 => {
-                if rom.hardwired {
+                if rom.ext_nt.is_some() {
                     return;
                 }
+
                 match value & 1 {
-                    0 => system.ppu.nametables.set_vertical(state),
-                    1 => system.ppu.nametables.set_horizontal(state),
+                    0 => self.mirroring.vertical(),
+                    1 => self.mirroring.horizontal(),
                     _ => unreachable!(),
                 }
             }
@@ -139,15 +253,25 @@ impl Txrom {
         }
     }
 
-    fn write_ppu(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
-        self.irq_tick(system, state, addr);
-        self.state
-            .borrow_mut()
-            .chr
-            .write(system, state, addr, value);
+    fn write_ppu(&self, addr: u16, value: u8) {
+        self.irq_tick(addr);
+        let mut rom = self.state.borrow_mut();
+        if let Some([a, b]) = rom.ext_nt.as_mut() {
+            if addr & 0x2000 != 0 {
+                match addr & 0x400 {
+                    0x0000 => a.write(addr & 0x3ff, value),
+                    0x0400 => b.write(addr & 0x3ff, value),
+                    _ => unreachable!(),
+                }
+            } else {
+                rom.chr.write(addr, value);
+            }
+        } else {
+            rom.chr.write(addr, value);
+        }
     }
 
-    fn irq_tick(&self, _system: &System, _state: &SystemState, addr: u16) {
+    fn irq_tick(&self, addr: u16) {
         let mut rom = self.state.borrow_mut();
         let a12 = addr & 0x1000 != 0;
         let mut clock = !rom.last_a12 && a12;
@@ -178,146 +302,66 @@ impl Txrom {
             }
         }
     }
-
-    fn sync(&self, rom: &mut TxromState) {
-        if rom.chr_type == BankKind::Rom {
-            if rom.bank_select & 0x80 == 0 {
-                rom.chr
-                    .map(0x0000, 1, (rom.bank_data[0] & 0xfe) as usize, BankKind::Rom);
-                rom.chr
-                    .map(0x0400, 1, (rom.bank_data[0] | 0x1) as usize, BankKind::Rom);
-                rom.chr
-                    .map(0x0800, 1, (rom.bank_data[1] & 0xfe) as usize, BankKind::Rom);
-                rom.chr
-                    .map(0x0c00, 1, (rom.bank_data[1] | 0x01) as usize, BankKind::Rom);
-                rom.chr
-                    .map(0x1000, 1, rom.bank_data[2] as usize, BankKind::Rom);
-                rom.chr
-                    .map(0x1400, 1, rom.bank_data[3] as usize, BankKind::Rom);
-                rom.chr
-                    .map(0x1800, 1, rom.bank_data[4] as usize, BankKind::Rom);
-                rom.chr
-                    .map(0x1c00, 1, rom.bank_data[5] as usize, BankKind::Rom);
-            } else {
-                rom.chr
-                    .map(0x0000, 1, rom.bank_data[2] as usize, BankKind::Rom);
-                rom.chr
-                    .map(0x0400, 1, rom.bank_data[3] as usize, BankKind::Rom);
-                rom.chr
-                    .map(0x0800, 1, rom.bank_data[4] as usize, BankKind::Rom);
-                rom.chr
-                    .map(0x0c00, 1, rom.bank_data[5] as usize, BankKind::Rom);
-                rom.chr
-                    .map(0x1000, 1, (rom.bank_data[0] & 0xfe) as usize, BankKind::Rom);
-                rom.chr
-                    .map(0x1400, 1, (rom.bank_data[0] | 0x1) as usize, BankKind::Rom);
-                rom.chr
-                    .map(0x1800, 1, (rom.bank_data[1] & 0xfe) as usize, BankKind::Rom);
-                rom.chr
-                    .map(0x1c00, 1, (rom.bank_data[1] | 0x01) as usize, BankKind::Rom);
-            }
-        }
-
-        if rom.bank_select & 0x40 == 0 {
-            rom.prg
-                .map(0x8000, 8, rom.bank_data[6] as usize, BankKind::Rom);
-            rom.prg
-                .map(0xa000, 8, rom.bank_data[7] as usize, BankKind::Rom);
-            rom.prg
-                .map(0xc000, 8, (rom.last - 1) as usize, BankKind::Rom);
-            rom.prg.map(0xe000, 8, rom.last as usize, BankKind::Rom);
-        } else {
-            rom.prg
-                .map(0x8000, 8, (rom.last - 1) as usize, BankKind::Rom);
-            rom.prg
-                .map(0xa000, 8, rom.bank_data[7] as usize, BankKind::Rom);
-            rom.prg
-                .map(0xc000, 8, rom.bank_data[6] as usize, BankKind::Rom);
-            rom.prg.map(0xe000, 8, rom.last as usize, BankKind::Rom);
-        }
-    }
 }
 
 impl Mapper for Txrom {
-    fn register(
-        &self,
-        state: &mut SystemState,
-        cpu: &mut AddressBus,
-        ppu: &mut Ppu,
-        cart: &Cartridge,
-    ) {
-        cpu.register_read(
-            state,
-            DeviceKind::Mapper,
-            AndEqualsAndMask(0xe000, 0x6000, 0x7fff),
-        );
-        cpu.register_write(
-            state,
-            DeviceKind::Mapper,
-            AndEqualsAndMask(0xe000, 0x6000, 0x7fff),
-        );
-        cpu.register_read(state, DeviceKind::Mapper, AndAndMask(0x8000, 0xffff));
-        cpu.register_write(state, DeviceKind::Mapper, AndAndMask(0x8000, 0xe001));
-        ppu.register_read(state, DeviceKind::Mapper, NotAndMask(0x1fff));
-        ppu.register_write(state, DeviceKind::Mapper, NotAndMask(0x1fff));
-        let mut rom = self.state.borrow_mut();
-
-        match cart.mirroring {
-            Mirroring::Horizontal => ppu.nametables.set_horizontal(state),
-            Mirroring::Vertical => ppu.nametables.set_vertical(state),
-            Mirroring::FourScreen => {
-                rom.hardwired = true;
-                let ext1 = state.mem.alloc_kb(1);
-                let ext2 = state.mem.alloc_kb(1);
-                ppu.nametables.set_four_screen(state, ext1, ext2);
-            }
-        }
-
-        self.sync(&mut rom);
+    fn register(&self, cpu: &mut AddressBus) {
+        cpu.register_read(DeviceKind::Mapper, AndEqualsAndMask(0xe000, 0x6000, 0x7fff));
+        cpu.register_write(DeviceKind::Mapper, AndEqualsAndMask(0xe000, 0x6000, 0x7fff));
+        cpu.register_read(DeviceKind::Mapper, AndAndMask(0x8000, 0xffff));
+        cpu.register_write(DeviceKind::Mapper, AndAndMask(0x8000, 0xe001));
     }
 
-    fn peek(&self, bus: BusKind, system: &System, state: &SystemState, addr: u16) -> u8 {
+    fn peek(&self, bus: BusKind, addr: u16) -> u8 {
         match bus {
-            BusKind::Cpu => self.read_cpu(system, state, addr),
-            BusKind::Ppu => self.read_ppu(system, state, addr),
+            BusKind::Cpu => self.read_cpu(addr),
+            BusKind::Ppu => self.peek_ppu(addr),
         }
     }
 
-    fn read(&self, bus: BusKind, system: &System, state: &mut SystemState, addr: u16) -> u8 {
+    fn read(&self, bus: BusKind, addr: u16) -> u8 {
         match bus {
-            BusKind::Cpu => self.read_cpu(system, state, addr),
-            BusKind::Ppu => self.read_ppu(system, state, addr),
+            BusKind::Cpu => self.read_cpu(addr),
+            BusKind::Ppu => self.read_ppu(addr),
         }
     }
 
-    fn write(&self, bus: BusKind, system: &System, state: &mut SystemState, addr: u16, value: u8) {
+    fn write(&self, bus: BusKind, addr: u16, value: u8) {
         match bus {
-            BusKind::Cpu => self.write_cpu(system, state, addr, value),
-            BusKind::Ppu => self.write_ppu(system, state, addr, value),
+            BusKind::Cpu => self.write_cpu(addr, value),
+            BusKind::Ppu => self.write_ppu(addr, value),
         }
     }
 
-    fn tick(&self, _system: &System, _state: &mut SystemState) {
+    fn tick(&self) {
         let mut rom = self.state.borrow_mut();
         rom.current_tick += 1;
     }
 
-    fn get_irq(&mut self) -> bool {
+    fn get_irq(&self) -> bool {
         let rom = self.state.borrow();
         rom.irq
     }
 
-    fn nt_read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
-        self.irq_tick(system, state, addr);
-        system.ppu.nametables.read(state, addr)
+    fn update_ppu_addr(&self, addr: u16) {
+        self.irq_tick(addr);
     }
 
-    fn nt_write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
-        self.irq_tick(system, state, addr);
-        system.ppu.nametables.write(state, addr, value);
-    }
-
-    fn update_ppu_addr(&self, system: &System, state: &mut SystemState, addr: u16) {
-        self.irq_tick(system, state, addr);
+    fn ppu_fetch(&self, address: u16) -> super::Nametable {
+        let rom = self.state.borrow();
+        if let Some(_) = rom.ext_nt {
+            if address & 0x2000 != 0 {
+                match address & 0xc00 {
+                    0x0000 => Nametable::InternalA,
+                    0x0400 => Nametable::InternalB,
+                    0x0800 | 0xc00 => Nametable::External,
+                    _ => unreachable!(),
+                }
+            } else {
+                Nametable::External
+            }
+        } else {
+            self.mirroring.ppu_fetch(address)
+        }
     }
 }

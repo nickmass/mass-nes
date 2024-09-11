@@ -305,7 +305,7 @@ impl<T: Filter> Gfx<T> {
         self.frame = Some(frame);
     }
 
-    pub fn render(&self) {
+    pub fn render(&mut self) {
         let Some(screen) = self.frame.as_ref() else {
             return;
         };

@@ -1,7 +1,10 @@
+#![allow(dead_code)]
+use std::cell::RefCell;
+
 use crate::cpu::CpuDebugState;
 use crate::ops::*;
 use crate::ppu::PpuDebugState;
-use crate::system::{System, SystemState};
+use crate::Machine;
 
 const INST_HISTORY_BUF_SIZE: usize = 100;
 
@@ -10,7 +13,7 @@ pub struct DebugState {
     color_dots: u32,
     log_once: bool,
     log_range: Option<(u16, u16)>,
-    pub logging_range: bool,
+    logging_range: bool,
     inst_ring: RingBuffer<(CpuDebugState, PpuDebugState)>,
 }
 
@@ -123,82 +126,90 @@ impl<'a, T> DoubleEndedIterator for RingIter<'a, T> {
     }
 }
 
-pub struct Debug;
+pub struct Debug {
+    state: RefCell<DebugState>,
+}
 
 impl Debug {
-    pub fn new() -> Debug {
-        Debug
+    pub fn new() -> Self {
+        Self {
+            state: RefCell::new(DebugState::default()),
+        }
     }
 
-    pub fn peek(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
-        system.cpu_bus.peek(system, state, addr)
+    pub fn peek(&self, system: &Machine, addr: u16) -> u8 {
+        system.cpu_bus.peek(system, addr)
     }
 
-    pub fn frame(&self, state: &SystemState) -> u32 {
-        state.ppu.frame
+    pub fn frame(&self, system: &Machine) -> u32 {
+        system.ppu.frame()
     }
 
-    pub fn color_for(&self, state: &mut SystemState, count: u32) {
-        state.debug.color_dots = count;
+    pub fn color_for(&self, count: u32) {
+        self.state.borrow_mut().color_dots = count;
     }
 
-    pub fn color(&self, state: &mut SystemState) -> bool {
-        if state.debug.color_dots != 0 {
-            state.debug.color_dots -= 1;
+    pub fn color(&self) -> bool {
+        let mut state = self.state.borrow_mut();
+        if state.color_dots != 0 {
+            state.color_dots -= 1;
             true
         } else {
             false
         }
     }
 
-    pub fn log_once_for(&self, state: &mut SystemState, count: u32) {
-        if !state.debug.log_once {
-            state.debug.log_once = true;
-            self.log_for(state, count);
+    pub fn log_once_for(&self, count: u32) {
+        let mut state = self.state.borrow_mut();
+        if !state.log_once {
+            state.log_once = true;
+            state.trace_instrs = count;
         }
     }
-    pub fn log_for(&self, state: &mut SystemState, count: u32) {
-        state.debug.trace_instrs = count;
+    pub fn log_for(&self, count: u32) {
+        let mut state = self.state.borrow_mut();
+        state.trace_instrs = count;
     }
 
-    pub fn log_range(&self, state: &mut SystemState, start_addr: u16, end_addr: u16) {
-        state.debug.log_range = Some((start_addr, end_addr));
+    pub fn log_range(&self, start_addr: u16, end_addr: u16) {
+        let mut state = self.state.borrow_mut();
+        state.log_range = Some((start_addr, end_addr));
     }
 
-    pub fn log_history(&self, system: &System, state: &SystemState) {
-        for (cpu_state, ppu_state) in state.debug.log_iter().rev() {
-            let log = self.trace_instruction(system, state, cpu_state, ppu_state);
+    pub fn log_history(&self, system: &Machine) {
+        let state = self.state.borrow();
+        self.do_log_history(system, &*state)
+    }
+
+    fn do_log_history(&self, system: &Machine, state: &DebugState) {
+        for (cpu_state, ppu_state) in state.log_iter().rev() {
+            let log = self.trace_instruction(system, cpu_state, ppu_state);
             eprintln!("{}", log);
         }
     }
 
-    pub fn trace(
-        &self,
-        system: &System,
-        state: &mut SystemState,
-        cpu_state: CpuDebugState,
-        ppu_state: PpuDebugState,
-    ) {
+    pub fn trace(&self, system: &Machine, cpu_state: CpuDebugState, ppu_state: PpuDebugState) {
+        let mut state = self.state.borrow_mut();
         if let Some(inst_addr) = cpu_state.instruction_addr {
-            if Some(inst_addr) == state.debug.log_range.as_ref().map(|r| r.0) {
-                state.debug.logging_range = true;
+            if Some(inst_addr) == state.log_range.as_ref().map(|r| r.0) {
+                state.logging_range = true;
             }
-            if state.debug.trace_instrs != 0 || state.debug.logging_range {
-                let log = self.trace_instruction(system, state, &cpu_state, &ppu_state);
+            if state.trace_instrs != 0 || state.logging_range {
+                let log = self.trace_instruction(system, &cpu_state, &ppu_state);
                 eprintln!("{}", log);
-                if state.debug.trace_instrs != 0 {
-                    state.debug.trace_instrs -= 1;
+                if state.trace_instrs != 0 {
+                    state.trace_instrs -= 1;
                 }
             }
-            if Some(inst_addr) == state.debug.log_range.as_ref().map(|r| r.1) {
-                state.debug.logging_range = false;
+            if Some(inst_addr) == state.log_range.as_ref().map(|r| r.1) {
+                state.logging_range = false;
             }
 
-            state.debug.log_inst((cpu_state, ppu_state));
+            state.log_inst((cpu_state, ppu_state));
 
-            let inst = super::ops::OPS[self.peek(system, state, inst_addr) as usize];
+            let inst = super::ops::OPS[self.peek(system, inst_addr) as usize];
             if let Instruction::IllKil = inst.instruction {
-                self.log_history(system, state);
+                self.do_log_history(system, &*state);
                 panic!("KIL");
             }
         }
@@ -206,35 +217,34 @@ impl Debug {
 
     pub fn trace_ppu(
         &self,
-        system: &System,
-        state: &mut SystemState,
-        cpu_state: CpuDebugState,
+        _system: &Machine,
+        _cpu_state: CpuDebugState,
         ppu_state: PpuDebugState,
     ) {
-        if state.debug.logging_range {
+        let state = self.state.borrow();
+        if state.logging_range {
             eprintln!("{:?}", ppu_state);
         }
     }
 
     pub fn trace_instruction(
         &self,
-        system: &System,
-        state: &SystemState,
+        system: &Machine,
         cpu_state: &CpuDebugState,
         ppu_state: &PpuDebugState,
     ) -> String {
         let addr = cpu_state.instruction_addr.unwrap();
-        let instr = self.peek(system, state, addr);
+        let instr = self.peek(system, addr);
 
         let op = super::ops::OPS[instr as usize];
         let name = op.instruction.name();
         let len = op.addressing.length() as u16;
 
         let mut addr_inc = addr + 1;
-        let read = |state, addr| -> u8 { self.peek(system, state, addr) };
+        let read = |addr| -> u8 { self.peek(system, addr) };
 
-        let mut read_pc = |state| -> u8 {
-            let val = self.peek(system, state, addr_inc);
+        let mut read_pc = || -> u8 {
+            let val = self.peek(system, addr_inc);
             addr_inc = addr_inc.wrapping_add(1);
             val
         };
@@ -244,7 +254,7 @@ impl Debug {
         let instr_bytes_string = {
             let mut buf = String::new();
             for x in 0..len {
-                buf.push_str(&*format!(" {:02X}", read(state, x.wrapping_add(addr))));
+                buf.push_str(&*format!(" {:02X}", read(x.wrapping_add(addr))));
             }
 
             buf
@@ -254,60 +264,60 @@ impl Debug {
             Addressing::None => format!(""),
             Addressing::Accumulator => format!("A = {:02X}", cpu_state.reg_a),
             Addressing::Immediate => {
-                let r = read_pc(state);
+                let r = read_pc();
                 format!("#${:02X}", r)
             }
             Addressing::ZeroPage(..) => {
-                let a = read_pc(state);
-                let v = read(state, a as u16);
+                let a = read_pc();
+                let v = read(a as u16);
                 format!("${:02X} = {:02X}", a, v)
             }
             Addressing::ZeroPageOffset(Reg::X, ..) => {
-                let a1 = read_pc(state) as u16;
+                let a1 = read_pc() as u16;
                 let a2 = a1.wrapping_add(cpu_state.reg_x as u16) & 0xff;
-                let v = read(state, a2);
+                let v = read(a2);
                 format!("${:02X},X @ {:04X} = {:02X}", a1, a2, v)
             }
             Addressing::ZeroPageOffset(Reg::Y, ..) => {
-                let a1 = read_pc(state) as u16;
+                let a1 = read_pc() as u16;
                 let a2 = a1.wrapping_add(cpu_state.reg_y as u16) & 0xff;
-                let v = read(state, a2);
+                let v = read(a2);
                 format!("${:02X},X @ {:04X} = {:02X}", a1, a2, v)
             }
             Addressing::Absolute(..) => {
-                let a_low = read_pc(state) as u16;
-                let a_high = read_pc(state);
+                let a_low = read_pc() as u16;
+                let a_high = read_pc();
                 let a = ((a_high as u16) << 8) | a_low;
-                let v = read(state, a);
+                let v = read(a);
                 format!("${:04X} = ${:02X}", a, v)
             }
             Addressing::AbsoluteOffset(Reg::X, ..) => {
-                let a_low = read_pc(state) as u16;
-                let a_high = read_pc(state);
+                let a_low = read_pc() as u16;
+                let a_high = read_pc();
                 let a1 = ((a_high as u16) << 8) | a_low;
                 let a2 = a1.wrapping_add(cpu_state.reg_x as u16);
-                let v = read(state, a2);
+                let v = read(a2);
                 format!("${:04X},X @ {:04X} = {:02X}", a1, a2, v)
             }
             Addressing::AbsoluteOffset(Reg::Y, ..) => {
-                let a_low = read_pc(state) as u16;
-                let a_high = read_pc(state);
+                let a_low = read_pc() as u16;
+                let a_high = read_pc();
                 let a1 = ((a_high as u16) << 8) | a_low;
                 let a2 = a1.wrapping_add(cpu_state.reg_y as u16);
-                let v = read(state, a2);
+                let v = read(a2);
                 format!("${:04X},X @ {:04X} = {:02X}", a1, a2, v)
             }
             Addressing::IndirectAbsolute(..) => {
-                let a1_low = read_pc(state) as u16;
-                let a1_high = read_pc(state);
+                let a1_low = read_pc() as u16;
+                let a1_high = read_pc();
                 let a1 = ((a1_high as u16) << 8) | a1_low;
-                let a2_low = read(state, a1) as u16;
-                let a2_high = read(state, (a1 & 0xff00) | (a1.wrapping_add(1) & 0xff));
+                let a2_low = read(a1) as u16;
+                let a2_high = read((a1 & 0xff00) | (a1.wrapping_add(1) & 0xff));
                 let a2 = ((a2_high as u16) << 8) | a2_low;
                 format!("(${:04X}) @ {:04X}", a1, a2)
             }
             Addressing::Relative(..) => {
-                let rel = read_pc(state);
+                let rel = read_pc();
                 let a = if rel < 0x080 {
                     addr_inc.wrapping_add(rel as u16)
                 } else {
@@ -316,21 +326,21 @@ impl Debug {
                 format!("${:04X}", a)
             }
             Addressing::IndirectX(..) => {
-                let a1 = read_pc(state) as u16;
+                let a1 = read_pc() as u16;
                 let a2 = a1.wrapping_add(cpu_state.reg_x as u16) & 0xff;
-                let a3_low = read(state, a2) as u16;
-                let a3_high = read(state, (a2 & 0xff00) | (a2.wrapping_add(1) & 0xff)) as u16;
+                let a3_low = read(a2) as u16;
+                let a3_high = read((a2 & 0xff00) | (a2.wrapping_add(1) & 0xff)) as u16;
                 let a3 = (a3_high << 8) | a3_low;
-                let v = read(state, a3);
+                let v = read(a3);
                 format!("(${:02X},X) @ {:02X} = {:04X} = {:02X}", a1, a2, a3, v)
             }
             Addressing::IndirectY(..) => {
-                let a1 = read_pc(state) as u16;
-                let a2_low = read(state, a1);
-                let a2_high = read(state, (a1 & 0xff00) | (a1.wrapping_add(1) & 0xff));
+                let a1 = read_pc() as u16;
+                let a2_low = read(a1);
+                let a2_high = read((a1 & 0xff00) | (a1.wrapping_add(1) & 0xff));
                 let a2 = ((a2_high as u16) << 8) | a2_low as u16;
                 let a3 = a2.wrapping_add(cpu_state.reg_y as u16);
-                let v = read(state, a3);
+                let v = read(a3);
                 format!("(${:02X}),Y = {:04X} @ {:04X} = {:02X}", a1, a2, a3, v)
             }
         };

@@ -1,5 +1,6 @@
 use crate::cartridge::Cartridge;
-use crate::system::{System, SystemState};
+
+use std::cell::Cell;
 
 #[derive(Copy, Clone)]
 pub struct Page {
@@ -8,7 +9,7 @@ pub struct Page {
 
 #[derive(Default)]
 pub struct Pages {
-    data: Vec<u8>,
+    data: Vec<Cell<u8>>,
 }
 
 impl Pages {
@@ -19,40 +20,40 @@ impl Pages {
     pub fn alloc_kb(&mut self, kb: usize) -> Page {
         let start = self.data.len();
         let end = start + (kb * 0x400);
-        self.data.resize(end, 0);
+        self.data.resize(end, Cell::new(0));
         Page { start }
     }
 
     pub fn read(&self, page: Page, addr: u16) -> u8 {
-        self.data[page.start + addr as usize]
+        let addr = page.start + addr as usize;
+        self.data[addr].get()
     }
 
-    pub fn write(&mut self, page: Page, addr: u16, val: u8) {
-        self.data[page.start + addr as usize] = val;
+    pub fn write(&self, page: Page, addr: u16, val: u8) {
+        let addr = page.start + addr as usize;
+        self.data[addr].set(val);
     }
 }
 
 pub struct MemoryBlock {
+    mem: Pages,
     page: Page,
 }
 
 impl MemoryBlock {
-    pub fn new(kb: usize, pages: &mut Pages) -> MemoryBlock {
-        MemoryBlock {
-            page: pages.alloc_kb(kb),
-        }
+    pub fn new(kb: usize) -> MemoryBlock {
+        let mut mem = Pages::new();
+        let page = mem.alloc_kb(kb);
+
+        MemoryBlock { mem, page }
     }
 
-    pub fn peek(&self, state: &SystemState, addr: u16) -> u8 {
-        state.mem.read(self.page, addr)
+    pub fn read(&self, addr: u16) -> u8 {
+        self.mem.read(self.page, addr)
     }
 
-    pub fn read(&self, state: &SystemState, addr: u16) -> u8 {
-        state.mem.read(self.page, addr)
-    }
-
-    pub fn write(&self, state: &mut SystemState, addr: u16, val: u8) {
-        state.mem.write(self.page, addr, val);
+    pub fn write(&self, addr: u16, val: u8) {
+        self.mem.write(self.page, addr, val);
     }
 }
 
@@ -82,11 +83,11 @@ impl Banks {
         Banks { data: v, kind }
     }
 
-    pub fn read(&self, system: &System, bank: usize, addr: u16) -> u8 {
+    pub fn read(&self, cartridge: &Cartridge, bank: usize, addr: u16) -> u8 {
         let bank = self.data[bank % self.data.len()];
         match self.kind {
-            MemKind::Prg => system.cartridge.prg_rom[bank.start + addr as usize],
-            MemKind::Chr => system.cartridge.chr_rom[bank.start + addr as usize],
+            MemKind::Prg => cartridge.prg_rom[bank.start + addr as usize],
+            MemKind::Chr => cartridge.chr_rom[bank.start + addr as usize],
         }
     }
 }
@@ -104,6 +105,7 @@ pub enum BankKind {
 }
 
 pub struct MappedMemory {
+    mem: Pages,
     banks: Banks,
     pages: Vec<Page>,
     base_addr: u16,
@@ -112,23 +114,24 @@ pub struct MappedMemory {
 
 impl MappedMemory {
     pub fn new(
-        state: &mut SystemState,
         cart: &Cartridge,
         base_addr: u16,
         ram_kb: u32,
         size_kb: u32,
         kind: MemKind,
     ) -> MappedMemory {
+        let mut mem = Pages::new();
         let mut pages = Vec::new();
         let mut mapping = Vec::new();
 
         for _ in 0..ram_kb {
-            pages.push(state.mem.alloc_kb(1));
+            pages.push(mem.alloc_kb(1));
         }
         for _ in 0..size_kb {
             mapping.push(Mapped::Bank(0));
         }
         MappedMemory {
+            mem,
             banks: Banks::load(cart, kind),
             pages,
             base_addr,
@@ -162,26 +165,26 @@ impl MappedMemory {
         self.mapping[offset as usize]
     }
 
-    pub fn read(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
+    pub fn read(&self, cartridge: &Cartridge, addr: u16) -> u8 {
         let mapping = self.get_mapping(addr);
 
         match mapping {
-            Mapped::Bank(b) => self.banks.read(system, b, addr & 0x3ff),
+            Mapped::Bank(b) => self.banks.read(cartridge, b, addr & 0x3ff),
             Mapped::Page(p) => {
                 let page = self.pages[p % self.pages.len()];
-                state.mem.read(page, addr & 0x3ff)
+                self.mem.read(page, addr & 0x3ff)
             }
         }
     }
 
-    pub fn write(&self, _system: &System, state: &mut SystemState, addr: u16, val: u8) {
+    pub fn write(&self, addr: u16, val: u8) {
         let mapping = self.get_mapping(addr);
 
         match mapping {
             Mapped::Bank(_) => {}
             Mapped::Page(p) => {
                 let page = self.pages[p % self.pages.len()];
-                state.mem.write(page, addr & 0x3ff, val);
+                self.mem.write(page, addr & 0x3ff, val);
             }
         }
     }

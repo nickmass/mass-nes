@@ -10,10 +10,9 @@ pub use self::triangle::Triangle;
 
 use crate::apu::ApuState;
 use crate::bus::AddressBus;
-use crate::system::SystemState;
 
 pub trait Channel {
-    fn register(&self, state: &mut SystemState, cpu: &mut AddressBus);
+    fn register(&self, cpu: &mut AddressBus);
     fn write(&self, addr: u16, value: u8);
     fn tick(&self, state: &ApuState) -> u8;
     fn enable(&self);

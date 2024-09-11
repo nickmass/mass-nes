@@ -1,7 +1,6 @@
 use crate::apu::ApuState;
 use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
-use crate::system::SystemState;
 
 use std::cell::RefCell;
 
@@ -93,12 +92,8 @@ impl Noise {
 }
 
 impl Channel for Noise {
-    fn register(&self, state: &mut SystemState, cpu: &mut AddressBus) {
-        cpu.register_write(
-            state,
-            DeviceKind::Noise,
-            AndEqualsAndMask(0xfffc, 0x400c, 0x3),
-        );
+    fn register(&self, cpu: &mut AddressBus) {
+        cpu.register_write(DeviceKind::Noise, AndEqualsAndMask(0xfffc, 0x400c, 0x3));
     }
 
     fn write(&self, addr: u16, value: u8) {

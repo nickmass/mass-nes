@@ -1,7 +1,12 @@
-use crate::bus::{AddressBus, AddressValidator, BusKind, DeviceKind};
-use crate::nametables::{Nametables, NametablesState};
+use crate::bus::{AddressBus, BusKind, DeviceKind, RangeAndMask};
+use crate::cpu::CpuNmiInterrupt;
+use crate::mapper::{Mapper, Nametable};
+use crate::memory::MemoryBlock;
 use crate::ppu_step::*;
-use crate::system::{EmphMode, Region, System, SystemState};
+use crate::region::{EmphMode, Region};
+
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 #[derive(Copy, Clone)]
 struct SpriteData {
@@ -66,8 +71,6 @@ pub struct PpuState {
     low_attr_shift: u16,
     high_attr_shift: u16,
 
-    pub screen: Vec<u16>,
-
     in_sprite_render: bool,
     next_sprite_byte: u8,
     sprite_n: u32,
@@ -84,7 +87,6 @@ pub struct PpuState {
     sprite_data: [SpriteData; 8],
     sprite_render_index: usize,
 
-    pub nametables: NametablesState,
     reset_delay: u32,
 
     region: Region,
@@ -139,8 +141,6 @@ impl Default for PpuState {
             low_attr_shift: 0,
             high_attr_shift: 0,
 
-            screen: vec![0x0f; 256 * 240],
-
             in_sprite_render: false,
             next_sprite_byte: 0,
             sprite_n: 0,
@@ -157,7 +157,6 @@ impl Default for PpuState {
             sprite_data: [SpriteData::default(); 8],
             sprite_render_index: 0,
 
-            nametables: Default::default(),
             reset_delay: 0,
 
             region: Region::default(),
@@ -293,6 +292,7 @@ impl PpuState {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Copy, Clone)]
 pub struct PpuDebugState {
     pub tick: u64,
@@ -303,277 +303,279 @@ pub struct PpuDebugState {
 }
 
 pub struct Ppu {
-    bus: AddressBus,
-    pub nametables: Nametables,
     region: Region,
+    mapper: Rc<dyn Mapper>,
+    cpu_nmi: CpuNmiInterrupt,
+    state: RefCell<PpuState>,
+    nt_internal_a: MemoryBlock,
+    nt_internal_b: MemoryBlock,
+    screen: Vec<Cell<u16>>,
 }
 
 impl Ppu {
-    pub fn new(state: &mut SystemState, region: Region) -> Ppu {
-        state.ppu.region = region;
-        state.ppu.ppu_steps = generate_steps(region);
+    pub fn new(region: Region, cpu_nmi: CpuNmiInterrupt, mapper: Rc<dyn Mapper>) -> Ppu {
+        let mut state = PpuState::default();
+        state.region = region;
+        state.ppu_steps = generate_steps(region);
         Ppu {
-            bus: AddressBus::new(BusKind::Ppu, state, 0, 0x3fff),
-            nametables: Nametables::new(state),
             region,
+            mapper,
+            cpu_nmi,
+            state: RefCell::new(state),
+            nt_internal_a: MemoryBlock::new(1),
+            nt_internal_b: MemoryBlock::new(1),
+            screen: vec![Cell::new(0x0f); 256 * 240],
         }
     }
 
-    pub fn power(&self, system: &System, state: &mut SystemState) {
-        self.write(system, state, 0x2000, 0);
-        self.write(system, state, 0x2001, 0);
-        self.write(system, state, 0x2002, 0xa0);
-        self.write(system, state, 0x2003, 0);
-        self.write(system, state, 0x2005, 0);
-        self.write(system, state, 0x2005, 0);
-        self.write(system, state, 0x2006, 0);
-        self.write(system, state, 0x2006, 0);
-        state.ppu.data_read_buffer = 0;
-        state.ppu.reset_delay = 29658 * 3;
+    pub fn power(&self) {
+        self.write(0x2000, 0);
+        self.write(0x2001, 0);
+        self.write(0x2002, 0xa0);
+        self.write(0x2003, 0);
+        self.write(0x2005, 0);
+        self.write(0x2005, 0);
+        self.write(0x2006, 0);
+        self.write(0x2006, 0);
+
+        let mut state = self.state.borrow_mut();
+        state.data_read_buffer = 0;
+        state.reset_delay = 29658 * 3;
     }
 
-    pub fn reset(&self, system: &System, state: &mut SystemState) {
-        self.write(system, state, 0x2000, 0);
-        self.write(system, state, 0x2001, 0);
-        self.write(system, state, 0x2005, 0);
-        self.write(system, state, 0x2005, 0);
-        state.ppu.data_read_buffer = 0;
-        state.ppu.reset_delay = 29658 * 3;
+    pub fn reset(&self) {
+        self.write(0x2000, 0);
+        self.write(0x2001, 0);
+        self.write(0x2005, 0);
+        self.write(0x2005, 0);
+
+        let mut state = self.state.borrow_mut();
+        state.data_read_buffer = 0;
+        state.reset_delay = 29658 * 3;
     }
 
-    pub fn debug_state(&self, state: &mut SystemState) -> PpuDebugState {
-        let (scanline, dot) = state.ppu.scanline();
-        let tick = state.ppu.current_tick;
+    pub fn register(&self, cpu: &mut AddressBus) {
+        cpu.register_read(DeviceKind::Ppu, RangeAndMask(0x2000, 0x4000, 0x2007));
+        cpu.register_write(DeviceKind::Ppu, RangeAndMask(0x2000, 0x4000, 0x2007));
+    }
+
+    pub fn debug_state(&self) -> PpuDebugState {
+        let state = self.state.borrow();
+        let (scanline, dot) = state.scanline();
+        let tick = state.current_tick;
         PpuDebugState {
             tick,
             scanline,
             dot,
-            vblank: state.ppu.vblank,
-            triggered_nmi: state.ppu.triggered_nmi,
+            vblank: state.vblank,
+            triggered_nmi: state.triggered_nmi,
         }
     }
 
-    pub fn register_read<T>(&mut self, state: &mut SystemState, device: DeviceKind, addr: T)
-    where
-        T: AddressValidator,
-    {
-        self.bus.register_read(state, device, addr);
-    }
-
-    pub fn register_write<T>(&mut self, state: &mut SystemState, device: DeviceKind, addr: T)
-    where
-        T: AddressValidator,
-    {
-        self.bus.register_write(state, device, addr);
-    }
-
-    pub fn peek(&self, _system: &System, state: &SystemState, address: u16) -> u8 {
+    pub fn peek(&self, address: u16) -> u8 {
+        let state = self.state.borrow();
         match address {
-            0x2000 => state.ppu.last_write,
-            0x2001 => state.ppu.last_write,
-            0x2002 => state.ppu.ppu_status(),
-            0x2003 => state.ppu.last_write, //OAMADDR
-            0x2004 => state.ppu.oam_data[state.ppu.oam_addr as usize], //OANDATA
-            0x2005 => state.ppu.last_write,
-            0x2006 => state.ppu.last_write,
+            0x2000 => state.last_write,
+            0x2001 => state.last_write,
+            0x2002 => state.ppu_status(),
+            0x2003 => state.last_write,                        //OAMADDR
+            0x2004 => state.oam_data[state.oam_addr as usize], //OANDATA
+            0x2005 => state.last_write,
+            0x2006 => state.last_write,
             0x2007 => {
                 //PPUDATA
-                let addr = state.ppu.vram_addr;
+                let addr = state.vram_addr;
                 if addr & 0x3f00 == 0x3f00 {
                     let addr = if addr & 0x03 != 0 {
                         addr & 0x1f
                     } else {
                         addr & 0x0f
                     };
-                    if state.ppu.is_grayscale() {
-                        state.ppu.palette_data[addr as usize] & 0x30
+                    if state.is_grayscale() {
+                        state.palette_data[addr as usize] & 0x30
                     } else {
-                        state.ppu.palette_data[addr as usize]
+                        state.palette_data[addr as usize]
                     }
                 } else {
-                    state.ppu.data_read_buffer
+                    state.data_read_buffer
                 }
             }
             _ => unreachable!(),
         }
     }
 
-    pub fn read(&self, system: &System, state: &mut SystemState, address: u16) -> u8 {
+    pub fn read(&self, address: u16) -> u8 {
+        let state: &mut PpuState = &mut *self.state.borrow_mut();
         let value = match address {
-            0x2000 => state.ppu.last_write,
-            0x2001 => state.ppu.last_write,
+            0x2000 => state.last_write,
+            0x2001 => state.last_write,
             0x2002 => {
                 //PPUSTATUS
-                let status = state.ppu.ppu_status();
-                state.ppu.write_latch = false;
-                state.ppu.vblank = false;
-                state.ppu.last_status_read = state.ppu.current_tick;
-                if state.ppu.last_nmi_set == state.ppu.current_tick
-                    || state.ppu.last_nmi_set == state.ppu.current_tick - 1
+                let status = state.ppu_status();
+                state.write_latch = false;
+                state.vblank = false;
+                state.last_status_read = state.current_tick;
+                if state.last_nmi_set == state.current_tick
+                    || state.last_nmi_set == state.current_tick - 1
                 {
-                    system.cpu.nmi_cancel();
+                    self.cpu_nmi.nmi_cancel();
                 }
                 status
             }
-            0x2003 => state.ppu.last_write, //OAMADDR
+            0x2003 => state.last_write, //OAMADDR
             0x2004 => {
-                //OANDATA
-                if state.ppu.is_rendering() && !state.ppu.in_vblank() {
-                    state.ppu.next_sprite_byte
+                //OAMDATA
+                if state.is_rendering() && !state.in_vblank() {
+                    state.next_sprite_byte
                 } else {
-                    state.ppu.oam_data[state.ppu.oam_addr as usize]
+                    state.oam_data[state.oam_addr as usize]
                 }
             }
-            0x2005 => state.ppu.last_write,
-            0x2006 => state.ppu.last_write,
+            0x2005 => state.last_write,
+            0x2006 => state.last_write,
             0x2007 => {
                 //PPUDATA
-                let addr = state.ppu.vram_addr;
+                let addr = state.vram_addr;
                 let result = if addr & 0x3f00 == 0x3f00 {
                     let addr = if addr & 0x03 != 0 {
                         addr & 0x1f
                     } else {
                         addr & 0x0f
                     };
-                    if state.ppu.is_grayscale() {
-                        state.ppu.palette_data[addr as usize] & 0x30
+                    if state.is_grayscale() {
+                        state.palette_data[addr as usize] & 0x30
                     } else {
-                        state.ppu.palette_data[addr as usize]
+                        state.palette_data[addr as usize]
                     }
                 } else {
-                    state.ppu.data_read_buffer
+                    state.data_read_buffer
                 };
-                state.ppu.data_read_buffer = self.bus.read(system, state, addr);
-                if !state.ppu.in_vblank() && state.ppu.is_rendering() {
-                    self.horz_increment(system, state);
-                    self.vert_increment(system, state);
+                state.data_read_buffer = self.ppu_read(addr);
+                if !state.in_vblank() && state.is_rendering() {
+                    self.horz_increment(state);
+                    self.vert_increment(state);
                 } else {
-                    state.ppu.vram_addr =
-                        state.ppu.vram_addr.wrapping_add(state.ppu.vram_inc()) & 0x7fff;
-                    let addr = state.ppu.vram_addr;
-                    system.mapper.update_ppu_addr(system, state, addr);
+                    state.vram_addr = state.vram_addr.wrapping_add(state.vram_inc()) & 0x7fff;
+                    let addr = state.vram_addr;
+                    self.mapper.update_ppu_addr(addr);
                 }
 
                 result
             }
             _ => unreachable!(),
         };
-        state.ppu.last_write = value;
+        state.last_write = value;
         value
     }
 
-    pub fn write(&self, system: &System, state: &mut SystemState, address: u16, value: u8) {
-        state.ppu.last_write = value;
+    pub fn write(&self, address: u16, value: u8) {
+        let state: &mut PpuState = &mut *self.state.borrow_mut();
+        state.last_write = value;
         match address {
             0x2000 => {
                 //PPUCTRL
-                if state.ppu.reset_delay != 0 {
+                if state.reset_delay != 0 {
                     return;
                 }
-                let was_nmi_enabled = state.ppu.is_nmi_enabled();
-                state.ppu.regs[0] = value;
-                state.ppu.vram_addr_temp &= 0xf3ff;
-                state.ppu.vram_addr_temp |= state.ppu.base_nametable();
-                if state.ppu.in_vblank()
-                    && !was_nmi_enabled
-                    && state.ppu.is_nmi_enabled()
-                    && state.ppu.vblank
+                let was_nmi_enabled = state.is_nmi_enabled();
+                state.regs[0] = value;
+                state.vram_addr_temp &= 0xf3ff;
+                state.vram_addr_temp |= state.base_nametable();
+                if state.in_vblank() && !was_nmi_enabled && state.is_nmi_enabled() && state.vblank {
+                    state.last_nmi_set = state.current_tick;
+                    self.cpu_nmi.nmi_req(1);
+                } else if !state.is_nmi_enabled()
+                    && state.vblank
+                    && state.last_nmi_set > state.current_tick - 2
                 {
-                    state.ppu.last_nmi_set = state.ppu.current_tick;
-                    system.cpu.nmi_req(1);
-                } else if !state.ppu.is_nmi_enabled()
-                    && state.ppu.vblank
-                    && state.ppu.last_nmi_set > state.ppu.current_tick - 2
-                {
-                    system.cpu.nmi_cancel();
+                    self.cpu_nmi.nmi_cancel();
                 }
             }
             0x2001 => {
                 //PPUMASK
-                if state.ppu.reset_delay != 0 {
+                if state.reset_delay != 0 {
                     return;
                 }
-                state.ppu.regs[1] = value;
+                state.regs[1] = value;
             }
             0x2002 => {
-                state.ppu.regs[2] = value;
+                state.regs[2] = value;
             }
             0x2003 => {
                 //OAMADDR
-                state.ppu.oam_addr = value;
+                state.oam_addr = value;
             }
             0x2004 => {
                 //OAMDATA
-                if !state.ppu.in_vblank() && state.ppu.is_rendering() {
-                    state.ppu.sprite_n += 1;
-                    if state.ppu.sprite_n == 64 {
-                        state.ppu.sprite_n = 0;
+                if !state.in_vblank() && state.is_rendering() {
+                    state.sprite_n += 1;
+                    if state.sprite_n == 64 {
+                        state.sprite_n = 0;
                     }
                 } else {
                     // OAM byte 2 bits 2-4 dont exist in hardware are read back as 0
-                    if state.ppu.oam_addr & 3 == 2 {
-                        state.ppu.oam_data[state.ppu.oam_addr as usize] = value & 0xe3;
+                    if state.oam_addr & 3 == 2 {
+                        state.oam_data[state.oam_addr as usize] = value & 0xe3;
                     } else {
-                        state.ppu.oam_data[state.ppu.oam_addr as usize] = value;
+                        state.oam_data[state.oam_addr as usize] = value;
                     }
-                    state.ppu.oam_addr = state.ppu.oam_addr.wrapping_add(1);
+                    state.oam_addr = state.oam_addr.wrapping_add(1);
                 }
             }
             0x2005 => {
                 //PPUSCROLL
-                if state.ppu.reset_delay != 0 {
+                if state.reset_delay != 0 {
                     return;
                 }
-                if state.ppu.write_latch {
+                if state.write_latch {
                     let value = value as u16;
-                    state.ppu.vram_addr_temp &= 0x0c1f;
-                    state.ppu.vram_addr_temp |= (value & 0xf8) << 2;
-                    state.ppu.vram_addr_temp |= (value & 0x07) << 12;
+                    state.vram_addr_temp &= 0x0c1f;
+                    state.vram_addr_temp |= (value & 0xf8) << 2;
+                    state.vram_addr_temp |= (value & 0x07) << 12;
                 } else {
-                    state.ppu.vram_addr_temp &= 0x7fe0;
-                    state.ppu.vram_addr_temp |= (value >> 3) as u16;
-                    state.ppu.vram_fine_x = (value & 0x07) as u16;
+                    state.vram_addr_temp &= 0x7fe0;
+                    state.vram_addr_temp |= (value >> 3) as u16;
+                    state.vram_fine_x = (value & 0x07) as u16;
                 }
-                state.ppu.write_latch = !state.ppu.write_latch;
+                state.write_latch = !state.write_latch;
             }
             0x2006 => {
                 //PPUADDR
-                if state.ppu.reset_delay != 0 {
+                if state.reset_delay != 0 {
                     return;
                 }
-                if state.ppu.write_latch {
-                    state.ppu.vram_addr_temp &= 0x7f00;
-                    state.ppu.vram_addr_temp |= value as u16;
-                    state.ppu.vram_addr = state.ppu.vram_addr_temp;
-                    let addr = state.ppu.vram_addr;
-                    system.mapper.update_ppu_addr(system, state, addr);
+                if state.write_latch {
+                    state.vram_addr_temp &= 0x7f00;
+                    state.vram_addr_temp |= value as u16;
+                    state.vram_addr = state.vram_addr_temp;
+                    let addr = state.vram_addr;
+                    self.mapper.update_ppu_addr(addr);
                 } else {
-                    state.ppu.vram_addr_temp &= 0x00ff;
-                    state.ppu.vram_addr_temp |= ((value & 0x3f) as u16) << 8;
+                    state.vram_addr_temp &= 0x00ff;
+                    state.vram_addr_temp |= ((value & 0x3f) as u16) << 8;
                 }
-                state.ppu.write_latch = !state.ppu.write_latch;
+                state.write_latch = !state.write_latch;
             }
             0x2007 => {
                 //PPUDATA
-                let addr = state.ppu.vram_addr;
+                let addr = state.vram_addr;
                 if addr & 0x3f00 == 0x3f00 {
                     let addr = if addr & 0x03 != 0 {
                         addr & 0x1f
                     } else {
                         addr & 0x0f
                     };
-                    state.ppu.palette_data[addr as usize] = value;
+                    state.palette_data[addr as usize] = value;
                 } else {
-                    self.bus.write(system, state, addr & 0x3fff, value);
+                    self.ppu_write(addr & 0x3fff, value);
                 }
-                if !state.ppu.in_vblank() && state.ppu.is_rendering() {
-                    self.horz_increment(system, state);
-                    self.vert_increment(system, state);
+                if !state.in_vblank() && state.is_rendering() {
+                    self.horz_increment(state);
+                    self.vert_increment(state);
                 } else {
-                    state.ppu.vram_addr =
-                        state.ppu.vram_addr.wrapping_add(state.ppu.vram_inc()) & 0x7fff;
-                    let addr = state.ppu.vram_addr;
-                    system.mapper.update_ppu_addr(system, state, addr);
+                    state.vram_addr = state.vram_addr.wrapping_add(state.vram_inc()) & 0x7fff;
+                    let addr = state.vram_addr;
+                    self.mapper.update_ppu_addr(addr);
                 }
             }
             _ => {
@@ -583,146 +585,147 @@ impl Ppu {
         }
     }
 
-    pub fn tick(&self, system: &System, state: &mut SystemState) {
-        state.ppu.triggered_nmi = false;
-        if state.ppu.reset_delay != 0 {
-            state.ppu.reset_delay -= 1;
+    pub fn tick(&self) {
+        let state: &mut PpuState = &mut *self.state.borrow_mut();
+        state.triggered_nmi = false;
+        if state.reset_delay != 0 {
+            state.reset_delay -= 1;
         }
 
-        state.ppu.current_tick += 1;
+        state.current_tick += 1;
 
-        let mut step = state.ppu.ppu_steps.step();
+        let mut step = state.ppu_steps.step();
 
         match step.state {
             Some(StateChange::SkippedTick) => {
-                if state.ppu.frame % 2 == 1 && state.ppu.is_background_enabled() {
-                    step = state.ppu.ppu_steps.step();
+                if state.frame % 2 == 1 && state.is_background_enabled() {
+                    step = state.ppu_steps.step();
                 }
             }
             Some(StateChange::SetNmi) => {
-                if state.ppu.current_tick > state.ppu.last_status_read {
-                    if state.ppu.is_nmi_enabled() {
-                        system.cpu.nmi_req(1);
-                        state.ppu.triggered_nmi = true;
-                        state.ppu.last_nmi_set = state.ppu.current_tick;
+                if state.current_tick > state.last_status_read {
+                    if state.is_nmi_enabled() {
+                        self.cpu_nmi.nmi_req(1);
+                        state.triggered_nmi = true;
+                        state.last_nmi_set = state.current_tick;
                     }
                 }
             }
             Some(StateChange::SetVblank) => {
-                if state.ppu.current_tick > state.ppu.last_status_read + 1 {
-                    state.ppu.vblank = true;
+                if state.current_tick > state.last_status_read + 1 {
+                    state.vblank = true;
                 }
             }
             Some(StateChange::ClearFlags) => {
                 // This is wrong... it should happen in ClearVblank, but this passes the tests
                 // this is symptom of some other timing mistake - only leaving this in so I can
                 // investigate later
-                state.ppu.sprite_zero_hit = false;
-                state.ppu.sprite_overflow = false;
+                state.sprite_zero_hit = false;
+                state.sprite_overflow = false;
             }
             Some(StateChange::ClearVblank) => {
-                state.ppu.vblank = false;
-                state.ppu.frame += 1;
+                state.vblank = false;
+                state.frame += 1;
             }
             None => (),
         }
 
         // Always reset sprite eval, even if rendering disabled
         if let Some(SpriteStep::Reset) = step.sprite {
-            state.ppu.sprite_render_index = 0;
-            state.ppu.sprite_n = 0;
-            state.ppu.sprite_m = 0;
-            state.ppu.found_sprites = 0;
-            state.ppu.sprite_reads = 0;
-            state.ppu.line_oam_index = 0;
-            state.ppu.sprite_read_loop = false;
-            state.ppu.block_oam_writes = false;
-            state.ppu.sprite_zero_on_line = state.ppu.sprite_zero_on_next_line;
-            state.ppu.sprite_zero_on_next_line = false;
+            state.sprite_render_index = 0;
+            state.sprite_n = 0;
+            state.sprite_m = 0;
+            state.found_sprites = 0;
+            state.sprite_reads = 0;
+            state.line_oam_index = 0;
+            state.sprite_read_loop = false;
+            state.block_oam_writes = false;
+            state.sprite_zero_on_line = state.sprite_zero_on_next_line;
+            state.sprite_zero_on_next_line = false;
         }
 
-        if state.ppu.is_rendering() {
+        if state.is_rendering() {
             match step.background {
                 Some(BackgroundStep::VertReset) => {
-                    self.vert_reset(system, state);
+                    self.vert_reset(state);
                 }
                 Some(BackgroundStep::HorzReset) => {
-                    self.horz_reset(system, state);
+                    self.horz_reset(state);
                 }
                 Some(BackgroundStep::VertIncrement) => {
-                    self.horz_increment(system, state);
-                    self.vert_increment(system, state);
+                    self.horz_increment(state);
+                    self.vert_increment(state);
                 }
                 Some(BackgroundStep::HorzIncrement) => {
                     self.load_bg_shifters(state);
-                    self.horz_increment(system, state);
+                    self.horz_increment(state);
                 }
                 Some(BackgroundStep::ShiftedHorzIncrement) => {
-                    state.ppu.low_bg_shift <<= 8;
-                    state.ppu.high_bg_shift <<= 8;
-                    state.ppu.low_attr_shift <<= 8;
-                    state.ppu.high_attr_shift <<= 8;
+                    state.low_bg_shift <<= 8;
+                    state.high_bg_shift <<= 8;
+                    state.low_attr_shift <<= 8;
+                    state.high_attr_shift <<= 8;
                     self.load_bg_shifters(state);
-                    self.horz_increment(system, state);
+                    self.horz_increment(state);
                 }
                 Some(BackgroundStep::Nametable) => {
-                    self.fetch_nametable(system, state);
+                    self.fetch_nametable(state);
                 }
                 Some(BackgroundStep::Attribute) => {
-                    self.fetch_attribute(system, state);
+                    self.fetch_attribute(state);
                 }
                 Some(BackgroundStep::LowPattern) => {
-                    self.fetch_low_bg_pattern(system, state);
+                    self.fetch_low_bg_pattern(state);
                 }
                 Some(BackgroundStep::HighPattern) => {
-                    self.fetch_high_bg_pattern(system, state);
+                    self.fetch_high_bg_pattern(state);
                 }
                 None => (),
             }
 
             match step.sprite {
                 Some(SpriteStep::Reset) => {
-                    state.ppu.in_sprite_render = false;
-                    self.init_line_oam(system, state, 0);
+                    state.in_sprite_render = false;
+                    self.init_line_oam(state, 0);
                 }
                 Some(SpriteStep::Clear) => {
-                    state.ppu.in_sprite_render = false;
-                    self.init_line_oam(system, state, step.dot / 2);
+                    state.in_sprite_render = false;
+                    self.init_line_oam(state, step.dot / 2);
                 }
                 Some(SpriteStep::Eval) => {
-                    self.sprite_eval(system, state, step.scanline);
+                    self.sprite_eval(state, step.scanline);
                 }
                 Some(SpriteStep::Read) => {
-                    state.ppu.in_sprite_render = false;
-                    self.sprite_read(system, state);
+                    state.in_sprite_render = false;
+                    self.sprite_read(state);
                 }
                 Some(SpriteStep::Hblank) => {
-                    state.ppu.sprite_n = 0;
-                    self.sprite_eval(system, state, step.scanline);
-                    state.ppu.sprite_any_on_line = false;
+                    state.sprite_n = 0;
+                    self.sprite_eval(state, step.scanline);
+                    state.sprite_any_on_line = false;
                 }
                 Some(SpriteStep::Fetch(0)) => self.sprite_oam_read(state, 0),
                 Some(SpriteStep::Fetch(1)) => {
                     self.sprite_oam_read(state, 1);
-                    self.fetch_nametable(system, state);
+                    self.fetch_nametable(state);
                 }
                 Some(SpriteStep::Fetch(2)) => self.sprite_oam_read(state, 2),
                 Some(SpriteStep::Fetch(3)) => {
                     self.sprite_oam_read(state, 3);
-                    self.fetch_attribute(system, state);
+                    self.fetch_attribute(state);
                 }
                 Some(SpriteStep::Fetch(4)) => self.sprite_oam_read(state, 3),
                 Some(SpriteStep::Fetch(5)) => {
                     self.sprite_oam_read(state, 3);
-                    self.sprite_fetch(system, state, step.scanline, false);
+                    self.sprite_fetch(state, step.scanline, false);
                 }
                 Some(SpriteStep::Fetch(6)) => self.sprite_oam_read(state, 3),
                 Some(SpriteStep::Fetch(7)) => {
                     self.sprite_oam_read(state, 3);
-                    self.sprite_fetch(system, state, step.scanline, true);
+                    self.sprite_fetch(state, step.scanline, true);
                 }
                 Some(SpriteStep::BackgroundWait) => {
-                    state.ppu.next_sprite_byte = state.ppu.line_oam_data[0];
+                    state.next_sprite_byte = state.line_oam_data[0];
                 }
                 None => (),
                 _ => unreachable!(),
@@ -730,18 +733,18 @@ impl Ppu {
         }
 
         if step.scanline < self.region.vblank_line() && step.dot < 256 {
-            self.render(system, state, step.dot, step.scanline);
+            self.render(state, step.dot, step.scanline);
         }
 
-        state.ppu.step = step;
+        state.step = step;
     }
 
-    fn render(&self, system: &System, state: &mut SystemState, dot: u32, scanline: u32) {
-        let fine_x = state.ppu.vram_fine_x;
-        let color = (((state.ppu.low_bg_shift >> (15 - fine_x)) & 0x1)
-            | ((state.ppu.high_bg_shift >> (14 - fine_x)) & 0x2)) as u16;
-        let attr = (((state.ppu.low_attr_shift >> (15 - fine_x)) & 0x1)
-            | ((state.ppu.high_attr_shift >> (14 - fine_x)) & 0x2)) as u16;
+    fn render(&self, state: &mut PpuState, dot: u32, scanline: u32) {
+        let fine_x = state.vram_fine_x;
+        let color = (((state.low_bg_shift >> (15 - fine_x)) & 0x1)
+            | ((state.high_bg_shift >> (14 - fine_x)) & 0x2)) as u16;
+        let attr = (((state.low_attr_shift >> (15 - fine_x)) & 0x1)
+            | ((state.high_attr_shift >> (14 - fine_x)) & 0x2)) as u16;
 
         let attr = if color == 0 { 0 } else { attr << 2 };
 
@@ -749,9 +752,9 @@ impl Ppu {
         let mut sprite_zero = false;
         let mut sprite_pixel = 0;
         let mut behind_bg = false;
-        let left_sprites = state.ppu.is_left_sprites();
-        if state.ppu.is_sprites_enabled() && state.ppu.sprite_any_on_line {
-            for (idx, sprite) in state.ppu.sprite_data.iter_mut().enumerate() {
+        let left_sprites = state.is_left_sprites();
+        if state.is_sprites_enabled() && state.sprite_any_on_line {
+            for (idx, sprite) in state.sprite_data.iter_mut().enumerate() {
                 if sprite.x == 0 {
                     sprite.active = 1;
                 }
@@ -771,7 +774,7 @@ impl Ppu {
                     }
 
                     if color != 0 && sprite_pixel == 0 {
-                        sprite_zero = idx == 0 && state.ppu.sprite_zero_on_line && dot < 255;
+                        sprite_zero = idx == 0 && state.sprite_zero_on_line && dot < 255;
                         sprite_pixel = color | pal;
                         behind_bg = attr & 0x20 != 0;
                     }
@@ -793,9 +796,8 @@ impl Ppu {
             }
         }
 
-        let bg_colored = color != 0
-            && (dot > 7 || state.ppu.is_left_background())
-            && state.ppu.is_background_enabled();
+        let bg_colored =
+            color != 0 && (dot > 7 || state.is_left_background()) && state.is_background_enabled();
         let sprite_colored = sprite_pixel != 0;
 
         let pixel = match (bg_colored, sprite_colored, behind_bg) {
@@ -804,20 +806,20 @@ impl Ppu {
             (true, false, _) => 0x3f00 | palette as u16,
             (true, true, false) => {
                 if sprite_zero {
-                    state.ppu.sprite_zero_hit = true;
+                    state.sprite_zero_hit = true;
                 }
                 0x3f10 | sprite_pixel as u16
             }
             (true, true, true) => {
                 if sprite_zero {
-                    state.ppu.sprite_zero_hit = true;
+                    state.sprite_zero_hit = true;
                 }
                 0x3f00 | palette as u16
             }
         };
 
-        let pixel = if !state.ppu.is_rendering() && state.ppu.vram_addr & 0x3f00 == 0x3f00 {
-            state.ppu.vram_addr & 0x3f1f
+        let pixel = if !state.is_rendering() && state.vram_addr & 0x3f00 == 0x3f00 {
+            state.vram_addr & 0x3f1f
         } else {
             pixel
         };
@@ -826,57 +828,52 @@ impl Ppu {
         } else {
             pixel & 0x0f
         };
-        let mut pixel_result = state.ppu.palette_data[addr as usize];
+        let mut pixel_result = state.palette_data[addr as usize];
 
-        if state.ppu.is_grayscale() {
+        if state.is_grayscale() {
             pixel_result &= 0x30;
         }
 
+        /*
         if system.debug.color(state) {
             pixel_result = 0x14
         }
+        */
 
-        state.ppu.screen[((scanline * 256) + dot) as usize] =
-            pixel_result as u16 | state.ppu.emph_bits();
+        self.screen[((scanline * 256) + dot) as usize].set(pixel_result as u16 | state.emph_bits());
 
-        state.ppu.low_attr_shift <<= 1;
-        state.ppu.high_attr_shift <<= 1;
-        state.ppu.low_bg_shift <<= 1;
-        state.ppu.high_bg_shift <<= 1;
+        state.low_attr_shift <<= 1;
+        state.high_attr_shift <<= 1;
+        state.low_bg_shift <<= 1;
+        state.high_bg_shift <<= 1;
     }
 
-    fn sprite_on_line(
-        &self,
-        _system: &System,
-        state: &SystemState,
-        sprite_y: u8,
-        scanline: u32,
-    ) -> bool {
+    fn sprite_on_line(&self, state: &PpuState, sprite_y: u8, scanline: u32) -> bool {
         if sprite_y > 239 {
             return false;
         }
-        if state.ppu.is_tall_sprites() {
+        if state.is_tall_sprites() {
             (sprite_y as u32) + 16 > scanline && (sprite_y as u32) <= scanline
         } else {
             (sprite_y as u32) + 8 > scanline && (sprite_y as u32) <= scanline
         }
     }
 
-    fn sprite_fetch(&self, system: &System, state: &mut SystemState, scanline: u32, high: bool) {
-        let index = state.ppu.sprite_render_index;
-        let sprite_y = state.ppu.line_oam_data[index * 4];
-        let sprite_tile = state.ppu.line_oam_data[(index * 4) + 1] as u16;
-        let sprite_attr = state.ppu.line_oam_data[(index * 4) + 2];
-        let sprite_x = state.ppu.line_oam_data[(index * 4) + 3];
+    fn sprite_fetch(&self, state: &mut PpuState, scanline: u32, high: bool) {
+        let index = state.sprite_render_index;
+        let sprite_y = state.line_oam_data[index * 4];
+        let sprite_tile = state.line_oam_data[(index * 4) + 1] as u16;
+        let sprite_attr = state.line_oam_data[(index * 4) + 2];
+        let sprite_x = state.line_oam_data[(index * 4) + 3];
 
         let flip_vert = sprite_attr & 0x80 != 0;
-        let sprite_height = if state.ppu.is_tall_sprites() { 16 } else { 8 };
+        let sprite_height = if state.is_tall_sprites() { 16 } else { 8 };
         let line = if scanline >= sprite_y as u32 && scanline - (sprite_y as u32) < sprite_height {
             (scanline - sprite_y as u32) as u16
         } else {
             0
         };
-        let tile_addr = if state.ppu.is_tall_sprites() {
+        let tile_addr = if state.is_tall_sprites() {
             let bottom_half = line >= 8;
             let line = if bottom_half { line - 8 } else { line };
             let line = if flip_vert { 7 - line } else { line };
@@ -889,15 +886,15 @@ impl Ppu {
             }
         } else {
             let line = if flip_vert { 7 - line } else { line };
-            ((sprite_tile << 4) | state.ppu.sprite_pattern_table()) + line
+            ((sprite_tile << 4) | state.sprite_pattern_table()) + line
         };
 
         let pattern_addr = if high { tile_addr | 0x08 } else { tile_addr };
-        let pattern_byte = self.bus.read(system, state, pattern_addr);
-        let sprite_on_line = self.sprite_on_line(system, state, sprite_y, scanline);
-        state.ppu.sprite_any_on_line |= sprite_on_line;
+        let pattern_byte = self.ppu_read(pattern_addr);
+        let sprite_on_line = self.sprite_on_line(state, sprite_y, scanline);
+        state.sprite_any_on_line |= sprite_on_line;
 
-        let sprite = &mut state.ppu.sprite_data[index];
+        let sprite = &mut state.sprite_data[index];
         sprite.x = sprite_x;
         sprite.attributes = sprite_attr;
         sprite.active = 0;
@@ -906,7 +903,7 @@ impl Ppu {
             if !sprite_on_line {
                 sprite.pattern_high = 0;
             }
-            state.ppu.sprite_render_index += 1;
+            state.sprite_render_index += 1;
         } else {
             sprite.pattern_low = pattern_byte;
             if !sprite_on_line {
@@ -915,105 +912,104 @@ impl Ppu {
         }
     }
 
-    fn sprite_read(&self, _system: &System, state: &mut SystemState) {
-        self.sprite_oam_read(state, state.ppu.sprite_m);
+    fn sprite_read(&self, state: &mut PpuState) {
+        self.sprite_oam_read(state, state.sprite_m);
     }
 
-    fn sprite_oam_read(&self, state: &mut SystemState, offset: u32) {
-        state.ppu.next_sprite_byte =
-            state.ppu.oam_data[((state.ppu.sprite_n * 4) + offset) as usize];
+    fn sprite_oam_read(&self, state: &mut PpuState, offset: u32) {
+        state.next_sprite_byte = state.oam_data[((state.sprite_n * 4) + offset) as usize];
 
         // OAM byte 2 bits 2-4 dont exist in hardware are read back as 0
         if offset == 2 {
-            state.ppu.next_sprite_byte &= 0xe3;
+            state.next_sprite_byte &= 0xe3;
         }
     }
 
-    fn sprite_eval(&self, system: &System, state: &mut SystemState, scanline: u32) {
-        if state.ppu.sprite_read_loop {
+    fn sprite_eval(&self, state: &mut PpuState, scanline: u32) {
+        if state.sprite_read_loop {
             return;
         }
 
-        if !state.ppu.block_oam_writes {
-            state.ppu.line_oam_data[state.ppu.line_oam_index] = state.ppu.next_sprite_byte;
+        if !state.block_oam_writes {
+            state.line_oam_data[state.line_oam_index] = state.next_sprite_byte;
         }
-        if state.ppu.found_sprites == 8 {
-            if state.ppu.sprite_reads != 0 {
-                state.ppu.sprite_m += 1;
-                state.ppu.sprite_m &= 3;
-                if state.ppu.sprite_m == 0 {
-                    state.ppu.sprite_n += 1;
-                    if state.ppu.sprite_n == 64 {
-                        state.ppu.sprite_read_loop = true;
-                        state.ppu.sprite_n = 0;
-                        state.ppu.sprite_m = 0;
+        if state.found_sprites == 8 {
+            if state.sprite_reads != 0 {
+                state.sprite_m += 1;
+                state.sprite_m &= 3;
+                if state.sprite_m == 0 {
+                    state.sprite_n += 1;
+                    if state.sprite_n == 64 {
+                        state.sprite_read_loop = true;
+                        state.sprite_n = 0;
+                        state.sprite_m = 0;
                     }
                 }
-                state.ppu.sprite_reads -= 1;
-            } else if self.sprite_on_line(system, state, state.ppu.next_sprite_byte, scanline) {
-                state.ppu.sprite_overflow = true;
-                state.ppu.sprite_m += 1;
-                state.ppu.sprite_m &= 3;
-                state.ppu.sprite_reads = 3;
+                state.sprite_reads -= 1;
+            } else if self.sprite_on_line(state, state.next_sprite_byte, scanline) {
+                state.sprite_overflow = true;
+                state.sprite_m += 1;
+                state.sprite_m &= 3;
+                state.sprite_reads = 3;
             } else {
-                state.ppu.sprite_n += 1;
-                state.ppu.sprite_m += 1;
-                state.ppu.sprite_m &= 3;
-                if state.ppu.sprite_n == 64 {
-                    state.ppu.sprite_read_loop = true;
-                    state.ppu.sprite_n = 0;
+                state.sprite_n += 1;
+                state.sprite_m += 1;
+                state.sprite_m &= 3;
+                if state.sprite_n == 64 {
+                    state.sprite_read_loop = true;
+                    state.sprite_n = 0;
                 }
             }
         } else {
             //Less then 8 sprites found
-            if state.ppu.sprite_reads != 0 {
-                state.ppu.sprite_m += 1;
-                state.ppu.sprite_m &= 3;
-                state.ppu.line_oam_index += 1;
-                state.ppu.sprite_reads -= 1;
-                if state.ppu.sprite_reads == 0 {
-                    state.ppu.found_sprites += 1;
+            if state.sprite_reads != 0 {
+                state.sprite_m += 1;
+                state.sprite_m &= 3;
+                state.line_oam_index += 1;
+                state.sprite_reads -= 1;
+                if state.sprite_reads == 0 {
+                    state.found_sprites += 1;
                 }
-            } else if self.sprite_on_line(system, state, state.ppu.next_sprite_byte, scanline) {
-                if state.ppu.sprite_n == 0 {
-                    state.ppu.sprite_zero_on_next_line = true;
+            } else if self.sprite_on_line(state, state.next_sprite_byte, scanline) {
+                if state.sprite_n == 0 {
+                    state.sprite_zero_on_next_line = true;
                 }
-                state.ppu.sprite_m += 1;
-                state.ppu.sprite_reads = 3;
-                state.ppu.line_oam_index += 1;
+                state.sprite_m += 1;
+                state.sprite_reads = 3;
+                state.line_oam_index += 1;
             }
-            if state.ppu.sprite_reads == 0 {
-                state.ppu.sprite_n += 1;
-                state.ppu.sprite_m = 0;
-                if state.ppu.sprite_n == 64 {
-                    state.ppu.sprite_read_loop = true;
-                    state.ppu.sprite_n = 0;
-                } else if state.ppu.found_sprites == 8 {
-                    state.ppu.block_oam_writes = true;
+            if state.sprite_reads == 0 {
+                state.sprite_n += 1;
+                state.sprite_m = 0;
+                if state.sprite_n == 64 {
+                    state.sprite_read_loop = true;
+                    state.sprite_n = 0;
+                } else if state.found_sprites == 8 {
+                    state.block_oam_writes = true;
                 }
             }
         }
     }
 
-    fn init_line_oam(&self, _system: &System, state: &mut SystemState, addr: u32) {
-        state.ppu.in_sprite_render = true;
-        state.ppu.next_sprite_byte = 0xff;
-        state.ppu.line_oam_data[addr as usize] = state.ppu.next_sprite_byte;
+    fn init_line_oam(&self, state: &mut PpuState, addr: u32) {
+        state.in_sprite_render = true;
+        state.next_sprite_byte = 0xff;
+        state.line_oam_data[addr as usize] = state.next_sprite_byte;
     }
 
-    fn horz_increment(&self, _system: &System, state: &mut SystemState) {
-        let mut addr = state.ppu.vram_addr;
+    fn horz_increment(&self, state: &mut PpuState) {
+        let mut addr = state.vram_addr;
         if addr & 0x001f == 0x1f {
             addr &= !0x001f;
             addr ^= 0x0400;
         } else {
             addr += 1;
         }
-        state.ppu.vram_addr = addr;
+        state.vram_addr = addr;
     }
 
-    fn vert_increment(&self, _system: &System, state: &mut SystemState) {
-        let mut addr = state.ppu.vram_addr;
+    fn vert_increment(&self, state: &mut PpuState) {
+        let mut addr = state.vram_addr;
         if (addr & 0x7000) != 0x7000 {
             addr += 0x1000;
         } else {
@@ -1030,89 +1026,114 @@ impl Ppu {
 
             addr = (addr & !0x03e0) | (y << 5);
         }
-        state.ppu.vram_addr = addr;
+        state.vram_addr = addr;
     }
 
-    fn horz_reset(&self, _system: &System, state: &mut SystemState) {
-        let mut addr = state.ppu.vram_addr;
-        let addr_t = state.ppu.vram_addr_temp;
+    fn horz_reset(&self, state: &mut PpuState) {
+        let mut addr = state.vram_addr;
+        let addr_t = state.vram_addr_temp;
 
         addr &= 0xfbe0;
         addr |= addr_t & 0x041f;
-        state.ppu.vram_addr = addr;
+        state.vram_addr = addr;
     }
 
-    fn vert_reset(&self, _system: &System, state: &mut SystemState) {
-        let mut addr = state.ppu.vram_addr;
-        let addr_t = state.ppu.vram_addr_temp;
+    fn vert_reset(&self, state: &mut PpuState) {
+        let mut addr = state.vram_addr;
+        let addr_t = state.vram_addr_temp;
 
         addr &= 0x841f;
         addr |= addr_t & 0x7be0;
-        state.ppu.vram_addr = addr;
+        state.vram_addr = addr;
     }
 
-    fn load_bg_shifters(&self, state: &mut SystemState) {
-        state.ppu.low_bg_shift &= 0xff00;
-        state.ppu.low_bg_shift |= state.ppu.pattern_low as u16;
-        state.ppu.high_bg_shift &= 0xff00;
-        state.ppu.high_bg_shift |= state.ppu.pattern_high as u16;
+    fn load_bg_shifters(&self, state: &mut PpuState) {
+        state.low_bg_shift &= 0xff00;
+        state.low_bg_shift |= state.pattern_low as u16;
+        state.high_bg_shift &= 0xff00;
+        state.high_bg_shift |= state.pattern_high as u16;
 
-        state.ppu.low_attr_shift &= 0xff00;
-        state.ppu.low_attr_shift |= ((state.ppu.attribute_low & 1) * 0xff) as u16;
-        state.ppu.high_attr_shift &= 0xff00;
-        state.ppu.high_attr_shift |= ((state.ppu.attribute_high & 1) * 0xff) as u16;
+        state.low_attr_shift &= 0xff00;
+        state.low_attr_shift |= ((state.attribute_low & 1) * 0xff) as u16;
+        state.high_attr_shift &= 0xff00;
+        state.high_attr_shift |= ((state.attribute_high & 1) * 0xff) as u16;
     }
 
-    fn fetch_nametable(&self, system: &System, state: &mut SystemState) {
-        let nt_addr = 0x2000 | (state.ppu.vram_addr & 0xfff);
-        state.ppu.nametable_tile = self.bus.read(system, state, nt_addr);
+    fn fetch_nametable(&self, state: &mut PpuState) {
+        let nt_addr = 0x2000 | (state.vram_addr & 0xfff);
+        state.nametable_tile = self.ppu_read(nt_addr);
     }
 
-    fn fetch_attribute(&self, system: &System, state: &mut SystemState) {
-        let v = state.ppu.vram_addr;
+    fn fetch_attribute(&self, state: &mut PpuState) {
+        let v = state.vram_addr;
         let at_addr = 0x23c0 | (v & 0x0c00) | ((v >> 4) & 0x38) | ((v >> 2) & 0x07);
-        let attr = self.bus.read(system, state, at_addr);
+        let attr = self.ppu_read(at_addr);
 
-        let tile_num = state.ppu.vram_addr & 0x3ff;
+        let tile_num = state.vram_addr & 0x3ff;
         let tile_x = tile_num % 32;
         let tile_y = tile_num / 32;
 
         let attr_quad = ((tile_y >> 1) & 1, (tile_x >> 1) & 1);
         match attr_quad {
             (0, 0) => {
-                state.ppu.attribute_low = (attr >> 0) & 1;
-                state.ppu.attribute_high = (attr >> 1) & 1;
+                state.attribute_low = (attr >> 0) & 1;
+                state.attribute_high = (attr >> 1) & 1;
             }
             (0, 1) => {
-                state.ppu.attribute_low = (attr >> 2) & 1;
-                state.ppu.attribute_high = (attr >> 3) & 1;
+                state.attribute_low = (attr >> 2) & 1;
+                state.attribute_high = (attr >> 3) & 1;
             }
             (1, 0) => {
-                state.ppu.attribute_low = (attr >> 4) & 1;
-                state.ppu.attribute_high = (attr >> 5) & 1;
+                state.attribute_low = (attr >> 4) & 1;
+                state.attribute_high = (attr >> 5) & 1;
             }
             (1, 1) => {
-                state.ppu.attribute_low = (attr >> 6) & 1;
-                state.ppu.attribute_high = (attr >> 7) & 1;
+                state.attribute_low = (attr >> 6) & 1;
+                state.attribute_high = (attr >> 7) & 1;
             }
             _ => unreachable!(),
         }
     }
 
-    fn fetch_low_bg_pattern(&self, system: &System, state: &mut SystemState) {
-        let v = state.ppu.vram_addr;
+    fn fetch_low_bg_pattern(&self, state: &mut PpuState) {
+        let v = state.vram_addr;
         let tile_addr = ((v >> 12) & 0x07)
-            | ((state.ppu.nametable_tile as u16) << 4)
-            | state.ppu.background_pattern_table();
-        state.ppu.pattern_low = self.bus.read(system, state, tile_addr);
+            | ((state.nametable_tile as u16) << 4)
+            | state.background_pattern_table();
+        state.pattern_low = self.ppu_read(tile_addr);
     }
 
-    fn fetch_high_bg_pattern(&self, system: &System, state: &mut SystemState) {
-        let v = state.ppu.vram_addr;
+    fn fetch_high_bg_pattern(&self, state: &mut PpuState) {
+        let v = state.vram_addr;
         let tile_addr = ((v >> 12) & 0x07)
-            | ((state.ppu.nametable_tile as u16) << 4)
-            | state.ppu.background_pattern_table()
+            | ((state.nametable_tile as u16) << 4)
+            | state.background_pattern_table()
             | 0x08;
-        state.ppu.pattern_high = self.bus.read(system, state, tile_addr);
+        state.pattern_high = self.ppu_read(tile_addr);
+    }
+
+    fn ppu_read(&self, address: u16) -> u8 {
+        let bank = self.mapper.ppu_fetch(address & 0x3fff);
+        match bank {
+            Nametable::InternalA => self.nt_internal_a.read(address & 0x3ff),
+            Nametable::InternalB => self.nt_internal_b.read(address & 0x3ff),
+            Nametable::External => self.mapper.read(BusKind::Ppu, address & 0x3fff),
+        }
+    }
+
+    fn ppu_write(&self, address: u16, value: u8) {
+        let bank = self.mapper.ppu_fetch(address & 0x3fff);
+        match bank {
+            Nametable::InternalA => self.nt_internal_a.write(address & 0x3ff, value),
+            Nametable::InternalB => self.nt_internal_b.write(address & 0x3ff, value),
+            Nametable::External => self.mapper.write(BusKind::Ppu, address & 0x3fff, value),
+        }
+    }
+
+    pub fn frame(&self) -> u32 {
+        self.state.borrow().frame
+    }
+    pub fn screen(&self) -> &[Cell<u16>] {
+        self.screen.as_ref()
     }
 }

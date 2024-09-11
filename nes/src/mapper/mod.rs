@@ -11,60 +11,106 @@ mod uxrom;
 
 use crate::bus::{AddressBus, BusKind};
 use crate::cartridge::Cartridge;
-use crate::ppu::Ppu;
-use crate::system::{System, SystemState};
+
+use std::rc::Rc;
 
 pub trait Mapper {
-    fn register(
-        &self,
-        state: &mut SystemState,
-        cpu: &mut AddressBus,
-        ppu: &mut Ppu,
-        cart: &Cartridge,
-    );
+    fn register(&self, cpu: &mut AddressBus);
 
-    fn peek(&self, bus: BusKind, system: &System, state: &SystemState, addr: u16) -> u8;
+    fn peek(&self, bus: BusKind, addr: u16) -> u8;
 
-    fn read(&self, bus: BusKind, system: &System, state: &mut SystemState, addr: u16) -> u8;
+    fn read(&self, bus: BusKind, addr: u16) -> u8;
 
-    fn write(&self, bus: BusKind, system: &System, state: &mut SystemState, addr: u16, value: u8);
+    fn write(&self, bus: BusKind, addr: u16, value: u8);
 
-    fn get_irq(&mut self) -> bool {
+    fn get_irq(&self) -> bool {
         false
     }
 
-    fn tick(&self, _system: &System, _state: &mut SystemState) {}
+    fn tick(&self) {}
 
-    fn nt_peek(&self, system: &System, state: &SystemState, addr: u16) -> u8 {
-        system.ppu.nametables.read(state, addr)
-    }
+    fn update_ppu_addr(&self, _addr: u16) {}
 
-    fn nt_read(&self, system: &System, state: &mut SystemState, addr: u16) -> u8 {
-        system.ppu.nametables.read(state, addr)
-    }
-
-    fn nt_write(&self, system: &System, state: &mut SystemState, addr: u16, value: u8) {
-        system.ppu.nametables.write(state, addr, value);
-    }
-
-    fn update_ppu_addr(&self, _system: &System, _state: &mut SystemState, _addr: u16) {}
+    fn ppu_fetch(&self, address: u16) -> Nametable;
 }
 
-pub fn ines(ines_number: u8, state: &mut SystemState, cart: &Cartridge) -> Box<dyn Mapper> {
+pub fn ines(ines_number: u8, cart: Cartridge) -> Rc<dyn Mapper> {
     match ines_number {
-        0 => Box::new(nrom::Nrom::new(cart, state)),
-        1 | 65 => Box::new(sxrom::Sxrom::new(cart, state)),
-        2 => Box::new(uxrom::Uxrom::new(cart, state)),
-        3 => Box::new(cnrom::Cnrom::new(cart, state)),
-        4 => Box::new(txrom::Txrom::new(cart, state)),
-        7 => Box::new(axrom::Axrom::new(cart, state)),
-        9 => Box::new(pxrom::Pxrom::new(cart, state)),
-        28 => Box::new(action53::Action53::new(cart, state)),
-        69 => Box::new(fme7::Fme7::new(cart, state)),
-        71 | 232 => Box::new(bf909x::Bf909x::new(cart, state)),
+        0 => Rc::new(nrom::Nrom::new(cart)),
+        1 | 65 => Rc::new(sxrom::Sxrom::new(cart)),
+        2 => Rc::new(uxrom::Uxrom::new(cart)),
+        3 => Rc::new(cnrom::Cnrom::new(cart)),
+        4 => Rc::new(txrom::Txrom::new(cart)),
+        7 => Rc::new(axrom::Axrom::new(cart)),
+        9 => Rc::new(pxrom::Pxrom::new(cart)),
+        28 => Rc::new(action53::Action53::new(cart)),
+        69 => Rc::new(fme7::Fme7::new(cart)),
+        71 | 232 => Rc::new(bf909x::Bf909x::new(cart)),
         _ => {
             println!("Mapper not implemented.");
-            Box::new(nrom::Nrom::new(cart, state))
+            Rc::new(nrom::Nrom::new(cart))
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Mirroring {
+    Horizontal,
+    Vertical,
+    Single(Nametable),
+    Custom,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Nametable {
+    InternalA,
+    InternalB,
+    External,
+}
+
+pub struct SimpleMirroring {
+    mirroring: std::cell::Cell<Mirroring>,
+}
+
+impl SimpleMirroring {
+    pub fn new(mirroring: Mirroring) -> Self {
+        Self {
+            mirroring: std::cell::Cell::new(mirroring),
+        }
+    }
+
+    pub fn internal_a(&self) {
+        self.mirroring.set(Mirroring::Single(Nametable::InternalA));
+    }
+
+    pub fn internal_b(&self) {
+        self.mirroring.set(Mirroring::Single(Nametable::InternalB));
+    }
+
+    pub fn horizontal(&self) {
+        self.mirroring.set(Mirroring::Horizontal);
+    }
+
+    pub fn vertical(&self) {
+        self.mirroring.set(Mirroring::Vertical);
+    }
+
+    pub fn custom(&self) {
+        self.mirroring.set(Mirroring::Custom);
+    }
+
+    pub fn ppu_fetch(&self, address: u16) -> Nametable {
+        if address & 0x2000 != 0 {
+            match self.mirroring.get() {
+                Mirroring::Single(n) => n,
+                Mirroring::Horizontal if address & 0x800 != 0 => Nametable::InternalA,
+                Mirroring::Horizontal => Nametable::InternalB,
+                Mirroring::Vertical if address & 0x400 != 0 => Nametable::InternalA,
+                Mirroring::Vertical => Nametable::InternalB,
+                Mirroring::Custom => Nametable::External,
+            }
+        } else {
+            Nametable::External
         }
     }
 }

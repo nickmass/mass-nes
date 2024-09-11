@@ -5,13 +5,14 @@ mod channel;
 mod cpu;
 mod debug;
 mod input;
+mod machine;
 mod mapper;
 mod memory;
-mod nametables;
 mod ops;
 mod ppu;
 mod ppu_step;
-mod system;
+mod region;
 
-pub use self::cartridge::Cartridge;
-pub use self::system::*;
+pub use cartridge::Cartridge;
+pub use machine::{Controller, Machine, UserInput};
+pub use region::Region;
