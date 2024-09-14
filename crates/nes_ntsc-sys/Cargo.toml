@@ -1,0 +1,15 @@
+[package]
+name = "nes_ntsc-sys"
+version = "0.1.0"
+edition = "2021"
+authors = ["Nick Massey <nickmass@nickmass.com>"]
+build = "build.rs"
+
+[lib]
+name = "nes_ntsc_sys"
+path = "src/lib.rs"
+
+[dependencies]
+
+[build-dependencies]
+cc = "1.1"

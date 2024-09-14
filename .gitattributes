@@ -1,0 +1,3 @@
+crates/nes/tests/data linguist-vendored
+crates/nes_ntsc-sys/nes_ntsc linguist-vendored
+crates/nes_ntsc-c2rust linguist-generated=true

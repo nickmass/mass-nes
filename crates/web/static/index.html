@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta name="robots" content="noindex, nofollow" />
+        <title>mass-nes</title>
+        <script type="module">
+         import init, { Emulator } from "./pkg/web.js";
+
+         const loading = document.getElementById("loading_dialog");
+         const canvas = document.getElementById("render_canvas");
+
+         await init({});
+         const emu = await new Emulator("ntsc", canvas);
+
+         const load_url = document.getElementById("load_url");
+         const rom_url = document.getElementById("rom_url")
+         load_url.addEventListener("click", async (e) => {
+             loading.show();
+             await emu.load_rom_url(rom_url.value);
+             loading.close();
+             canvas.focus();
+         });
+
+         const reader = new FileReader();
+         reader.addEventListener("load", (e) => {
+             emu.load_rom_array_buffer(reader.result);
+             canvas.focus();
+         });
+
+         const load_file = document.getElementById("load_file");
+         load_file.addEventListener("change", (e) => {
+             const file = e.target.files[0];
+             reader.readAsArrayBuffer(file);
+         });
+
+         loading.close();
+
+         const rom_examples = await fetch("roms/romlist.json").then((res) => {
+             if (!res.ok) {
+                 return [];
+             } else {
+                 return res.json();
+             }
+         });
+
+         if (rom_examples.length > 0) {
+             const rom_select = document.getElementById("rom_select");
+
+             for (let i = 0; i < rom_examples.length; i++) {
+                 const opt = document.createElement("option");
+                 opt.setAttribute("value", i);
+                 opt.insertAdjacentText("afterbegin", rom_examples[i].title);
+                 rom_select.appendChild(opt);
+             }
+
+             rom_select.addEventListener("change", async (e) => {
+                 const idx = rom_select.value | 0;
+                 if (idx >= 0) {
+                     const rom = rom_examples[idx];
+
+                     loading.show();
+                     await emu.load_rom_url(rom.url);
+                     loading.close();
+                     rom_select.value = "-1";
+                     canvas.focus();
+                 }
+             })
+
+             rom_select.removeAttribute("disabled");
+         }
+        </script>
+        <style>
+         body {
+             background-color: #000;
+
+             margin: 0;
+
+             display: flex;
+             flex-wrap: wrap;
+         }
+
+         #render_canvas {
+             object-fit: contain;
+
+             max-width: 100vh;
+             max-height: 100vh;
+             min-width: 75%;
+             flex-grow: 1;
+             flex-basis: max-content;
+         }
+
+         #render_canvas:focus {
+             outline: none;
+         }
+
+         .info {
+             font-family: sans-serif;
+             color: #ccc;
+             background-color: #333;
+
+             border-radius: 5px;
+             border-color: #555;
+             border-width: 5px;
+
+             margin: 25px;
+             padding: 25px;
+             box-sizing: border-box;
+
+             width: 33%;
+             min-width: 400px;
+             flex-grow: 1;
+             flex-basis: min-content;
+         }
+        </style>
+    </head>
+    <body>
+        <dialog id="loading_dialog" open>Loading...</dialog>
+        <canvas id="render_canvas"></canvas>
+        <div class="info">
+            <h1>mass-nes</h1>
+            <h2>Select a rom:</h2>
+            <select id="rom_select" disabled>
+                <option value="-1">Select...</option>
+            </select>
+            <h2>Or load from a URL:</h2>
+            <input type="url" placeholder="https://" id="rom_url" />
+            <button id="load_url">Load</button>
+            <h2>Or upload a file:</h2>
+            <input type="file" id="load_file" />
+            <p>
+                This emulator supports the Gamepad API in most modern browser and should automatically detect your controller. Alternatively use the follow keyboard controls.
+            </p>
+            <table>
+                <tr><td><strong>Keyboard Controls</strong></td></tr>
+                <tr><td>Up</td><td>Up Arrow</td></tr>
+                <tr><td>Down</td><td>Down Arrow</td></tr>
+                <tr><td>Left</td><td>Left Arrow</td></tr>
+                <tr><td>Right</td><td>Right Arrow</td></tr>
+                <tr><td>A</td><td>Z</td></tr>
+                <tr><td>B</td><td>X</td></tr>
+                <tr><td>Select</td><td>Shift</td></tr>
+                <tr><td>Start</td><td>Enter</td></tr>
+                <tr><td>Reset</td><td>Backspace</td></tr>
+                <tr><td>Power</td><td>Delete</td></tr>
+            </table>
+            <p>
+                <a href="https://github.com/nickmass/mass-nes" target="_blank">Source Code</a>
+            </p>
+        </div>
+    </body>
+</html>
