@@ -7,9 +7,8 @@ authors = ["Nick Massey <nickmass@nickmass.com>"]
 [dependencies]
 blip_buf = "0.1"
 clap = { version = "4.5", features = ["derive"] }
-cpal = "0.15"
 crossbeam = "0.8"
 nes = { path = "../nes" }
-nes_ntsc = { path = "../nes_ntsc", version = "0.1"}
 glium = { git = "https://github.com/nickmass/glium.git", features = ["simple_window_builder"] }
-gilrs = "0.10"
+ui = { path = "../ui" }
+log = "0.4.22"

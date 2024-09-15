@@ -1,33 +1,35 @@
-#![cfg(target_arch = "wasm32")]
-
 use futures::{SinkExt, Stream, StreamExt};
-use gloo::{net::http, worker::{reactor::{reactor, ReactorBridge, ReactorScope}, Registrable, Spawnable}};
-use nes::{Region, Machine, Cartridge, UserInput, Controller};
-use nes_ntsc_c2rust::NesNtscSetup;
-use serde::{Serialize, Deserialize};
-use std::io::Cursor;
+use gloo::{
+    net::http,
+    worker::{
+        reactor::{reactor, ReactorBridge, ReactorScope},
+        Registrable, Spawnable,
+    },
+};
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{js_sys, wasm_bindgen, HtmlCanvasElement, WorkerGlobalScope};
-use window::{NesInputs, NesOutputs, UserEvent};
 use winit::event_loop::EventLoopProxy;
 
+use std::io::Cursor;
 
+use nes::{Cartridge, Controller, Machine, Region, UserInput};
+use ui::audio::Audio;
+
+mod app;
 mod audio;
-mod gamepad;
 mod gfx;
 mod gl;
 mod sync;
-mod window;
 
-use audio::Audio;
-use gfx::Filter;
+use app::{NesInputs, NesOutputs, UserEvent};
 
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "Region")]
 enum RegionDef {
     Ntsc,
-    Pal
+    Pal,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -53,7 +55,11 @@ struct ControllerDef {
 
 #[derive(Serialize, Deserialize)]
 enum MachineInput {
-    Init { #[serde(with = "RegionDef")] region: Region, sample_rate: u32},
+    Init {
+        #[serde(with = "RegionDef")]
+        region: Region,
+        sample_rate: u32,
+    },
     Load(Vec<u8>),
     UserInput(#[serde(with = "UserInputDef")] UserInput),
 }
@@ -77,6 +83,7 @@ enum InitFailureCause {
 #[wasm_bindgen(start)]
 pub fn main() {
     console_error_panic_hook::set_once();
+    let _ = console_log::init_with_level(log::Level::Debug);
 }
 
 #[wasm_bindgen]
@@ -87,19 +94,33 @@ pub async fn worker() {
 pub fn global() -> WorkerGlobalScope {
     use wasm_bindgen::JsCast;
 
-    js_sys::global().dyn_into::<WorkerGlobalScope>().ok().unwrap()
+    js_sys::global()
+        .dyn_into::<WorkerGlobalScope>()
+        .ok()
+        .unwrap()
 }
 
 #[reactor]
 async fn MachineRunner(mut scope: ReactorScope<MachineInput, MachineOutput>) {
     let (region, sample_rate) = match scope.next().await {
-        Some(MachineInput::Init { region, sample_rate }) => (region, sample_rate),
+        Some(MachineInput::Init {
+            region,
+            sample_rate,
+        }) => (region, sample_rate),
         Some(m) => {
-            let _ = scope.send(MachineOutput::InitFailure(InitFailureCause::InvalidMessage(m))).await;
+            let _ = scope
+                .send(MachineOutput::InitFailure(
+                    InitFailureCause::InvalidMessage(m),
+                ))
+                .await;
             return;
-        },
+        }
         None => {
-            let _ = scope.send(MachineOutput::InitFailure(InitFailureCause::ReactorShutdown)).await;
+            let _ = scope
+                .send(MachineOutput::InitFailure(
+                    InitFailureCause::ReactorShutdown,
+                ))
+                .await;
             return;
         }
     };
@@ -109,8 +130,11 @@ async fn MachineRunner(mut scope: ReactorScope<MachineInput, MachineOutput>) {
     machine_loop(scope, region, sample_rate).await
 }
 
-async fn machine_loop(mut scope: ReactorScope<MachineInput, MachineOutput>, region: Region, sample_rate: u32) {
-
+async fn machine_loop(
+    mut scope: ReactorScope<MachineInput, MachineOutput>,
+    region: Region,
+    sample_rate: u32,
+) {
     let mut delta = 0;
     let mut blip = blip_buf_rs::Blip::new(sample_rate / 30);
     blip.set_rates(
@@ -122,10 +146,14 @@ async fn machine_loop(mut scope: ReactorScope<MachineInput, MachineOutput>, regi
     while let Some(event) = scope.next().await {
         let input = match event {
             MachineInput::UserInput(input) => input,
-            MachineInput::Load(rom)  => {
+            MachineInput::Load(rom) => {
                 let mut rom = Cursor::new(rom);
-                let Ok(cartridge)  =Cartridge::load(&mut rom) else {
-                    let _ = scope.send(MachineOutput::InitFailure(InitFailureCause::InvalidCartridge)).await;
+                let Ok(cartridge) = Cartridge::load(&mut rom) else {
+                    let _ = scope
+                        .send(MachineOutput::InitFailure(
+                            InitFailureCause::InvalidCartridge,
+                        ))
+                        .await;
                     return;
                 };
 
@@ -141,7 +169,6 @@ async fn machine_loop(mut scope: ReactorScope<MachineInput, MachineOutput>, regi
         let Some(machine) = machine.as_mut() else {
             continue;
         };
-
 
         machine.handle_input(input);
         machine.run();
@@ -176,19 +203,25 @@ async fn create_worker() -> ReactorBridge<MachineRunner> {
     machine_bridge
 }
 
-async fn worker_input_proxy(mut machine_sink: impl SinkExt<MachineInput> + std::marker::Unpin, inputs: NesInputs) {
+async fn worker_input_proxy(
+    mut machine_sink: impl SinkExt<MachineInput> + std::marker::Unpin,
+    inputs: NesInputs,
+) {
     let mut inputs = inputs.inputs();
     while let Some(i) = inputs.next().await {
         let msg = match i {
-            window::EmulatorInput::UserInput(i) => MachineInput::UserInput(i),
-            window::EmulatorInput::Load(rom) => MachineInput::Load(rom),
+            app::EmulatorInput::UserInput(i) => MachineInput::UserInput(i),
+            app::EmulatorInput::Load(rom) => MachineInput::Load(rom),
         };
 
         let _ = machine_sink.send(msg).await;
     }
 }
 
-async fn worker_output_proxy(mut machine_stream: impl Stream<Item = MachineOutput> + std::marker::Unpin, outputs: NesOutputs) {
+async fn worker_output_proxy(
+    mut machine_stream: impl Stream<Item = MachineOutput> + std::marker::Unpin,
+    outputs: NesOutputs,
+) {
     while let Some(m) = machine_stream.next().await {
         match m {
             MachineOutput::AudioSamples(samples) => outputs.send_samples(samples),
@@ -212,25 +245,31 @@ impl Emulator {
         let region = region.to_lowercase();
         let region = match region.as_str() {
             "pal" => Region::Pal,
-            "ntsc" | _ => Region::Ntsc
+            "ntsc" | _ => Region::Ntsc,
         };
 
-        let filter = gfx::NtscFilter::new(NesNtscSetup::composite());
-        let (audio, sync) = audio::CpalAudio::new(region.refresh_rate()).ok()?;
+        let sync = audio::CpalSync::new();
+        let (audio, sync) = ui::audio::CpalAudio::new(sync, region.refresh_rate(), 128).ok()?;
 
         let sample_rate = audio.sample_rate();
 
         let mut machine_runner = create_worker().await;
-        machine_runner.send(MachineInput::Init { region, sample_rate }).await.ok()?;
+        machine_runner
+            .send(MachineInput::Init {
+                region,
+                sample_rate,
+            })
+            .await
+            .ok()?;
         match machine_runner.next().await? {
             MachineOutput::InitSuccess => (),
             _ => return None,
         }
 
-        let (width, height) = filter.dimensions();
-        canvas.set_width(width);
-        canvas.set_height(height);
-        let mut app = window::App::new(filter, audio, sync, canvas);
+        let setup = ui::filters::NesNtscSetup::composite();
+        //let filter = ui::filters::PalettedFilter::new(setup.generate_palette());
+        let filter = ui::filters::NtscFilter::new(setup);
+        let mut app = app::App::new(filter, audio, sync, canvas);
 
         let (machine_sink, machine_stream) = machine_runner.split();
         let (nes_inputs, nes_outputs) = app.nes_io();
@@ -241,9 +280,7 @@ impl Emulator {
 
         app.run();
 
-        Some(Self {
-            proxy
-        })
+        Some(Self { proxy })
     }
 
     fn load_rom_bytes(&self, bytes: Vec<u8>) {
@@ -260,7 +297,11 @@ impl Emulator {
 
     #[wasm_bindgen]
     pub async fn load_rom_url(&self, url: String) -> Option<bool> {
-        let res = http::RequestBuilder::new(&url).method(http::Method::GET).send().await.ok()?;
+        let res = http::RequestBuilder::new(&url)
+            .method(http::Method::GET)
+            .send()
+            .await
+            .ok()?;
         let bytes = res.binary().await.ok()?;
 
         self.load_rom_bytes(bytes);

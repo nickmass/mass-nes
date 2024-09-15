@@ -1,16 +1,15 @@
-#version 140
 
 // Adapted from https://www.shadertoy.com/view/WsVSzV
 
 float warp = 0.3; // simulate curvature of CRT monitor
-float scan = 0.3; // simulate darkness between scanlines
+float scan = 0.15; // simulate darkness between scanlines
 
 in vec2 v_tex_coords;
 out vec4 color;
 
 uniform vec2 input_size;
 uniform vec2 output_size;
-uniform sampler2D tex;
+uniform sampler2D nes_screen;
 
 vec4 sharp_bilinear(sampler2D tex, vec2 uv)
 {
@@ -48,6 +47,6 @@ void main()
       // determine if we are drawing in a scanline
       float apply = abs(sin(v_tex_coords.y * input_size.y * 4.0)*0.5*scan);
       // sample the texture
-      color = vec4(mix(sharp_bilinear(tex, uv).zyx,vec3(0.0),apply),1.0);
+      color = vec4(mix(sharp_bilinear(nes_screen, uv).zyx,vec3(0.0),apply),1.0);
     }
 }

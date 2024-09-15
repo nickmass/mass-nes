@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{js_sys, wasm_bindgen,
-    HtmlCanvasElement, WebGlBuffer, WebGlFramebuffer, WebGlProgram,
+use web_sys::{
+    js_sys, wasm_bindgen, HtmlCanvasElement, WebGlBuffer, WebGlFramebuffer, WebGlProgram,
     WebGlShader, WebGlTexture, WebGlUniformLocation, WebGlVertexArrayObject,
 };
 
@@ -16,6 +16,24 @@ use std::rc::Rc;
 
 static mut MODEL_ID: u64 = 0;
 
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebGlContextOptions {
+    pub alpha: bool,
+    pub depth: bool,
+    pub stencil: bool,
+    pub desynchronized: bool,
+    pub antialias: bool,
+    pub power_preference: WebGlPowerPreference,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WebGlPowerPreference {
+    Default,
+    HighPerformance,
+    LowPower,
+}
 
 #[derive(Clone)]
 pub struct GlContext<C: Clone = HtmlCanvasElement> {
@@ -28,6 +46,17 @@ impl GlContext {
     pub fn new(canvas: HtmlCanvasElement) -> Self {
         let gl = canvas
             .get_context("webgl2")
+            .unwrap_or(None)
+            .and_then(|e| e.dyn_into::<GL>().ok())
+            .unwrap();
+        GlContext::with_gl(canvas, gl)
+    }
+
+    pub fn with_options(canvas: HtmlCanvasElement, options: WebGlContextOptions) -> Self {
+        let opts = serde_json::to_string(&options).unwrap();
+        let opts = js_sys::JSON::parse(&opts).unwrap();
+        let gl = canvas
+            .get_context_with_context_options("webgl2", &opts)
             .unwrap_or(None)
             .and_then(|e| e.dyn_into::<GL>().ok())
             .unwrap();
@@ -137,7 +166,6 @@ impl GlProgram {
             }
         }
 
-
         GlProgram {
             gl,
             program: prog,
@@ -174,15 +202,13 @@ impl GlProgram {
 
         let key = model.id;
         if let Some(vao) = self.vao_map.get(&key) {
-            self.gl
-                .bind_vertex_array(Some(vao))
+            self.gl.bind_vertex_array(Some(vao))
         } else {
             let vao = self.gl.create_vertex_array().expect("Create vao");
             self.vao_map.insert(key, vao);
             let vao = self.vao_map.get(&key).unwrap();
 
-            self.gl
-                .bind_vertex_array(Some(vao));
+            self.gl.bind_vertex_array(Some(vao));
             model.fill_vao(&self);
         }
 
@@ -206,23 +232,20 @@ impl GlProgram {
 
         let key = model.id;
         if let Some(vao) = self.vao_map.get(&key) {
-            self.gl
-                .bind_vertex_array(Some(vao));
+            self.gl.bind_vertex_array(Some(vao));
         } else {
             let vao = self.gl.create_vertex_array().expect("Create vao");
             self.vao_map.insert(key, vao);
             let vao = self.vao_map.get(&key).unwrap();
 
-            self.gl
-                .bind_vertex_array(Some(vao));
+            self.gl.bind_vertex_array(Some(vao));
             model.fill_vao_instanced::<I>(&self);
         }
 
         self.bind_uniforms(uniforms);
         model.draw_instanced(instanced_data);
 
-        self.gl
-            .bind_vertex_array(None);
+        self.gl.bind_vertex_array(None);
         self.reset_texture_unit();
     }
 
@@ -367,9 +390,6 @@ impl AsGlUniform for GlTexture {
         let texture_unit = program.next_texture_unit();
         gl.active_texture(GL::TEXTURE0 + texture_unit);
         gl.bind_texture(GL::TEXTURE_2D, Some(&self.texture));
-
-        log::info!("{}", texture_unit);
-
         gl.uniform1i(location, texture_unit as i32);
     }
 }
@@ -467,8 +487,7 @@ impl<V: AsGlVertex> GlModel<V> {
             let location = location as u32;
             if let Some(divisor) = divisor {
                 for i in 0..vtype.elements() {
-                    self.gl
-                        .vertex_attrib_divisor(location + i, divisor);
+                    self.gl.vertex_attrib_divisor(location + i, divisor);
                 }
             }
             vtype.layout(&self.gl, location, stride, offset);
@@ -744,27 +763,44 @@ impl GlValueType {
     }
 }
 
+#[derive(Clone)]
 pub struct GlTexture {
     gl: GlContext,
-    texture: WebGlTexture,
+    texture: Rc<WebGlTexture>,
 }
 
 impl GlTexture {
-    pub fn new(gl: &GlContext, width: u32, height: u32, pixel_format: PixelFormat, pixels: &[u8]) -> GlTexture {
+    pub fn new(
+        gl: &GlContext,
+        width: u32,
+        height: u32,
+        pixel_format: PixelFormat,
+        pixels: &[u8],
+    ) -> GlTexture {
+        Self::create(gl, width, height, pixel_format, Some(pixels))
+    }
+
+    pub fn empty(gl: &GlContext, width: u32, height: u32, pixel_format: PixelFormat) -> GlTexture {
+        Self::create(gl, width, height, pixel_format, None)
+    }
+
+    fn create(
+        gl: &GlContext,
+        width: u32,
+        height: u32,
+        pixel_format: PixelFormat,
+        pixels: Option<&[u8]>,
+    ) -> GlTexture {
         let gl = gl.clone();
         let texture = gl.create_texture().expect("Create Texture");
 
-        let buf = &pixels[0..width as usize * height as usize * pixel_format.byte_count()];
+        let buf = pixels
+            .as_ref()
+            .map(|p| &p[0..width as usize * height as usize * pixel_format.byte_count()]);
 
-        gl.active_texture(GL::TEXTURE0);
         gl.bind_texture(GL::TEXTURE_2D, Some(&texture));
 
-        gl.pixel_storei(GL::UNPACK_ALIGNMENT, 1);
-        gl.pixel_storei(GL::PACK_ALIGNMENT, 1);
-
-        let js_buf = pixel_format.format_buffer(buf);
-
-        gl.tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_array_buffer_view(
+        gl.tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
             GL::TEXTURE_2D,
             0,
             pixel_format.internal_format() as i32,
@@ -773,7 +809,7 @@ impl GlTexture {
             0,
             pixel_format.format(),
             pixel_format._type(),
-            Some(&js_buf),
+            buf,
         )
         .expect("Assign Texture");
         gl.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_WRAP_S, GL::CLAMP_TO_EDGE as i32);
@@ -781,25 +817,23 @@ impl GlTexture {
         gl.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MIN_FILTER, GL::NEAREST as i32);
         gl.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MAG_FILTER, GL::NEAREST as i32);
 
-        GlTexture { gl, texture }
-    }
-
-    pub fn empty(gl: &GlContext, width: u32, height: u32, pixel_format: PixelFormat) -> GlTexture {
-        let pixels = vec![0; width as usize * height as usize * pixel_format.byte_count()];
-        Self::new(gl, width, height, pixel_format, &pixels)
+        GlTexture {
+            gl,
+            texture: Rc::new(texture),
+        }
     }
 
     pub fn with_min_filter(self, filter: TextureFilter) -> GlTexture {
-        self.gl.active_texture(GL::TEXTURE0);
         self.gl.bind_texture(GL::TEXTURE_2D, Some(&self.texture));
-        self.gl.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MIN_FILTER, filter.into());
+        self.gl
+            .tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MIN_FILTER, filter.into());
         self
     }
 
     pub fn with_mag_filter(self, filter: TextureFilter) -> GlTexture {
-        self.gl.active_texture(GL::TEXTURE0);
         self.gl.bind_texture(GL::TEXTURE_2D, Some(&self.texture));
-        self.gl.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MIN_FILTER, filter.into());
+        self.gl
+            .tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_MIN_FILTER, filter.into());
         self
     }
 
@@ -813,12 +847,10 @@ impl GlTexture {
         pixels: &[u8],
     ) {
         let buf = &pixels[0..width as usize * height as usize * pixel_format.byte_count()];
-        let js_buf = pixel_format.format_buffer(buf);
 
-        self.gl.active_texture(GL::TEXTURE0);
         self.gl.bind_texture(GL::TEXTURE_2D, Some(&self.texture));
         self.gl
-            .tex_sub_image_2d_with_i32_and_i32_and_u32_and_type_and_opt_array_buffer_view(
+            .tex_sub_image_2d_with_i32_and_i32_and_u32_and_type_and_opt_u8_array(
                 GL::TEXTURE_2D,
                 0,
                 x as i32,
@@ -827,15 +859,16 @@ impl GlTexture {
                 height as i32,
                 pixel_format.internal_format(),
                 pixel_format._type(),
-                Some(&js_buf),
+                Some(buf),
             )
             .expect("Write to texture");
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum TextureFilter {
     Nearest,
-    Linear
+    Linear,
 }
 
 impl From<TextureFilter> for i32 {
@@ -867,7 +900,7 @@ impl PixelFormat {
         }
     }
 
-    // See; https://registry.khronos.org/webgl/specs/latest/2.0/#TEXTURE_TYPES_FORMATS_FROM_DOM_ELEMENTS_TABLE
+    // See: https://registry.khronos.org/webgl/specs/latest/2.0/#TEXTURE_TYPES_FORMATS_FROM_DOM_ELEMENTS_TABLE
     fn internal_format(&self) -> u32 {
         match self {
             PixelFormat::Alpha => GL::ALPHA,
@@ -888,31 +921,21 @@ impl PixelFormat {
 
     fn _type(&self) -> u32 {
         match self {
-            PixelFormat::Alpha |
-            PixelFormat::RGB | PixelFormat::SRGB |
-            PixelFormat::RGBA | PixelFormat::SRGBA => GL::UNSIGNED_BYTE,
+            PixelFormat::Alpha
+            | PixelFormat::RGB
+            | PixelFormat::SRGB
+            | PixelFormat::RGBA
+            | PixelFormat::SRGBA => GL::UNSIGNED_BYTE,
             PixelFormat::U16 => GL::UNSIGNED_BYTE,
-        }
-    }
-
-    fn format_buffer(&self, buf: &[u8]) -> js_sys::Object {
-        match self._type() {
-            GL::UNSIGNED_SHORT => {
-                let buf: &[u16] = bytemuck::cast_slice(buf);
-
-                js_sys::Uint16Array::from(buf).into()
-            },
-            GL::UNSIGNED_BYTE | _ => {
-                js_sys::Uint8Array::from(buf).into()
-            }
-
         }
     }
 }
 
 impl Drop for GlTexture {
     fn drop(&mut self) {
-        self.gl.delete_texture(Some(&self.texture));
+        if Rc::strong_count(&self.texture) == 1 {
+            self.gl.delete_texture(Some(&self.texture));
+        }
     }
 }
 

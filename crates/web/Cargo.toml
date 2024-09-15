@@ -12,14 +12,15 @@ blip_buf-rs = "0.1"
 bytemuck = "1.18.0"
 byteorder = "1.5.0"
 console_error_panic_hook = { version = "0.1.7" }
+console_log = "1.0.0"
 cpal = { version = "0.15",  features = ["wasm-bindgen"] }
 futures = "0.3"
-gilrs = "0.10"
 gloo = { git = "https://github.com/JonasAlaif/gloo.git", branch = "spawn-options", features = ["worker", "console", "futures"]}
 log = "0.4.22"
 nes = { path = "../nes" }
-nes_ntsc-c2rust = { path = "../nes_ntsc-c2rust" }
 serde = { version = "1.0", features = ["derive"]}
+serde_json = "1.0.128"
+ui = { path = "../ui" }
 wasm-bindgen-futures = { version = "0.4" }
 winit = { version = "0.30.5" }
 

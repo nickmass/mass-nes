@@ -1,0 +1,242 @@
+use glium::glutin::config::ConfigTemplateBuilder;
+use glium::winit;
+use winit::keyboard::PhysicalKey;
+
+use nes::UserInput;
+use ui::audio::Audio;
+use ui::filters::Filter;
+use ui::gamepad::{GamepadEvent, GilrsInput};
+use ui::input::InputMap;
+
+use super::gfx::Gfx;
+use super::sync::FrameSync;
+
+enum UserEvent {
+    Frame(Frame),
+    Samples(Samples),
+    Gamepad(GamepadEvent),
+    Sync,
+}
+
+impl From<GamepadEvent> for UserEvent {
+    fn from(value: GamepadEvent) -> Self {
+        UserEvent::Gamepad(value)
+    }
+}
+
+pub struct Frame(Vec<u16>);
+
+struct Samples(Vec<i16>);
+
+pub struct App<F, A, S> {
+    audio: A,
+    sync: Option<S>,
+    gfx: Gfx<F>,
+    gamepad: Option<GilrsInput<UserEvent>>,
+    window: winit::window::Window,
+    event_loop: Option<winit::event_loop::EventLoop<UserEvent>>,
+    input: InputMap,
+    input_tx: Option<std::sync::mpsc::Sender<UserInput>>,
+}
+
+impl<F: Filter, A: Audio, S: FrameSync> App<F, A, S> {
+    pub fn new(filter: F, audio: A, sync: S) -> Self {
+        let event_loop = winit::event_loop::EventLoop::with_user_event()
+            .build()
+            .unwrap();
+
+        let dims = filter.dimensions();
+
+        let (window, display) = glium::backend::glutin::SimpleWindowBuilder::new()
+            .with_config_template_builder(
+                ConfigTemplateBuilder::new().with_swap_interval(None, None),
+            )
+            .with_inner_size(dims.0, dims.1)
+            .with_title("Mass NES")
+            .build(&event_loop);
+
+        let gfx = Gfx::new(display, filter);
+
+        event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
+        window.set_cursor_visible(false);
+
+        let gamepad = GilrsInput::new(event_loop.create_proxy()).unwrap();
+
+        Self {
+            audio,
+            sync: Some(sync),
+            window,
+            gfx,
+            event_loop: Some(event_loop),
+            input: InputMap::new(),
+            input_tx: None,
+            gamepad: Some(gamepad),
+        }
+    }
+
+    fn proxy(&self) -> winit::event_loop::EventLoopProxy<UserEvent> {
+        let Some(event_loop) = self.event_loop.as_ref() else {
+            panic!("no event loop created");
+        };
+
+        event_loop.create_proxy()
+    }
+
+    pub fn nes_io(&mut self) -> (NesInputs, NesOutputs) {
+        let output = NesOutputs {
+            proxy: self.proxy(),
+        };
+
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        self.input_tx = Some(tx);
+
+        let input = NesInputs { rx };
+
+        (input, output)
+    }
+
+    pub fn run(mut self) -> ! {
+        if let Some(mut sync) = self.sync.take() {
+            let sync_proxy = self.proxy();
+            std::thread::Builder::new()
+                .name("sync".into())
+                .spawn(move || loop {
+                    sync.sync_frame();
+                    let _ = sync_proxy.send_event(UserEvent::Sync);
+                })
+                .unwrap();
+        } else {
+            panic!("no frame sync provided");
+        }
+
+        if let Some(mut gamepad) = self.gamepad.take() {
+            let _ = std::thread::Builder::new()
+                .name("gamepad".into())
+                .spawn(move || loop {
+                    gamepad.poll();
+                });
+        }
+
+        let Some(event_loop) = self.event_loop.take() else {
+            panic!("no event loop created");
+        };
+
+        let Err(err) = event_loop.run_app(&mut self) else {
+            std::process::exit(0)
+        };
+
+        panic!("{:?}", err)
+    }
+}
+
+impl<F: Filter, A: Audio, S: FrameSync> winit::application::ApplicationHandler<UserEvent>
+    for App<F, A, S>
+{
+    fn resumed(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {}
+
+    fn window_event(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        _window_id: winit::window::WindowId,
+        event: winit::event::WindowEvent,
+    ) {
+        match event {
+            winit::event::WindowEvent::Resized(size) => {
+                self.gfx.resize(size.into());
+                self.window.request_redraw();
+            }
+            winit::event::WindowEvent::CloseRequested => {
+                event_loop.exit();
+            }
+            winit::event::WindowEvent::KeyboardInput {
+                device_id: _,
+                event,
+                is_synthetic: _,
+            } => {
+                if let PhysicalKey::Code(key) = event.physical_key {
+                    if event.state.is_pressed() {
+                        self.input.press(key);
+                    } else {
+                        self.input.release(key);
+                    }
+                }
+            }
+            winit::event::WindowEvent::ScaleFactorChanged {
+                scale_factor: _,
+                inner_size_writer: _,
+            } => {
+                self.window.request_redraw();
+            }
+            winit::event::WindowEvent::RedrawRequested => {
+                if self.window.is_visible() != Some(false) {
+                    self.gfx.render();
+                }
+            }
+            _ => (),
+        }
+    }
+
+    fn user_event(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop, event: UserEvent) {
+        match event {
+            UserEvent::Frame(Frame(frame)) => {
+                self.gfx.update_frame(frame);
+                self.window.request_redraw();
+            }
+            UserEvent::Samples(Samples(samples)) => self.audio.add_samples(samples),
+            UserEvent::Sync => {
+                if let Some(tx) = self.input_tx.as_ref() {
+                    let p1 = self.input.controller();
+
+                    if self.input.reset() {
+                        let _ = tx.send(UserInput::Reset);
+                    }
+
+                    if self.input.power() {
+                        let _ = tx.send(UserInput::Power);
+                    }
+
+                    let _ = tx.send(UserInput::PlayerOne(p1));
+                }
+            }
+            UserEvent::Gamepad(ev) => match ev {
+                GamepadEvent::Button {
+                    gamepad_id: _,
+                    state,
+                    button,
+                } => {
+                    if state.is_pressed() {
+                        self.input.press(button);
+                    } else {
+                        self.input.release(button);
+                    }
+                }
+                _ => (),
+            },
+        }
+    }
+}
+
+pub struct NesInputs {
+    rx: std::sync::mpsc::Receiver<UserInput>,
+}
+
+impl NesInputs {
+    pub fn inputs(self) -> impl Iterator<Item = UserInput> {
+        self.rx.into_iter()
+    }
+}
+
+pub struct NesOutputs {
+    proxy: winit::event_loop::EventLoopProxy<UserEvent>,
+}
+
+impl NesOutputs {
+    pub fn send_frame(&self, frame: Vec<u16>) {
+        let _ = self.proxy.send_event(UserEvent::Frame(Frame(frame)));
+    }
+
+    pub fn send_samples(&self, samples: Vec<i16>) {
+        let _ = self.proxy.send_event(UserEvent::Samples(Samples(samples)));
+    }
+}

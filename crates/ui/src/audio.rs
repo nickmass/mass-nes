@@ -1,6 +1,5 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, OutputCallbackInfo, Sample};
-use crossbeam::sync::{Parker, Unparker};
 
 use std::collections::VecDeque;
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -8,33 +7,29 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 pub trait Audio {
     fn sample_rate(&self) -> u32;
     fn add_samples(&mut self, samples: Vec<i16>);
+    fn play(&mut self);
 }
 
 pub struct Null;
+
 impl Audio for Null {
     fn sample_rate(&self) -> u32 {
         48000
     }
     fn add_samples(&mut self, _samples: Vec<i16>) {}
+
+    fn play(&mut self) {}
 }
 
-pub struct CpalAudio {
-    _host: cpal::Host,
-    _device: cpal::Device,
-    _stream: cpal::Stream,
-    format: cpal::StreamConfig,
-    tx: Sender<Vec<i16>>,
-}
-
-const BUFFER_FRAMES: f64 = 1.0;
+const BUFFER_FRAMES: f64 = 2.0;
 
 #[derive(Debug)]
 pub enum Error {
     NoDefaultOutputDevice,
     NoMatchingOutputConfig,
-    SupportedStreamConfigsError(cpal::SupportedStreamConfigsError),
-    BuildStreamError(cpal::BuildStreamError),
-    PlayStreamError(cpal::PlayStreamError),
+    SupportedStreamConfigsError(Box<cpal::SupportedStreamConfigsError>),
+    BuildStreamError(Box<cpal::BuildStreamError>),
+    PlayStreamError(Box<cpal::PlayStreamError>),
 }
 
 impl std::error::Error for Error {}
@@ -53,24 +48,37 @@ impl std::fmt::Display for Error {
 
 impl From<cpal::SupportedStreamConfigsError> for Error {
     fn from(value: cpal::SupportedStreamConfigsError) -> Self {
-        Self::SupportedStreamConfigsError(value)
+        Self::SupportedStreamConfigsError(Box::new(value))
     }
 }
 
 impl From<cpal::BuildStreamError> for Error {
     fn from(value: cpal::BuildStreamError) -> Self {
-        Self::BuildStreamError(value)
+        Self::BuildStreamError(Box::new(value))
     }
 }
 
 impl From<cpal::PlayStreamError> for Error {
     fn from(value: cpal::PlayStreamError) -> Self {
-        Self::PlayStreamError(value)
+        Self::PlayStreamError(Box::new(value))
     }
 }
 
-impl CpalAudio {
-    pub fn new(refresh_rate: f64) -> Result<(CpalAudio, CpalSync), Error> {
+pub struct CpalAudio<P: Parker> {
+    _host: cpal::Host,
+    _device: cpal::Device,
+    stream: cpal::Stream,
+    format: cpal::StreamConfig,
+    tx: Sender<Vec<i16>>,
+    _marker: std::marker::PhantomData<P>,
+}
+
+impl<P: Parker> CpalAudio<P> {
+    pub fn new(
+        parker: P,
+        refresh_rate: f64,
+        device_buffer: usize,
+    ) -> Result<(CpalAudio<P>, P), Error> {
         let allowed_sample_rates = [
             cpal::SampleRate(48000),
             cpal::SampleRate(44100),
@@ -146,14 +154,13 @@ impl CpalAudio {
         }
 
         let best_match = best_match.ok_or(Error::NoMatchingOutputConfig)?;
-        let buffer_size = 64;
         let samples_min_len = (((best_match.sample_rate.0 as f64 / refresh_rate) * BUFFER_FRAMES)
             .ceil() as usize)
-            .saturating_sub(buffer_size as usize);
+            .saturating_sub(device_buffer);
 
-        let samples_min_len = samples_min_len.max(buffer_size as usize);
+        let samples_min_len = samples_min_len.max(device_buffer);
 
-        eprintln!(
+        log::debug!(
             "{:?}: {} channel(s), {} sample rate, {} format, {} buffer samples, {}ms buffer duration",
             host.id(),
             best_match.channels,
@@ -170,7 +177,7 @@ impl CpalAudio {
             channels: best_match.channels,
             sample_rate: best_match.sample_rate,
             buffer_size: cpal::BufferSize::Fixed(
-                buffer_size * best_match.data_type.sample_size() as u32,
+                device_buffer as u32 * best_match.data_type.sample_size() as u32,
             ),
         };
         let channels = format.channels as usize;
@@ -178,60 +185,55 @@ impl CpalAudio {
         let (tx, rx) = channel();
         let samples = SamplesIterator::new(rx);
 
-        let sync = CpalSync::new();
-        let unparker = sync.unparker();
+        let unparker = parker.unparker();
 
         let host_id = host.id();
-        let err_handler = move |err| eprintln!("{:?}: {:?}", host_id, err);
+        let err_handler = move |err| log::error!("{:?}: {:?}", host_id, err);
 
         let stream = match best_match.data_type {
             cpal::SampleFormat::I16 => device.build_output_stream(
                 &format,
-                output_callback::<i16>(samples, samples_min_len, channels, unparker),
+                output_callback::<i16, _>(samples, samples_min_len, channels, unparker),
                 err_handler,
                 None,
             )?,
             cpal::SampleFormat::U16 => device.build_output_stream(
                 &format,
-                output_callback::<u16>(samples, samples_min_len, channels, unparker),
+                output_callback::<u16, _>(samples, samples_min_len, channels, unparker),
                 err_handler,
                 None,
             )?,
             cpal::SampleFormat::F32 => device.build_output_stream(
                 &format,
-                output_callback::<f32>(samples, samples_min_len, channels, unparker),
+                output_callback::<f32, _>(samples, samples_min_len, channels, unparker),
                 err_handler,
                 None,
             )?,
             _ => return Err(Error::NoMatchingOutputConfig),
         };
 
-        stream.play()?;
-
         Ok((
             CpalAudio {
                 _host: host,
                 _device: device,
-                _stream: stream,
+                stream,
                 format,
                 tx,
+                _marker: Default::default(),
             },
-            sync,
+            parker,
         ))
     }
 }
 
-fn output_callback<S: Sample + FromSample<i16>>(
+fn output_callback<S: Sample + FromSample<i16>, U: Unparker>(
     mut sample_source: SamplesIterator<i16>,
     samples_min_len: usize,
     channels: usize,
-    unparker: Unparker,
+    mut unparker: U,
 ) -> impl FnMut(&mut [S], &OutputCallbackInfo) + Send + 'static {
     move |buffer: &mut [S], _| {
-        for (sample, value) in buffer
-            .chunks_mut(channels)
-            .zip((&mut sample_source).chain(std::iter::repeat(i16::EQUILIBRIUM)))
-        {
+        for (sample, value) in buffer.chunks_mut(channels).zip(&mut sample_source) {
             let s = value.to_sample();
             for out in sample.iter_mut() {
                 *out = s;
@@ -247,7 +249,7 @@ fn output_callback<S: Sample + FromSample<i16>>(
     }
 }
 
-impl Audio for CpalAudio {
+impl<P: Parker> Audio for CpalAudio<P> {
     fn sample_rate(&self) -> u32 {
         let cpal::SampleRate(rate) = self.format.sample_rate;
         rate
@@ -256,42 +258,36 @@ impl Audio for CpalAudio {
     fn add_samples(&mut self, samples: Vec<i16>) {
         let _ = self.tx.send(samples).unwrap();
     }
-}
 
-pub struct CpalSync {
-    parker: Parker,
-}
-
-impl CpalSync {
-    fn new() -> Self {
-        Self {
-            parker: Parker::new(),
-        }
-    }
-
-    fn unparker(&self) -> Unparker {
-        self.parker.unparker().clone()
+    fn play(&mut self) {
+        let _ = self.stream.play();
     }
 }
 
-impl super::sync::FrameSync for CpalSync {
-    fn sync_frame(&mut self) {
-        self.parker.park()
-    }
+pub trait Parker {
+    type Unparker: Unparker;
+
+    fn unparker(&self) -> Self::Unparker;
+}
+
+pub trait Unparker: Send + 'static {
+    fn unpark(&mut self);
 }
 
 struct SamplesIterator<T> {
     rx: Receiver<Vec<T>>,
     buf: VecDeque<T>,
     pending_req: bool,
+    last_sample: T,
 }
 
-impl<T> SamplesIterator<T> {
+impl<T: Default> SamplesIterator<T> {
     fn new(rx: Receiver<Vec<T>>) -> SamplesIterator<T> {
         SamplesIterator {
             rx,
             buf: VecDeque::new(),
             pending_req: false,
+            last_sample: T::default(),
         }
     }
 
@@ -308,7 +304,7 @@ impl<T> SamplesIterator<T> {
     }
 }
 
-impl<T> Iterator for SamplesIterator<T> {
+impl<T: Copy> Iterator for SamplesIterator<T> {
     type Item = T;
 
     fn next(&mut self) -> Option<T> {
@@ -319,16 +315,21 @@ impl<T> Iterator for SamplesIterator<T> {
             }
             Err(_) => (),
         }
-        self.buf.pop_front()
+        if let Some(sample) = self.buf.pop_front() {
+            self.last_sample = sample;
+            Some(sample)
+        } else {
+            Some(self.last_sample)
+        }
     }
 }
 
-pub enum AudioDevices {
-    Cpal(CpalAudio),
+pub enum AudioDevices<P: Parker> {
+    Cpal(CpalAudio<P>),
     Null(Null),
 }
 
-impl Audio for AudioDevices {
+impl<P: Parker> Audio for AudioDevices<P> {
     fn sample_rate(&self) -> u32 {
         match self {
             AudioDevices::Cpal(a) => a.sample_rate(),
@@ -342,15 +343,22 @@ impl Audio for AudioDevices {
             AudioDevices::Null(a) => a.add_samples(samples),
         }
     }
+
+    fn play(&mut self) {
+        match self {
+            AudioDevices::Cpal(a) => a.play(),
+            AudioDevices::Null(a) => a.play(),
+        }
+    }
 }
 
-impl From<CpalAudio> for AudioDevices {
-    fn from(value: CpalAudio) -> Self {
+impl<P: Parker> From<CpalAudio<P>> for AudioDevices<P> {
+    fn from(value: CpalAudio<P>) -> Self {
         AudioDevices::Cpal(value)
     }
 }
 
-impl From<Null> for AudioDevices {
+impl<P: Parker> From<Null> for AudioDevices<P> {
     fn from(value: Null) -> Self {
         AudioDevices::Null(value)
     }

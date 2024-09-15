@@ -1,18 +1,18 @@
 use blip_buf::BlipBuf;
-
-use nes::{Cartridge, Machine};
-
-mod ui;
-use ui::{
-    audio::{Audio, AudioDevices, CpalAudio, Null},
-    sync::{NaiveSync, SyncDevices},
-};
-
-use nes_ntsc::NesNtscSetup;
-
 use clap::{Parser, Subcommand, ValueEnum};
+use nes::{Cartridge, Machine};
+use ui::audio::{Audio, AudioDevices, CpalAudio, Null};
+use ui::filters::NesNtscSetup;
 
 use std::{fs::File, path::PathBuf};
+
+pub mod app;
+pub mod audio;
+pub mod gfx;
+pub mod sync;
+
+use app::App;
+use sync::{NaiveSync, SyncDevices};
 
 fn main() {
     let args = Args::parse();
@@ -26,11 +26,13 @@ fn run(path: PathBuf, region: nes::Region) {
     let mut file = File::open(path).unwrap();
     let cart = Cartridge::load(&mut file).unwrap();
 
-    let filter = ui::ntsc::NtscFilter::new(NesNtscSetup::composite());
-    //let filter = ui::gfx::PalettedFilter::new(NesNtscSetup::rgb().generate_palette());
+    let setup = NesNtscSetup::composite();
+    let filter = ui::filters::NtscFilter::new(setup);
+    //let filter = ui::filters::PalettedFilter::new(setup.generate_palette());
 
-    let (audio, frame_sync): (AudioDevices, SyncDevices) =
-        match CpalAudio::new(region.refresh_rate()) {
+    let sync = audio::CpalSync::new();
+    let (audio, frame_sync): (AudioDevices<_>, SyncDevices) =
+        match CpalAudio::new(sync, region.refresh_rate(), 64) {
             Ok((audio, frame_sync)) => (audio.into(), frame_sync.into()),
             Err(err) => {
                 eprintln!("unable to init audio device: {err:?}");
@@ -40,7 +42,7 @@ fn run(path: PathBuf, region: nes::Region) {
 
     let sample_rate = audio.sample_rate();
 
-    let mut app = ui::window::App::new(filter, audio, frame_sync);
+    let mut app = App::new(filter, audio, frame_sync);
 
     let (input, output) = app.nes_io();
 

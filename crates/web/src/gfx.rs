@@ -1,123 +1,203 @@
-use nes_ntsc_c2rust::{NesNtsc, NesNtscSetup};
+use web_sys::HtmlCanvasElement;
 
-use std::cell::{RefCell, Cell};
+use ui::filters::Filter;
 
-use crate::gl;
+use super::gl;
 
-pub trait Filter {
-    fn dimensions(&self) -> (u32, u32);
-    fn fragment_shader(&self) -> &'static str;
-    fn vertex_shader(&self) -> &'static str;
-    fn process(
-        &mut self,
-        display: &gl::GlContext,
-        render_size: (f64, f64),
-        screen: &[u16],
-    ) -> gl::GlUniformCollection ;
+pub struct Gfx<T> {
+    filter: T,
+    canvas: HtmlCanvasElement,
+    gl: gl::GlContext,
+    screen: gl::GlModel<Vertex>,
+    program: gl::GlProgram,
+    size: (f64, f64),
+    render_size: (u32, u32),
+    resize_count: usize,
+    frame: Option<Vec<u16>>,
 }
 
-pub struct PalettedFilter {
-    palette: [u8; 1536],
-    palette_texture: Option<gl::GlTexture>,
-    buf: Vec<u8>,
-}
+impl<T: Filter> Gfx<T> {
+    pub fn new(canvas: HtmlCanvasElement, filter: T) -> Self {
+        let (width, height) = filter.dimensions();
+        let size = (width as f64, height as f64);
+        let render_size = (width, height);
 
-impl PalettedFilter {
-    pub fn new(pal: [u8; 1536]) -> PalettedFilter {
-        PalettedFilter { palette: pal, buf: Vec::new(), palette_texture: None }
-    }
-}
+        let gl = gl::GlContext::with_options(
+            canvas.clone(),
+            gl::WebGlContextOptions {
+                alpha: false,
+                depth: false,
+                stencil: false,
+                desynchronized: true,
+                antialias: false,
+                power_preference: gl::WebGlPowerPreference::HighPerformance,
+            },
+        );
 
-impl Filter for PalettedFilter {
-    fn dimensions(&self) -> (u32, u32) {
-        (256, 240)
-    }
+        let top_right = Vertex {
+            position: [1.0, 1.0],
+            tex_coords: [1.0, 0.0],
+        };
+        let top_left = Vertex {
+            position: [-1.0, 1.0],
+            tex_coords: [0.0, 0.0],
+        };
+        let bottom_left = Vertex {
+            position: [-1.0, -1.0],
+            tex_coords: [0.0, 1.0],
+        };
+        let bottom_right = Vertex {
+            position: [1.0, -1.0],
+            tex_coords: [1.0, 1.0],
+        };
 
-    fn fragment_shader(&self) -> &'static str {
-        include_str!("../shaders/paletted_frag.glsl")
-    }
+        let shape = [top_right, top_left, bottom_left, bottom_right];
+        let screen = gl::GlModel::new(&gl, shape);
+        let program = gl::GlProgram::new(&gl, filter.vertex_shader(), filter.fragment_shader());
 
-    fn vertex_shader(&self) -> &'static str {
-        include_str!("../shaders/paletted_vert.glsl")
-    }
-
-    fn process(
-        &mut self,
-        display: &gl::GlContext,
-        _render_size: (f64, f64),
-        screen: &[u16],
-    ) -> gl::GlUniformCollection
-    {
-        let (width, height) = self.dimensions();
-
-        let mut uniforms = gl::GlUniformCollection::new();
-        let tex = gl::GlTexture::new(display, width, height, gl::PixelFormat::U16, bytemuck::cast_slice(screen));
-        uniforms.add("nes_screen", tex);
-
-        let pal_tex = gl::GlTexture::new(display, 64, 8, gl::PixelFormat::RGB, &self.palette);
-        uniforms.add("nes_palette", pal_tex);
-
-        uniforms
-    }
-}
-
-pub struct NtscFilter {
-    ntsc: Box<RefCell<NesNtsc>>,
-    width: u32,
-    height: u32,
-    phase: Cell<u32>,
-    frame: RefCell<Vec<u32>>,
-}
-
-impl NtscFilter {
-    pub fn new(setup: NesNtscSetup) -> NtscFilter {
-        let width = NesNtsc::out_width(256);
-        let height = 240;
-        NtscFilter {
-            ntsc: Box::new(RefCell::new(NesNtsc::new(setup))),
-            width,
-            height,
-            phase: Cell::new(0),
-            frame: RefCell::new(vec![0; (width * height) as usize]),
+        Self {
+            filter,
+            canvas,
+            gl,
+            screen,
+            program,
+            size,
+            render_size,
+            resize_count: 0,
+            frame: None,
         }
     }
+
+    pub fn resize(&mut self, (c_width, c_height): (u32, u32)) {
+        let (width, height) = self.filter.dimensions();
+        let (f_width, f_height) = (width as f64, height as f64);
+        let (c_width, c_height) = (c_width as f64, c_height as f64);
+
+        let (width, height) = if f_width < f_height {
+            let ratio = f_height / f_width;
+            (c_width, c_width * ratio)
+        } else {
+            let ratio = f_width / f_height;
+            (c_height * ratio, c_height)
+        };
+
+        // high performance
+        let render_scale = 1.0;
+        let (new_width, new_height) = (
+            (width * render_scale).floor() as u32,
+            (height * render_scale).floor() as u32,
+        );
+        let (current_width, current_height) = (self.canvas.width(), self.canvas.height());
+
+        // low performance
+        //let (w, h) = self.filter.dimensions();
+        //let (new_width, new_height) = (w / 2, h / 2);
+
+        if new_width.abs_diff(current_width) < 5 && new_height.abs_diff(current_height) < 5 {
+            return;
+        }
+
+        self.resize_count += 1;
+
+        if self.resize_count > 1000 {
+            log::debug!("resize");
+        }
+
+        self.canvas.set_width(new_width);
+        self.canvas.set_height(new_height);
+        self.render_size = (new_width, new_height);
+        self.size = (width, height);
+    }
+
+    pub fn update_frame(&mut self, frame: Vec<u16>) {
+        self.frame = Some(frame);
+    }
+
+    pub fn render(&mut self) {
+        let Some(screen) = self.frame.as_ref() else {
+            return;
+        };
+
+        let (render_width, render_height) = self.render_size;
+
+        let uniforms = self.filter.process(
+            &self.gl,
+            (render_width as f64, render_height as f64),
+            screen.as_ref(),
+        );
+
+        let (width, height) = (render_width as i32, render_height as i32);
+        self.gl.viewport(0, 0, width, height);
+        self.program.draw(&self.screen, &uniforms, None);
+        self.gl.flush();
+    }
 }
 
-impl Filter for NtscFilter {
-    fn dimensions(&self) -> (u32, u32) {
-        (self.width * 2, self.height * 4)
+impl ui::filters::FilterContext for gl::GlContext {
+    type Uniforms = gl::GlUniformCollection;
+
+    type Texture = gl::GlTexture;
+
+    fn create_uniforms(&self) -> Self::Uniforms {
+        gl::GlUniformCollection::new()
     }
 
-    fn fragment_shader(&self) -> &'static str {
-        include_str!("../shaders/ntsc_frag.glsl")
+    fn create_texture(&self, params: ui::filters::TextureParams) -> Self::Texture {
+        let format = match params.format {
+            ui::filters::TextureFormat::RGBA => gl::PixelFormat::RGBA,
+            ui::filters::TextureFormat::RGB => gl::PixelFormat::RGB,
+            ui::filters::TextureFormat::U16 => gl::PixelFormat::U16,
+        };
+
+        let filter = match params.filter {
+            ui::filters::TextureFilter::Nearest => gl::TextureFilter::Nearest,
+            ui::filters::TextureFilter::Linear => gl::TextureFilter::Linear,
+        };
+
+        let texture = gl::GlTexture::new(
+            self,
+            params.width as u32,
+            params.height as u32,
+            format,
+            bytemuck::cast_slice(&params.pixels),
+        )
+        .with_min_filter(filter)
+        .with_mag_filter(filter);
+
+        texture
+    }
+}
+
+impl ui::filters::FilterUniforms<gl::GlContext> for gl::GlUniformCollection {
+    fn add_vec2(&mut self, name: &'static str, value: (f32, f32)) {
+        self.add(name, value);
     }
 
-    fn vertex_shader(&self) -> &'static str {
-        include_str!("../shaders/ntsc_vert.glsl")
+    fn add_texture(&mut self, name: &'static str, value: gl::GlTexture) {
+        self.add(name, value);
     }
+}
 
-    fn process(
-        &mut self,
-        display: &gl::GlContext,
-        render_size: (f64, f64),
-        screen: &[u16],
-    ) -> gl::GlUniformCollection
-    {
-        let mut unis = gl::GlUniformCollection::new();
-        let mut out = self.frame.borrow_mut();
-        self.phase.set(self.phase.get() ^ 1);
-        self.ntsc
-            .borrow_mut()
-            .blit(256, screen, self.phase.get(), &mut *out, self.width * 4);
+struct Vertex {
+    position: [f32; 2],
+    tex_coords: [f32; 2],
+}
 
-        let tex = gl::GlTexture::new(display, self.width, self.height, gl::PixelFormat::RGBA, bytemuck::cast_slice(&out))
-            .with_min_filter(gl::TextureFilter::Linear)
-            .with_mag_filter(gl::TextureFilter::Linear);
+impl gl::AsGlVertex for Vertex {
+    const ATTRIBUTES: &'static [(&'static str, gl::GlValueType)] = &[
+        ("position", gl::GlValueType::Vec2),
+        ("tex_coords", gl::GlValueType::Vec2),
+    ];
 
-        unis.add("input_size", (self.width as f32, self.height as f32));
-        unis.add("output_size", (render_size.0 as f32, render_size.1 as f32));
-        unis.add("nes_screen", tex);
+    const POLY_TYPE: u32 = gl::GL::TRIANGLE_FAN;
 
-        unis
+    const SIZE: usize = std::mem::size_of::<Self>();
+
+    fn write(&self, mut buf: impl std::io::Write) {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        let _ = buf.write_f32::<LittleEndian>(self.position[0]);
+        let _ = buf.write_f32::<LittleEndian>(self.position[1]);
+        let _ = buf.write_f32::<LittleEndian>(self.tex_coords[0]);
+        let _ = buf.write_f32::<LittleEndian>(self.tex_coords[1]);
     }
 }

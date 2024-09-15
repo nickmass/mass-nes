@@ -184,3 +184,25 @@ impl NesNtsc {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::{NesNtsc, NesNtscSetup};
+
+    #[test]
+    fn basic_usage() {
+        let width = NesNtsc::out_width(256);
+        let height = 240;
+
+        let setup = NesNtscSetup::composite();
+        let mut ntsc = Box::new(NesNtsc::new(setup));
+
+        let screen = vec![0; (width * height) as usize];
+        let mut frame = vec![0; (width * height) as usize];
+
+        ntsc.blit(256, &screen, 0, &mut frame, width * 4);
+        ntsc.blit(256, &screen, 1, &mut frame, width * 4);
+
+        assert_ne!(frame[0], 0);
+    }
+}

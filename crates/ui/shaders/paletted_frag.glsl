@@ -1,8 +1,3 @@
-#version 300 es
-
-precision mediump float;
-precision lowp sampler2D;
-precision highp usampler2D;
 
 in vec2 v_tex_coords;
 out vec4 color;
