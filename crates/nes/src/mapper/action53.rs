@@ -21,24 +21,24 @@ impl Action53State {
             0x00 => {
                 if self.regs[2] & 0x02 == 0 {
                     if self.regs[0] & 0x10 == 0 {
-                        self.mirroring.internal_a();
-                    } else {
                         self.mirroring.internal_b();
+                    } else {
+                        self.mirroring.internal_a();
                     }
                 }
             }
             0x01 => {
                 if self.regs[2] & 0x02 == 0 {
                     if self.regs[1] & 0x10 == 0 {
-                        self.mirroring.internal_a();
-                    } else {
                         self.mirroring.internal_b();
+                    } else {
+                        self.mirroring.internal_a();
                     }
                 }
             }
             0x02 => match self.regs[2] & 3 {
-                0 => self.mirroring.internal_a(),
-                1 => self.mirroring.internal_b(),
+                0 => self.mirroring.internal_b(),
+                1 => self.mirroring.internal_a(),
                 2 => self.mirroring.vertical(),
                 3 => self.mirroring.horizontal(),
                 _ => unreachable!(),
@@ -98,6 +98,9 @@ impl Action53State {
 
         self.prg.map(0x8000, 16, low as usize, BankKind::Rom);
         self.prg.map(0xc000, 16, high as usize, BankKind::Rom);
+
+        let chr = self.regs[0] & 0x03;
+        self.chr.map(0x0000, 8, chr as usize, BankKind::Ram);
     }
 }
 
@@ -115,7 +118,13 @@ impl Action53 {
         };
         let mut chr = match chr_type {
             BankKind::Rom => MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr),
-            BankKind::Ram => MappedMemory::new(&cartridge, 0x0000, 8, 8, MemKind::Chr),
+            BankKind::Ram => MappedMemory::new(
+                &cartridge,
+                0x0000,
+                cartridge.chr_ram_bytes as u32 / 1024,
+                cartridge.chr_ram_bytes as u32 / 1024,
+                MemKind::Chr,
+            ),
         };
 
         let mut prg = MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg);
