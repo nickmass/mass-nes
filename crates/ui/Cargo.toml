@@ -10,11 +10,10 @@ winit = "0.30.5"
 bytemuck = "1.18.0"
 const_format = "0.2.33"
 log = "0.4.22"
+nes-ntsc-rust = { path = "../nes-ntsc-rust" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-nes_ntsc = { path = "../nes_ntsc", version = "0.1"}
 cpal = { version = "0.15" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-nes_ntsc-c2rust = { path = "../nes_ntsc-c2rust", version = "0.1"}
-cpal = { version = "0.15",  features = ["wasm-bindgen"] }
+cpal = { version = "0.15", features = ["wasm-bindgen"] }

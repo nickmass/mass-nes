@@ -1,27 +1,24 @@
 use super::{Filter, FilterContext, FilterUniforms, TextureFilter, TextureFormat, TextureParams};
 
-#[cfg(target_arch = "wasm32")]
-use nes_ntsc_c2rust as nes_ntsc;
-
-pub use nes_ntsc::{NesNtsc, NesNtscSetup};
+pub use nes_ntsc_rust::{NesNtsc, NesNtscSetup};
 
 pub struct NtscFilter {
-    ntsc: Box<NesNtsc>,
+    ntsc: NesNtsc,
     width: u32,
     height: u32,
-    phase: u32,
     frame: Vec<u32>,
 }
 
 impl NtscFilter {
-    pub fn new(setup: NesNtscSetup) -> NtscFilter {
+    pub fn new(setup: &NesNtscSetup) -> NtscFilter {
         let width = NesNtsc::out_width(256);
         let height = 240;
+        let ntsc = NesNtsc::new(setup);
+
         NtscFilter {
-            ntsc: Box::new(NesNtsc::new(setup)),
+            ntsc,
             width,
             height,
-            phase: 0,
             frame: vec![0; (width * height) as usize],
         }
     }
@@ -47,9 +44,8 @@ impl Filter for NtscFilter {
         screen: &[u16],
     ) -> C::Uniforms {
         let mut unis = display.create_uniforms();
-        self.phase = self.phase ^ 1;
-        self.ntsc
-            .blit(256, screen, self.phase, &mut self.frame, self.width * 4);
+
+        self.ntsc.blit(screen, &mut self.frame, 256, 240, 0);
 
         let params = TextureParams {
             width: self.width as usize,

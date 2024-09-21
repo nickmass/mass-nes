@@ -267,8 +267,8 @@ impl Emulator {
         }
 
         let setup = ui::filters::NesNtscSetup::composite();
+        let filter = ui::filters::NtscFilter::new(&setup);
         //let filter = ui::filters::PalettedFilter::new(setup.generate_palette());
-        let filter = ui::filters::NtscFilter::new(setup);
         let mut app = app::App::new(filter, audio, sync, canvas);
 
         let (machine_sink, machine_stream) = machine_runner.split();

@@ -1,0 +1,9 @@
+[package]
+name = "nes-ntsc-rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+nes_ntsc-sys = { path = "../nes_ntsc-sys" }

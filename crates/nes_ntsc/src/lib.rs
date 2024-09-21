@@ -102,8 +102,8 @@ impl NesNtscSetup {
     }
 
     /// merges even and odd fields together to reduce flicker
-    pub fn merge_fields(&mut self) -> &mut Self {
-        self.0.merge_fields = 1;
+    pub fn set_merge_fields(&mut self, val: bool) -> &mut Self {
+        self.0.merge_fields = val as i32;
         self
     }
 
