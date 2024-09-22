@@ -83,7 +83,11 @@ enum InitFailureCause {
 #[wasm_bindgen(start)]
 pub fn main() {
     console_error_panic_hook::set_once();
-    let _ = console_log::init_with_level(log::Level::Debug);
+    tracing_wasm::set_as_global_default_with_config(
+        tracing_wasm::WASMLayerConfigBuilder::new()
+            .set_max_level(tracing::Level::DEBUG)
+            .build(),
+    )
 }
 
 #[wasm_bindgen]

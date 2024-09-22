@@ -160,7 +160,7 @@ impl<P: Parker> CpalAudio<P> {
 
         let samples_min_len = samples_min_len.max(device_buffer);
 
-        log::debug!(
+        tracing::debug!(
             "{:?}: {} channel(s), {} sample rate, {} format, {} buffer samples, {}ms buffer duration",
             host.id(),
             best_match.channels,
@@ -188,7 +188,7 @@ impl<P: Parker> CpalAudio<P> {
         let unparker = parker.unparker();
 
         let host_id = host.id();
-        let err_handler = move |err| log::error!("{:?}: {:?}", host_id, err);
+        let err_handler = move |err| tracing::error!("{:?}: {:?}", host_id, err);
 
         let stream = match best_match.data_type {
             cpal::SampleFormat::I16 => device.build_output_stream(

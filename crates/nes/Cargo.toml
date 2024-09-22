@@ -6,3 +6,6 @@ authors = ["Nick Massey <nickmass@nickmass.com>"]
 
 [lib]
 path = "src/lib.rs"
+
+[dependencies]
+tracing = "0.1.40"

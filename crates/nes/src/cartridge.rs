@@ -135,20 +135,25 @@ impl Cartridge {
 
         let format = if nes_2 { "NES 2.0" } else { "iNES" };
 
-        eprintln!(
+        tracing::debug!(
             "{} PRGROM: {}, CHRROM: {}, PRGRAM: {}, CHRRAM:{}, Mapper: {}",
-            format, prg_rom_bytes, chr_rom_bytes, prg_ram_bytes, chr_ram_bytes, mapper_number
+            format,
+            prg_rom_bytes,
+            chr_rom_bytes,
+            prg_ram_bytes,
+            chr_ram_bytes,
+            mapper_number
         );
         Ok(cartridge)
     }
 
     fn load_fds<T: std::io::Read>(_file: &mut T) -> Result<Cartridge, CartridgeError> {
-        println!("FDS");
+        tracing::debug!("FDS");
         Err(CartridgeError::NotSupported)
     }
 
     fn load_unif<T: std::io::Read>(_file: &mut T) -> Result<Cartridge, CartridgeError> {
-        println!("UNIF");
+        tracing::debug!("UNIF");
         Err(CartridgeError::NotSupported)
     }
 

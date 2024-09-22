@@ -23,6 +23,7 @@ impl Filter for PalettedFilter {
         super::PALETTED_FRAGMENT_SHADER
     }
 
+    #[tracing::instrument(skip_all)]
     fn process<C: FilterContext>(
         &mut self,
         display: &C,

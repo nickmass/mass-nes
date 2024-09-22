@@ -173,9 +173,7 @@ impl PpuState {
     fn is_nmi_enabled(&self) -> bool {
         self.regs[0] & 0x80 != 0
     }
-    fn is_ext_bg(&self) -> bool {
-        self.regs[0] & 0x40 != 0
-    }
+
     fn is_tall_sprites(&self) -> bool {
         self.regs[0] & 0x20 != 0
     }
@@ -278,10 +276,6 @@ impl PpuState {
         value
     }
 
-    fn oam_address(&self) -> u8 {
-        self.regs[3]
-    }
-
     fn in_vblank(&self) -> bool {
         self.step.scanline >= self.region.vblank_line()
             && self.step.scanline < self.region.prerender_line()
@@ -379,7 +373,7 @@ impl Ppu {
             0x2001 => state.last_write,
             0x2002 => state.ppu_status(),
             0x2003 => state.last_write,                        //OAMADDR
-            0x2004 => state.oam_data[state.oam_addr as usize], //OANDATA
+            0x2004 => state.oam_data[state.oam_addr as usize], //OAMDATA
             0x2005 => state.last_write,
             0x2006 => state.last_write,
             0x2007 => {
@@ -579,7 +573,7 @@ impl Ppu {
                 }
             }
             _ => {
-                eprintln!("{:4X} Address", address);
+                tracing::error!("unreachable ppu register: {:04X}", address);
                 unreachable!()
             }
         }

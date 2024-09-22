@@ -100,7 +100,7 @@ impl<T: Filter> Gfx<T> {
         self.resize_count += 1;
 
         if self.resize_count > 1000 {
-            log::debug!("resize");
+            tracing::debug!("resize");
         }
 
         self.canvas.set_width(new_width);

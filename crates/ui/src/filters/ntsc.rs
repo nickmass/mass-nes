@@ -37,6 +37,7 @@ impl Filter for NtscFilter {
         super::NTSC_FRAGMENT_SHADER
     }
 
+    #[tracing::instrument(skip_all)]
     fn process<C: FilterContext>(
         &mut self,
         display: &C,
@@ -54,6 +55,7 @@ impl Filter for NtscFilter {
             pixels: bytemuck::cast_slice(&self.frame),
             filter: TextureFilter::Linear,
         };
+
         let texture = display.create_texture(params);
 
         unis.add_vec2("input_size", (self.width as f32, self.height as f32));

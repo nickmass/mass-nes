@@ -1718,7 +1718,7 @@ impl Cpu {
     }
 
     fn ill_inst_kil(&mut self) -> ExecResult {
-        eprintln!("KIL encountered");
+        tracing::error!("KIL encountered");
         ExecResult::Done
     }
 

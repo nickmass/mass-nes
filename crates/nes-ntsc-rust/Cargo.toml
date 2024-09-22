@@ -2,6 +2,8 @@
 name = "nes-ntsc-rust"
 version = "0.1.0"
 edition = "2021"
+authors = ["Nick Massey <nickmass@nickmass.com>", "Shay Green"]
+license = "LGPL-2.1-or-later"
 
 [dependencies]
 

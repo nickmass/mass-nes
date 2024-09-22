@@ -47,7 +47,7 @@ pub fn ines(ines_number: u8, cart: Cartridge) -> Rc<dyn Mapper> {
         69 => Rc::new(fme7::Fme7::new(cart)),
         71 | 232 => Rc::new(bf909x::Bf909x::new(cart)),
         _ => {
-            println!("Mapper not implemented.");
+            tracing::error!("mapper not implemented");
             Rc::new(nrom::Nrom::new(cart))
         }
     }

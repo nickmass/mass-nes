@@ -174,6 +174,7 @@ fn std_hue_condition(setup: &NesNtscSetup) -> bool {
 }
 
 const DEFAULT_DECODER: [f32; 6] = [0.956, 0.621, -0.272, -0.647, -1.105, 1.702];
+const PI: f32 = std::f32::consts::PI;
 
 struct Init {
     to_rgb: [f32; BURST_COUNT as usize * 6],
@@ -229,8 +230,6 @@ impl Init {
             }
         }
 
-        const PI: f32 = std::f32::consts::PI;
-
         let mut hue = setup.hue as f32 * PI + PI / 180.0 * EXT_DECODER_HUE as f32;
         let sat = setup.saturation as f32 + 1.0;
         let decoder = if let Some(decoder) = setup.decoder_matrix.as_ref() {
@@ -269,7 +268,6 @@ impl Init {
 }
 
 fn init_filters(init: &mut Init, setup: &NesNtscSetup) {
-    const PI: f32 = std::f32::consts::PI;
     // rescale_out is defined at 7 for NES
     let mut kernels = [0.0; KERNEL_SIZE as usize * 2];
 
@@ -574,9 +572,8 @@ const fn ntsc_pixel_info(ntsc: i32, scaled: i32, kernel: [f32; 4]) -> PixelInfo 
 fn merge_kernel_fields(io: &mut [NesNtscRgb]) {
     let mut io_idx = 0;
     let burst_size = BURST_SIZE as usize;
-    let mut n = BURST_SIZE;
 
-    loop {
+    for _ in 0..BURST_SIZE {
         let io = &mut io[io_idx..];
         let p0 = io[burst_size * 0].wrapping_add(RGB_BIAS);
         let p1 = io[burst_size * 1].wrapping_add(RGB_BIAS);
@@ -590,19 +587,13 @@ fn merge_kernel_fields(io: &mut [NesNtscRgb]) {
             .wrapping_sub(RGB_BIAS);
 
         io_idx += 1;
-
-        n -= 1;
-        if n == 0 {
-            break;
-        }
     }
 }
 
 fn correct_errors(color: NesNtscRgb, out: &mut [NesNtscRgb]) {
     let mut out_idx = 0;
-    let mut n = BURST_COUNT;
 
-    loop {
+    for _ in 0..BURST_COUNT {
         let out = &mut out[out_idx..];
 
         for i in 0..(RGB_KERNEL_SIZE / 2) as usize {
@@ -619,11 +610,6 @@ fn correct_errors(color: NesNtscRgb, out: &mut [NesNtscRgb]) {
         }
 
         out_idx += (ALIGNMENT_COUNT * RGB_KERNEL_SIZE) as usize;
-
-        n -= 1;
-        if n == 0 {
-            break;
-        }
     }
 }
 
@@ -872,11 +858,11 @@ impl<'a> Blitter<'a> {
     fn rgb_out(&mut self, index: usize) {
         let k = |entry: usize, x: usize| self.ntsc.table[entry][x + self.burst_offset];
         let mut raw = k(self.kernel[0], index)
-            + k(self.kernel[1], (index + 12) % 7 + 14)
-            + k(self.kernel[2], (index + 10) % 7 + 28)
-            + k(self.kernelx[0], (index + 7) % 14)
-            + k(self.kernelx[1], (index + 5) % 7 + 21)
-            + k(self.kernelx[2], (index + 3) % 7 + 35);
+            .wrapping_add(k(self.kernel[1], (index + 12) % 7 + 14))
+            .wrapping_add(k(self.kernel[2], (index + 10) % 7 + 28))
+            .wrapping_add(k(self.kernelx[0], (index + 7) % 14))
+            .wrapping_add(k(self.kernelx[1], (index + 5) % 7 + 21))
+            .wrapping_add(k(self.kernelx[2], (index + 3) % 7 + 35));
 
         let sub = raw >> 9 & NES_NTSC_CLAMP_MASK;
         let mut clamp = NES_NTSC_CLAMP_ADD - sub;
@@ -892,57 +878,63 @@ impl<'a> Blitter<'a> {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod test {
+    use super::{NesNtsc, NesNtscSetup};
+
     #[test]
-    fn compare_impls() {
-        let mut control_palette = vec![0; 1536];
+    fn compare_composite() {
+        let setup = unsafe { *&nes_ntsc_sys::nes_ntsc_composite };
+        compare_impls(setup, NesNtscSetup::composite())
+    }
+
+    #[test]
+    fn compare_rgb() {
+        let setup = unsafe { *&nes_ntsc_sys::nes_ntsc_rgb };
+        compare_impls(setup, NesNtscSetup::rgb())
+    }
+
+    #[test]
+    fn compare_monochrome() {
+        let setup = unsafe { *&nes_ntsc_sys::nes_ntsc_monochrome };
+        compare_impls(setup, NesNtscSetup::monochrome())
+    }
+
+    #[test]
+    fn compare_svideo() {
+        let setup = unsafe { *&nes_ntsc_sys::nes_ntsc_svideo };
+        compare_impls(setup, NesNtscSetup::svideo())
+    }
+
+    fn compare_impls(mut setup: nes_ntsc_sys::nes_ntsc_setup_t, mut new_setup: NesNtscSetup) {
+        let mut palette = vec![0; 1536];
+        setup.palette_out = palette.as_mut_ptr();
+
         let ntsc = unsafe {
-            let mut setup = nes_ntsc_sys::nes_ntsc_composite;
-            setup.palette_out = control_palette.as_mut_ptr();
             let mut ntsc = std::mem::zeroed::<nes_ntsc_sys::nes_ntsc_t>();
             nes_ntsc_sys::nes_ntsc_init((&mut ntsc) as *mut _, &setup as *const _);
             ntsc
         };
 
-        let mut new_setup = super::NesNtscSetup::composite();
-        let palette_out = new_setup.generate_palette();
-        let new_ntsc = super::NesNtsc::new(&mut new_setup);
+        let new_palette = new_setup.generate_palette();
+        let new_ntsc = NesNtsc::new(&mut new_setup);
 
-        for p in control_palette.iter().zip(&palette_out) {
-            assert_eq!(p.0, p.1);
+        assert_eq!(palette.len(), new_palette.len());
+
+        for (&a, &b) in palette.iter().zip(&new_palette) {
+            assert_eq!(a, b);
         }
 
-        let mut same = 0;
-        let mut diff = 0;
-
-        let mut len_a = 0;
-        let mut len_b = 0;
-
-        for _ in ntsc.table.as_flattened() {
-            len_a += 1;
-        }
-
-        for _ in new_ntsc.table.iter().flatten() {
-            len_b += 1;
-        }
+        let len_a = ntsc.table.as_flattened().len();
+        let len_b = new_ntsc.table.iter().flatten().count();
 
         assert_eq!(len_a, len_b);
 
-        for (k, kk) in ntsc
+        for (&a, &b) in ntsc
             .table
             .as_flattened()
             .iter()
-            .copied()
-            .zip(new_ntsc.table.iter().flatten().copied())
+            .zip(new_ntsc.table.iter().flatten())
         {
-            if k == kk {
-                same += 1;
-            } else {
-                diff += 1;
-            }
+            assert_eq!(a, b)
         }
-
-        eprintln!("same: {same}  diff: {diff}");
-
-        assert!(diff == 0);
     }
 }

@@ -80,6 +80,7 @@ impl Machine {
         self.region
     }
 
+    #[tracing::instrument(skip_all)]
     pub fn run(&mut self) {
         let last_frame = self.ppu.frame();
         while self.ppu.frame() == last_frame {

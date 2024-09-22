@@ -184,7 +184,7 @@ impl Debug {
     fn do_log_history(&self, system: &Machine, state: &DebugState) {
         for (cpu_state, ppu_state) in state.log_iter().rev() {
             let log = self.trace_instruction(system, cpu_state, ppu_state);
-            eprintln!("{}", log);
+            tracing::info!("{}", log);
         }
     }
 
@@ -196,7 +196,7 @@ impl Debug {
             }
             if state.trace_instrs != 0 || state.logging_range {
                 let log = self.trace_instruction(system, &cpu_state, &ppu_state);
-                eprintln!("{}", log);
+                tracing::info!("{}", log);
                 if state.trace_instrs != 0 {
                     state.trace_instrs -= 1;
                 }
@@ -223,7 +223,7 @@ impl Debug {
     ) {
         let state = self.state.borrow();
         if state.logging_range {
-            eprintln!("{:?}", ppu_state);
+            tracing::info!("{:?}", ppu_state);
         }
     }
 

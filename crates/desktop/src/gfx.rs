@@ -5,7 +5,7 @@ use glium::{implement_vertex, Display, Program, Surface, VertexBuffer};
 
 use std::borrow::Cow;
 
-use ui::filters::{Filter, FilterContext, FilterUniforms, TextureFormat};
+use ui::filters::{Filter, FilterContext, FilterUniforms, NesNtscSetup, TextureFormat};
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -23,16 +23,21 @@ pub struct Gfx<T> {
     vertex_buffer: VertexBuffer<Vertex>,
     size: (f64, f64),
     frame: Option<Vec<u16>>,
+    tracy: Tracy,
 }
 
 impl<T: Filter> Gfx<T> {
     pub fn new(display: Display<WindowSurface>, filter: T) -> Self {
-        log::debug!(
+        let ver = display.get_opengl_version_string();
+        let glsl = display.get_supported_glsl_version();
+        let vendor = display.get_opengl_vendor_string();
+        let renderer = display.get_opengl_renderer_string();
+        tracing::debug!(
             "OpenGL: ver: {}, glsl: {:?}, vendor: {}, renderer: {}",
-            display.get_opengl_version_string(),
-            display.get_supported_glsl_version(),
-            display.get_opengl_vendor_string(),
-            display.get_opengl_renderer_string()
+            ver,
+            glsl,
+            vendor,
+            renderer
         );
 
         let top_right = Vertex {
@@ -75,6 +80,8 @@ impl<T: Filter> Gfx<T> {
         let size = filter.dimensions();
         let size = (size.0 as f64, size.1 as f64);
 
+        let tracy = Tracy::new();
+
         Self {
             filter,
             display: GliumContext(display),
@@ -83,6 +90,7 @@ impl<T: Filter> Gfx<T> {
             vertex_buffer,
             size,
             frame: None,
+            tracy,
         }
     }
 
@@ -153,6 +161,70 @@ impl<T: Filter> Gfx<T> {
             )
             .unwrap();
         target.finish().unwrap();
+        self.tracy.frame(screen);
+    }
+}
+
+struct Tracy {
+    palette: Box<[u8]>,
+    frame_image: Vec<u32>,
+}
+
+impl Tracy {
+    fn new() -> Self {
+        let ntsc = NesNtscSetup::rgb();
+        let palette = ntsc.generate_palette().into();
+        let frame_image = vec![0; 120 * 128];
+
+        Self {
+            palette,
+            frame_image,
+        }
+    }
+
+    #[tracing::instrument(skip_all)]
+    fn frame(&mut self, screen: &[u16]) {
+        if let Some(client) = tracy_client::Client::running() {
+            let pixel = |x: usize, y: usize| {
+                let s = screen[y * 256 + x] as usize;
+                let r = self.palette[s * 3 + 2] as u32;
+                let g = self.palette[s * 3 + 1] as u32;
+                let b = self.palette[s * 3 + 0] as u32;
+
+                [r, g, b]
+            };
+
+            for row in 0..120 {
+                for col in 0..128 {
+                    let [r0, g0, b0] = pixel(col * 2 + 0, row * 2 + 0);
+                    let [r1, g1, b1] = pixel(col * 2 + 1, row * 2 + 0);
+                    let [r2, g2, b2] = pixel(col * 2 + 0, row * 2 + 1);
+                    let [r3, g3, b3] = pixel(col * 2 + 1, row * 2 + 1);
+
+                    let r = ((r0 + r1 + r2 + r3) as f32 / 4.0) as u32;
+                    let g = ((g0 + g1 + g2 + g3) as f32 / 4.0) as u32;
+                    let b = ((b0 + b1 + b2 + b3) as f32 / 4.0) as u32;
+
+                    let p = r << 16 | g << 8 | b;
+
+                    self.frame_image[row * 128 + col] = p;
+                }
+            }
+
+            unsafe {
+                let ptr = self.frame_image.as_ptr();
+
+                let () = tracy_client::sys::___tracy_emit_frame_image(
+                    ptr.cast(),
+                    128,
+                    120,
+                    0,
+                    false as i32,
+                );
+            }
+
+            client.frame_mark();
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-use blip_buf::BlipBuf;
+use blip_buf_rs::Blip;
 use clap::{Parser, Subcommand, ValueEnum};
 use nes::{Cartridge, Machine};
 use ui::audio::{Audio, AudioDevices, CpalAudio, Null};
@@ -11,11 +11,23 @@ pub mod audio;
 pub mod gfx;
 pub mod sync;
 
-use app::App;
+use app::{App, NesInputs, NesOutputs};
 use sync::{NaiveSync, SyncDevices};
 
 fn main() {
     let args = Args::parse();
+
+    use tracing_subscriber::{layer::SubscriberExt, Layer};
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::registry()
+            .with(tracing_tracy::TracyLayer::default())
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_filter(tracing_subscriber::filter::LevelFilter::DEBUG),
+            ),
+    )
+    .expect("init tracing");
+
     match args.mode {
         Mode::Run { file } => run(file, args.region.into()),
         Mode::Bench { frames, file } => bench(file, args.region.into(), frames),
@@ -35,7 +47,7 @@ fn run(path: PathBuf, region: nes::Region) {
         match CpalAudio::new(sync, region.refresh_rate(), 64) {
             Ok((audio, frame_sync)) => (audio.into(), frame_sync.into()),
             Err(err) => {
-                eprintln!("unable to init audio device: {err:?}");
+                tracing::error!("unable to init audio device: {err:?}");
                 (Null.into(), NaiveSync::new(region.refresh_rate()).into())
             }
         };
@@ -48,41 +60,54 @@ fn run(path: PathBuf, region: nes::Region) {
 
     std::thread::Builder::new()
         .name("machine".into())
-        .spawn(move || {
-            let mut machine = Machine::new(region, cart);
-            let mut delta = 0;
-            let mut blip = BlipBuf::new(sample_rate / 30);
-            blip.set_rates(
-                region.frame_ticks() * region.refresh_rate(),
-                sample_rate as f64,
-            );
-
-            for input in input.inputs() {
-                machine.handle_input(input);
-                machine.run();
-
-                let samples = machine.get_audio();
-                let count = samples.len();
-
-                for (i, v) in samples.iter().enumerate() {
-                    blip.add_delta(i as u32, *v as i32 - delta);
-                    delta = *v as i32;
-                }
-                blip.end_frame(count as u32);
-                while blip.samples_avail() > 0 {
-                    let mut buf = vec![0i16; 1024];
-                    let count = blip.read_samples(&mut buf, false);
-                    buf.truncate(count);
-                    output.send_samples(buf);
-                }
-
-                let frame = machine.get_screen().iter().map(|p| p.get()).collect();
-                output.send_frame(frame);
-            }
-        })
+        .spawn(move || run_machine(region, cart, sample_rate, input, output))
         .unwrap();
 
     app.run();
+}
+
+fn run_machine(
+    region: nes::Region,
+    cart: Cartridge,
+    sample_rate: u32,
+    input: NesInputs,
+    output: NesOutputs,
+) {
+    let mut machine = Machine::new(region, cart);
+    let mut delta = 0;
+    let mut blip = Blip::new(sample_rate / 30);
+    blip.set_rates(
+        region.frame_ticks() * region.refresh_rate(),
+        sample_rate as f64,
+    );
+
+    for input in input.inputs() {
+        machine.handle_input(input);
+        machine.run();
+
+        {
+            let span = tracing::trace_span!("audio_blip");
+            let _enter = span.enter();
+
+            let samples = machine.get_audio();
+            let count = samples.len();
+
+            for (i, v) in samples.iter().enumerate() {
+                blip.add_delta(i as u32, *v as i32 - delta);
+                delta = *v as i32;
+            }
+            blip.end_frame(count as u32);
+            while blip.samples_avail() > 0 {
+                let mut buf = vec![0i16; 1024];
+                let count = blip.read_samples(&mut buf, 1024, false);
+                buf.truncate(count as usize);
+                output.send_samples(buf);
+            }
+        }
+
+        let frame = machine.get_screen().iter().map(|p| p.get()).collect();
+        output.send_frame(frame);
+    }
 }
 
 fn bench(path: PathBuf, region: nes::Region, mut frames: u32) {

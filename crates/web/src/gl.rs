@@ -133,7 +133,7 @@ impl GlProgram {
         let info = gl.get_shader_info_log(&shader_vert);
         if let Some(info) = info {
             if info.len() > 0 {
-                log::warn!("Vertex Shader: {}\n{}", info, vertex_shader.as_ref());
+                tracing::warn!("Vertex Shader: {}\n{}", info, vertex_shader.as_ref());
             }
         }
 
@@ -145,7 +145,7 @@ impl GlProgram {
         let info = gl.get_shader_info_log(&shader_frag);
         if let Some(info) = info {
             if info.len() > 0 {
-                log::warn!("Fragment Shader: {}\n{}", info, fragment_shader.as_ref());
+                tracing::warn!("Fragment Shader: {}\n{}", info, fragment_shader.as_ref());
             }
         }
 
@@ -157,7 +157,7 @@ impl GlProgram {
         let info = gl.get_program_info_log(&prog);
         if let Some(info) = info {
             if info.len() > 0 {
-                log::warn!(
+                tracing::warn!(
                     "Program Shader: {} {} {}",
                     info,
                     vertex_shader.as_ref(),
