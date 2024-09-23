@@ -73,7 +73,7 @@ fn run_machine(
     input: NesInputs,
     output: NesOutputs,
 ) {
-    let mut machine = Machine::new(region, cart);
+    let mut machine = instrument_machine(Machine::new(region, cart));
     let mut delta = 0;
     let mut blip = Blip::new(sample_rate / 30);
     blip.set_rates(
@@ -163,4 +163,81 @@ enum Mode {
         /// Provides a rom file to emulate
         file: PathBuf,
     },
+}
+
+fn instrument_machine(machine: Machine) -> Machine {
+    if let Some(client) = tracy_client::Client::running() {
+        client.plot_config(c"scanline", true, true, None);
+        client.plot_config(c"vblank", true, true, None);
+        client.plot_config(c"nmi", true, true, None);
+    }
+    let mut scanline = 0;
+    let mut vblank = false;
+    let mut nmi = false;
+    machine.with_trace_fn(move |_cpu, ppu| {
+        if let Some(client) = tracy_client::Client::running() {
+            if scanline != ppu.scanline {
+                client.plot_int(c"scanline", ppu.scanline as i64);
+                scanline = ppu.scanline;
+            }
+            if vblank != ppu.vblank {
+                client.plot_int(c"vblank", ppu.vblank as i64);
+                vblank = ppu.vblank;
+            }
+            if nmi != ppu.triggered_nmi {
+                client.plot_int(c"nmi", ppu.triggered_nmi as i64);
+                nmi = ppu.triggered_nmi;
+            }
+        }
+    })
+}
+
+trait TracyExt {
+    fn plot_config(
+        &self,
+        name: &'static std::ffi::CStr,
+        step: bool,
+        fill: bool,
+        color: Option<u32>,
+    );
+    fn plot_int(&self, name: &'static std::ffi::CStr, value: i64);
+    fn emit_frame_image(&self, data: &[u8], width: u16, height: u16, offset: u8, flip: bool);
+}
+
+impl TracyExt for tracy_client::Client {
+    fn plot_config(
+        &self,
+        name: &'static std::ffi::CStr,
+        step: bool,
+        fill: bool,
+        color: Option<u32>,
+    ) {
+        unsafe {
+            tracy_client::sys::___tracy_emit_plot_config(
+                name.as_ptr(),
+                tracy_client::sys::TracyPlotFormatEnum_TracyPlotFormatNumber as i32,
+                step as i32,
+                fill as i32,
+                color.unwrap_or(0),
+            );
+        }
+    }
+
+    fn plot_int(&self, name: &'static std::ffi::CStr, value: i64) {
+        unsafe {
+            tracy_client::sys::___tracy_emit_plot_int(name.as_ptr(), value);
+        }
+    }
+
+    fn emit_frame_image(&self, data: &[u8], width: u16, height: u16, offset: u8, flip: bool) {
+        unsafe {
+            tracy_client::sys::___tracy_emit_frame_image(
+                data.as_ptr() as _,
+                width,
+                height,
+                offset,
+                flip as i32,
+            );
+        }
+    }
 }

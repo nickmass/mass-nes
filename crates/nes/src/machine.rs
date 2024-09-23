@@ -72,6 +72,16 @@ impl Machine {
         machine
     }
 
+    pub fn with_trace_fn<
+        F: FnMut(crate::cpu::CpuDebugState, crate::ppu::PpuDebugState) -> () + 'static,
+    >(
+        self,
+        trace_fn: F,
+    ) -> Self {
+        self.debug.trace_fn(trace_fn);
+        self
+    }
+
     pub fn force_power_up_pc(&mut self, addr: u16) {
         self.cpu.power_up_pc(Some(addr));
     }
@@ -113,12 +123,14 @@ impl Machine {
 
             for _ in 0..3 {
                 self.ppu.tick();
-                //let ppu_state = self.ppu.debug_state();
-                //self.debug.trace_ppu(&self, cpu_state, ppu_state);
+                let ppu_state = self.ppu.debug_state();
+                self.debug.trace_ppu(&self, cpu_state, ppu_state);
             }
 
             if self.region.extra_ppu_tick() && self.cycle % 5 == 0 {
                 self.ppu.tick();
+                let ppu_state = self.ppu.debug_state();
+                self.debug.trace_ppu(&self, cpu_state, ppu_state);
             }
 
             self.cpu_pin_in.power = false;

@@ -22,6 +22,7 @@ mod audio;
 mod gfx;
 mod gl;
 mod sync;
+mod worker;
 
 use app::{NesInputs, NesOutputs, UserEvent};
 
@@ -246,6 +247,8 @@ pub struct Emulator {
 impl Emulator {
     #[wasm_bindgen(constructor)]
     pub async fn new(region: String, canvas: HtmlCanvasElement) -> Option<Emulator> {
+        let gfx_worker = worker::GfxWorker::new(&canvas).await;
+
         let region = region.to_lowercase();
         let region = match region.as_str() {
             "pal" => Region::Pal,
@@ -270,10 +273,7 @@ impl Emulator {
             _ => return None,
         }
 
-        let setup = ui::filters::NesNtscSetup::composite();
-        let filter = ui::filters::NtscFilter::new(&setup);
-        //let filter = ui::filters::PalettedFilter::new(setup.generate_palette());
-        let mut app = app::App::new(filter, audio, sync, canvas);
+        let mut app = app::App::new(gfx_worker, audio, sync, canvas);
 
         let (machine_sink, machine_stream) = machine_runner.split();
         let (nes_inputs, nes_outputs) = app.nes_io();
@@ -281,7 +281,6 @@ impl Emulator {
         spawn_local(worker_input_proxy(machine_sink, nes_inputs));
 
         let proxy = app.proxy();
-
         app.run();
 
         Some(Self { proxy })

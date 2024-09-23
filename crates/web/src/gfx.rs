@@ -1,12 +1,20 @@
-use web_sys::HtmlCanvasElement;
+use futures::{
+    channel::mpsc::{Receiver, Sender},
+    StreamExt,
+};
+use web_sys::OffscreenCanvas;
 
 use ui::filters::Filter;
+
+use crate::worker::{GfxRequest, GfxResponse, GfxWorkerChannel};
 
 use super::gl;
 
 pub struct Gfx<T> {
     filter: T,
-    canvas: HtmlCanvasElement,
+    canvas: OffscreenCanvas,
+    rx: Option<Receiver<GfxRequest>>,
+    tx: Sender<GfxResponse>,
     gl: gl::GlContext,
     screen: gl::GlModel<Vertex>,
     program: gl::GlProgram,
@@ -17,7 +25,8 @@ pub struct Gfx<T> {
 }
 
 impl<T: Filter> Gfx<T> {
-    pub fn new(canvas: HtmlCanvasElement, filter: T) -> Self {
+    pub fn new(canvas: OffscreenCanvas, filter: T, channel: GfxWorkerChannel) -> Self {
+        let GfxWorkerChannel { tx, rx } = channel;
         let (width, height) = filter.dimensions();
         let size = (width as f64, height as f64);
         let render_size = (width, height);
@@ -58,6 +67,8 @@ impl<T: Filter> Gfx<T> {
         Self {
             filter,
             canvas,
+            tx,
+            rx: Some(rx),
             gl,
             screen,
             program,
@@ -65,6 +76,24 @@ impl<T: Filter> Gfx<T> {
             render_size,
             resize_count: 0,
             frame: None,
+        }
+    }
+
+    pub async fn run(mut self) {
+        let Some(mut rx) = self.rx.take() else {
+            panic!("no gfx_channel receiver");
+        };
+
+        while let Some(request) = rx.next().await {
+            self.handle_request(request);
+        }
+    }
+
+    fn handle_request(&mut self, request: GfxRequest) {
+        match request {
+            GfxRequest::Frame(frame) => self.update_frame(frame),
+            GfxRequest::Redraw => self.render(),
+            GfxRequest::Resize(width, height) => self.resize((width, height)),
         }
     }
 

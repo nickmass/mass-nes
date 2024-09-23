@@ -43,4 +43,9 @@ features = [
     "WebGlVertexArrayObject",
     "WebGlUniformLocation",
     "WorkerGlobalScope",
+    "Worker",
+    "WorkerOptions",
+    "OffscreenCanvas",
+    "OffscreenCanvasRenderingContext2d",
+    "DedicatedWorkerGlobalScope",
 ]

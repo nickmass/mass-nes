@@ -7,12 +7,12 @@ use winit::keyboard::PhysicalKey;
 use winit::platform::web::{EventLoopExtWebSys, WindowAttributesExtWebSys};
 use winit::window::{Window, WindowAttributes};
 
-use super::gfx::Gfx;
+use crate::worker::{GfxRequest, GfxWorker};
+
 use super::sync::FrameSync;
 
 use nes::UserInput;
 use ui::audio::Audio;
-use ui::filters::Filter;
 use ui::gamepad::{GamepadEvent, GilrsInput};
 use ui::input::InputMap;
 
@@ -45,19 +45,19 @@ pub struct Frame(Vec<u16>);
 
 pub struct Samples(Vec<i16>);
 
-pub struct App<F, A, S> {
+pub struct App<A, S> {
     audio: A,
     sync: Option<S>,
-    gfx: Gfx<F>,
     gamepad: Option<GilrsInput<UserEvent>>,
     window: Window,
     event_loop: Option<EventLoop<UserEvent>>,
     input: InputMap,
     input_tx: Option<futures::channel::mpsc::Sender<EmulatorInput>>,
+    gfx_worker: GfxWorker,
 }
 
-impl<F: Filter + 'static, A: Audio + 'static, S: FrameSync + 'static> App<F, A, S> {
-    pub fn new(filter: F, audio: A, sync: S, canvas: HtmlCanvasElement) -> Self {
+impl<A: Audio + 'static, S: FrameSync + 'static> App<A, S> {
+    pub fn new(gfx_worker: GfxWorker, audio: A, sync: S, canvas: HtmlCanvasElement) -> Self {
         let event_loop = EventLoop::with_user_event().build().unwrap();
 
         let window = event_loop
@@ -68,8 +68,6 @@ impl<F: Filter + 'static, A: Audio + 'static, S: FrameSync + 'static> App<F, A, 
             )
             .unwrap();
 
-        let gfx = Gfx::new(canvas, filter);
-
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
 
         let gamepad = GilrsInput::new(event_loop.create_proxy()).unwrap();
@@ -78,11 +76,11 @@ impl<F: Filter + 'static, A: Audio + 'static, S: FrameSync + 'static> App<F, A, 
             audio,
             sync: Some(sync),
             window,
-            gfx,
             event_loop: Some(event_loop),
             input: InputMap::new(),
             input_tx: None,
             gamepad: Some(gamepad),
+            gfx_worker,
         }
     }
 
@@ -131,7 +129,7 @@ async fn sync_loop<S: FrameSync>(mut sync: S, proxy: EventLoopProxy<UserEvent>) 
     }
 }
 
-impl<F: Filter, A: Audio, S: FrameSync> ApplicationHandler<UserEvent> for App<F, A, S> {
+impl<A: Audio, S: FrameSync> ApplicationHandler<UserEvent> for App<A, S> {
     fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
 
     fn window_event(
@@ -142,7 +140,8 @@ impl<F: Filter, A: Audio, S: FrameSync> ApplicationHandler<UserEvent> for App<F,
     ) {
         match event {
             WindowEvent::Resized(size) => {
-                self.gfx.resize(size.into());
+                let (x, y) = size.into();
+                let _ = self.gfx_worker.tx.try_send(GfxRequest::Resize(x, y));
                 self.window.request_redraw();
             }
             WindowEvent::CloseRequested => {
@@ -169,7 +168,7 @@ impl<F: Filter, A: Audio, S: FrameSync> ApplicationHandler<UserEvent> for App<F,
             }
             WindowEvent::RedrawRequested => {
                 if self.window.is_visible() != Some(false) {
-                    self.gfx.render();
+                    let _ = self.gfx_worker.tx.try_send(GfxRequest::Redraw);
                 }
             }
             _ => (),
@@ -179,7 +178,7 @@ impl<F: Filter, A: Audio, S: FrameSync> ApplicationHandler<UserEvent> for App<F,
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::Frame(Frame(frame)) => {
-                self.gfx.update_frame(frame);
+                let _ = self.gfx_worker.tx.try_send(GfxRequest::Frame(frame));
                 self.window.request_redraw();
             }
             UserEvent::Samples(Samples(samples)) => self.audio.add_samples(samples),

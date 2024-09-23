@@ -52,9 +52,6 @@ pub struct PpuState {
     oam_data: [u8; 256],
     line_oam_data: [u8; 32],
 
-    current_frame: i32,
-    current_line: i32,
-
     palette_data: [u8; 32],
 
     nametable_tile: u8,
@@ -121,9 +118,6 @@ impl Default for PpuState {
             oam_addr: 0,
             oam_data: [0; 256],
             line_oam_data: [0; 32],
-
-            current_frame: 0,
-            current_line: 0,
 
             palette_data: [0x0f; 32],
 

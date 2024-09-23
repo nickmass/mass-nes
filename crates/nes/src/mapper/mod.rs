@@ -95,10 +95,6 @@ impl SimpleMirroring {
         self.mirroring.set(Mirroring::Vertical);
     }
 
-    pub fn custom(&self) {
-        self.mirroring.set(Mirroring::Custom);
-    }
-
     pub fn ppu_fetch(&self, address: u16) -> Nametable {
         if address & 0x2000 != 0 {
             match self.mirroring.get() {

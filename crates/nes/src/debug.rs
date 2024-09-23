@@ -15,6 +15,7 @@ pub struct DebugState {
     log_range: Option<(u16, u16)>,
     logging_range: bool,
     inst_ring: RingBuffer<(CpuDebugState, PpuDebugState)>,
+    trace_fn: Option<Box<dyn FnMut(CpuDebugState, PpuDebugState)>>,
 }
 
 impl Default for DebugState {
@@ -26,6 +27,7 @@ impl Default for DebugState {
             log_range: None,
             logging_range: false,
             inst_ring: RingBuffer::new(INST_HISTORY_BUF_SIZE),
+            trace_fn: None,
         }
     }
 }
@@ -213,17 +215,19 @@ impl Debug {
                 panic!("KIL");
             }
         }
+
+        if let Some(trace_fn) = state.trace_fn.as_mut() {
+            trace_fn(cpu_state, ppu_state);
+        }
     }
 
-    pub fn trace_ppu(
-        &self,
-        _system: &Machine,
-        _cpu_state: CpuDebugState,
-        ppu_state: PpuDebugState,
-    ) {
-        let state = self.state.borrow();
+    pub fn trace_ppu(&self, _system: &Machine, cpu_state: CpuDebugState, ppu_state: PpuDebugState) {
+        let mut state = self.state.borrow_mut();
         if state.logging_range {
             tracing::info!("{:?}", ppu_state);
+        }
+        if let Some(trace_fn) = state.trace_fn.as_mut() {
+            trace_fn(cpu_state, ppu_state);
         }
     }
 
@@ -368,5 +372,10 @@ impl Debug {
             "{}{: <10.10}{: >4.4} {: <30.30} {} {}",
             pc_string, instr_bytes_string, name, addr_string, reg_string, ppu_string
         )
+    }
+
+    pub fn trace_fn<F: FnMut(CpuDebugState, PpuDebugState) -> () + 'static>(&self, trace_fn: F) {
+        let mut state = self.state.borrow_mut();
+        state.trace_fn = Some(Box::new(trace_fn));
     }
 }

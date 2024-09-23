@@ -4,12 +4,14 @@ use std::convert::AsRef;
 use std::fs::File;
 use std::path::Path;
 
+#[allow(dead_code)]
 #[derive(Debug, Copy, Clone)]
 pub enum Condition {
     Equals(u16, u8),
     PowerUpPc(u16),
 }
 
+#[allow(dead_code)]
 pub enum RunUntil {
     Frame(u32),
     NotEqual(u16, u8),

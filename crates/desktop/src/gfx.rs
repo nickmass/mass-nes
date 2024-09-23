@@ -7,6 +7,8 @@ use std::borrow::Cow;
 
 use ui::filters::{Filter, FilterContext, FilterUniforms, NesNtscSetup, TextureFormat};
 
+use crate::TracyExt;
+
 #[derive(Copy, Clone)]
 struct Vertex {
     position: [f32; 2],
@@ -211,17 +213,7 @@ impl Tracy {
                 }
             }
 
-            unsafe {
-                let ptr = self.frame_image.as_ptr();
-
-                let () = tracy_client::sys::___tracy_emit_frame_image(
-                    ptr.cast(),
-                    128,
-                    120,
-                    0,
-                    false as i32,
-                );
-            }
+            client.emit_frame_image(bytemuck::cast_slice(&self.frame_image), 128, 120, 0, false);
 
             client.frame_mark();
         }

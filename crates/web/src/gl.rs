@@ -1,8 +1,7 @@
 #![allow(dead_code)]
 use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsCast;
 use web_sys::{
-    js_sys, wasm_bindgen, HtmlCanvasElement, WebGlBuffer, WebGlFramebuffer, WebGlProgram,
+    js_sys, wasm_bindgen, OffscreenCanvas, WebGlBuffer, WebGlFramebuffer, WebGlProgram,
     WebGlShader, WebGlTexture, WebGlUniformLocation, WebGlVertexArrayObject,
 };
 
@@ -36,14 +35,14 @@ pub enum WebGlPowerPreference {
 }
 
 #[derive(Clone)]
-pub struct GlContext<C: Clone = HtmlCanvasElement> {
+pub struct GlContext<C: Clone = OffscreenCanvas> {
     gl: GL,
     canvas: C,
     ext_map: Rc<RefCell<HashMap<TypeId, Option<Box<dyn Any>>>>>,
 }
 
 impl GlContext {
-    pub fn new(canvas: HtmlCanvasElement) -> Self {
+    pub fn new(canvas: OffscreenCanvas) -> Self {
         let gl = canvas
             .get_context("webgl2")
             .unwrap_or(None)
@@ -52,7 +51,10 @@ impl GlContext {
         GlContext::with_gl(canvas, gl)
     }
 
-    pub fn with_options(canvas: HtmlCanvasElement, options: WebGlContextOptions) -> Self {
+    pub fn with_options(
+        canvas: OffscreenCanvas,
+        options: WebGlContextOptions,
+    ) -> GlContext<OffscreenCanvas> {
         let opts = serde_json::to_string(&options).unwrap();
         let opts = js_sys::JSON::parse(&opts).unwrap();
         let gl = canvas

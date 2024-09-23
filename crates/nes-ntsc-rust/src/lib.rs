@@ -136,13 +136,21 @@ impl NesNtscSetup {
 }
 
 const NES_NTSC_EMPHASIS: bool = true;
-const NES_NTSC_PALETTE_SIZE: u32 = if NES_NTSC_EMPHASIS { 64 * 8 } else { 64 };
-const NES_NTSC_ENTRY_SIZE: u32 = 128;
+const NES_NTSC_PALETTE_SIZE: usize = if NES_NTSC_EMPHASIS { 64 * 8 } else { 64 };
+const NES_NTSC_ENTRY_SIZE: usize = 128;
 
 pub type NesNtscRgb = u64;
 
 pub struct NesNtsc {
-    table: Box<[Box<[NesNtscRgb]>]>,
+    table: Box<[[NesNtscRgb; NES_NTSC_ENTRY_SIZE]; NES_NTSC_PALETTE_SIZE]>,
+}
+
+impl NesNtsc {
+    #[allow(dead_code)]
+    #[inline]
+    fn unsafe_index(&self, entry: usize, offset: usize) -> NesNtscRgb {
+        unsafe { *self.table.get_unchecked(entry).get_unchecked(offset) }
+    }
 }
 
 const ALIGNMENT_COUNT: u32 = 3;
@@ -163,7 +171,7 @@ const EXT_DECODER_HUE: i32 = STD_DECODER_HUE + 15;
 const RGB_UNIT: u32 = 1 << RGB_BITS;
 const RGB_OFFSET: f32 = (RGB_UNIT * 2) as f32 + 0.5;
 
-const BURST_SIZE: u32 = NES_NTSC_ENTRY_SIZE / BURST_COUNT;
+const BURST_SIZE: u32 = NES_NTSC_ENTRY_SIZE as u32 / BURST_COUNT;
 const KERNEL_HALF: i32 = 16;
 const KERNEL_SIZE: i32 = KERNEL_HALF * 2 + 1;
 
@@ -382,11 +390,7 @@ impl NesNtsc {
 
     fn new_with_palette<'a>(setup: &NesNtscSetup, mut palette_out: Option<&'a mut [u8]>) -> Self {
         let mut ntsc = NesNtsc {
-            table: vec![
-                vec![0; NES_NTSC_ENTRY_SIZE as usize].into_boxed_slice();
-                NES_NTSC_PALETTE_SIZE as usize
-            ]
-            .into_boxed_slice(),
+            table: Box::new([[0; NES_NTSC_ENTRY_SIZE]; NES_NTSC_PALETTE_SIZE]),
         };
         let init = Init::new(setup);
 
@@ -492,7 +496,7 @@ impl NesNtsc {
                 rgb_palette_out(rgb, &mut palette_out[entry as usize * 3..]);
             }
 
-            let kernel = ntsc.table[entry as usize].as_mut();
+            let kernel = &mut ntsc.table[entry as usize];
             gen_kernel(&init, y, i, q, kernel);
             if merge_fields {
                 merge_kernel_fields(kernel);
@@ -761,7 +765,7 @@ const NES_NTSC_IN_CHUNK: u32 = 3;
 const NES_NTSC_OUT_CHUNK: u32 = 7;
 const NES_NTSC_BLACK: u16 = 15;
 const NES_NTSC_BURST_COUNT: u32 = 3;
-const NES_NTSC_BURST_SIZE: u32 = NES_NTSC_ENTRY_SIZE / NES_NTSC_BURST_COUNT;
+const NES_NTSC_BURST_SIZE: u32 = NES_NTSC_ENTRY_SIZE as u32 / NES_NTSC_BURST_COUNT;
 
 pub struct Blitter<'a> {
     ntsc: &'a NesNtsc,
@@ -856,13 +860,33 @@ impl<'a> Blitter<'a> {
     }
 
     fn rgb_out(&mut self, index: usize) {
-        let k = |entry: usize, x: usize| self.ntsc.table[entry][x + self.burst_offset];
-        let mut raw = k(self.kernel[0], index)
-            .wrapping_add(k(self.kernel[1], (index + 12) % 7 + 14))
-            .wrapping_add(k(self.kernel[2], (index + 10) % 7 + 28))
-            .wrapping_add(k(self.kernelx[0], (index + 7) % 14))
-            .wrapping_add(k(self.kernelx[1], (index + 5) % 7 + 21))
-            .wrapping_add(k(self.kernelx[2], (index + 3) % 7 + 35));
+        let entries = [
+            self.kernel[0],
+            self.kernel[1],
+            self.kernel[2],
+            self.kernelx[0],
+            self.kernelx[1],
+            self.kernelx[2],
+        ];
+
+        let offsets = [
+            index + self.burst_offset,
+            (index + 12) % 7 + 14 + self.burst_offset,
+            (index + 10) % 7 + 28 + self.burst_offset,
+            (index + 7) % 14 + self.burst_offset,
+            (index + 5) % 7 + 21 + self.burst_offset,
+            (index + 3) % 7 + 35 + self.burst_offset,
+        ];
+
+        let mut raw: u64 = 0;
+
+        for i in 0..6 {
+            let p = self.ntsc.table[entries[i]][offsets[i]];
+
+            // unsafe: +35% perf over entire blit (1.9ms -> 1.2ms), previous C macros were 0.8ms
+            //let p = self.ntsc.unsafe_index(entries[i], offsets[i]);
+            raw = raw.wrapping_add(p);
+        }
 
         let sub = raw >> 9 & NES_NTSC_CLAMP_MASK;
         let mut clamp = NES_NTSC_CLAMP_ADD - sub;
@@ -924,7 +948,7 @@ mod test {
         }
 
         let len_a = ntsc.table.as_flattened().len();
-        let len_b = new_ntsc.table.iter().flatten().count();
+        let len_b = new_ntsc.table.as_flattened().len();
 
         assert_eq!(len_a, len_b);
 
@@ -932,7 +956,7 @@ mod test {
             .table
             .as_flattened()
             .iter()
-            .zip(new_ntsc.table.iter().flatten())
+            .zip(new_ntsc.table.as_flattened().iter())
         {
             assert_eq!(a, b)
         }

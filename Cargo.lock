@@ -1350,6 +1350,7 @@ name = "mass_nes"
 version = "0.1.0"
 dependencies = [
  "blip_buf-rs",
+ "bytemuck",
  "clap",
  "crossbeam",
  "glium",
