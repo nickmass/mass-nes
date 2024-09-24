@@ -274,13 +274,10 @@ impl PpuState {
         self.step.scanline >= self.region.vblank_line()
             && self.step.scanline < self.region.prerender_line()
     }
-
-    pub fn scanline(&self) -> (u32, u32) {
-        (self.step.scanline, self.step.dot)
-    }
 }
 
 #[allow(dead_code)]
+#[cfg(feature = "debugger")]
 #[derive(Debug, Copy, Clone)]
 pub struct PpuDebugState {
     pub tick: u64,
@@ -289,6 +286,10 @@ pub struct PpuDebugState {
     pub vblank: bool,
     pub triggered_nmi: bool,
 }
+
+#[cfg(not(feature = "debugger"))]
+#[derive(Debug, Copy, Clone)]
+pub struct PpuDebugState;
 
 pub struct Ppu {
     region: Region,
@@ -347,17 +348,21 @@ impl Ppu {
         cpu.register_write(DeviceKind::Ppu, RangeAndMask(0x2000, 0x4000, 0x2007));
     }
 
+    #[cfg(feature = "debugger")]
     pub fn debug_state(&self) -> PpuDebugState {
         let state = self.state.borrow();
-        let (scanline, dot) = state.scanline();
         let tick = state.current_tick;
         PpuDebugState {
             tick,
-            scanline,
-            dot,
+            scanline: state.step.scanline,
+            dot: state.step.dot,
             vblank: state.vblank,
             triggered_nmi: state.triggered_nmi,
         }
+    }
+    #[cfg(not(feature = "debugger"))]
+    pub fn debug_state(&self) -> PpuDebugState {
+        PpuDebugState
     }
 
     pub fn peek(&self, address: u16) -> u8 {

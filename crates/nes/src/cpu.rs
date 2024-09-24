@@ -116,6 +116,7 @@ impl CpuNmiInterrupt {
 }
 
 #[allow(dead_code)]
+#[cfg(feature = "debugger")]
 #[derive(Debug, Copy, Clone)]
 pub struct CpuDebugState {
     pub reg_a: u8,
@@ -127,6 +128,10 @@ pub struct CpuDebugState {
     pub instruction_addr: Option<u16>,
     pub cycle: u64,
 }
+
+#[cfg(not(feature = "debugger"))]
+#[derive(Debug, Copy, Clone)]
+pub struct CpuDebugState;
 
 pub struct Cpu {
     current_tick: u64,
@@ -343,6 +348,7 @@ impl Cpu {
         self.last_tick
     }
 
+    #[cfg(feature = "debugger")]
     pub fn debug_state(&self) -> CpuDebugState {
         CpuDebugState {
             reg_a: self.reg_a as u8,
@@ -354,6 +360,10 @@ impl Cpu {
             instruction_addr: self.instruction_addr,
             cycle: self.current_tick,
         }
+    }
+    #[cfg(not(feature = "debugger"))]
+    pub fn debug_state(&self) -> CpuDebugState {
+        CpuDebugState
     }
 
     fn read_pc(&mut self) -> TickResult {

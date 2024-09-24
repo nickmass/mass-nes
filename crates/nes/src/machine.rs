@@ -72,6 +72,7 @@ impl Machine {
         machine
     }
 
+    #[cfg(feature = "debugger")]
     pub fn with_trace_fn<
         F: FnMut(crate::cpu::CpuDebugState, crate::ppu::PpuDebugState) -> () + 'static,
     >(

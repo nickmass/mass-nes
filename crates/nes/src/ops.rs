@@ -89,6 +89,7 @@ pub enum Instruction {
 }
 
 impl Instruction {
+    #[cfg(feature = "debugger")]
     pub fn name(&self) -> &'static str {
         use Instruction::*;
         match self {
@@ -326,6 +327,7 @@ pub enum Addressing {
 }
 
 impl Addressing {
+    #[cfg(feature = "debugger")]
     pub fn length(&self) -> usize {
         use Addressing::*;
         match self {

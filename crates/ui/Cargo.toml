@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Nick Massey <nickmass@nickmass.com>"]
 
 [dependencies]
-nes = { path = "../nes" }
+nes = { path = "../nes", default-features = false }
 gilrs = "0.10.9"
 winit = "0.30.5"
 bytemuck = "1.18.0"
