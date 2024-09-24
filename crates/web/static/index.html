@@ -3,6 +3,10 @@
     <head>
         <meta name="robots" content="noindex, nofollow" />
         <title>mass-nes</title>
+        <link rel="modulepreload" href="pkg/web.js" />
+        <link rel="preload" href="pkg/web_bg.wasm" as="fetch" crossorigin />
+        <link rel="modulepreload" href="worker.js" />
+        <link rel="preload" href="roms/romlist.json" as="fetch" crossorigin />
         <script type="module">
             import init, { Emulator } from "./pkg/web.js";
 

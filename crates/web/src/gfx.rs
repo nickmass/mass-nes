@@ -1,32 +1,28 @@
-use futures::{
-    channel::mpsc::{Receiver, Sender},
-    StreamExt,
-};
+use futures::{channel::mpsc::Receiver, StreamExt};
 use web_sys::OffscreenCanvas;
 
 use ui::filters::Filter;
 
-use crate::worker::{GfxRequest, GfxResponse, GfxWorkerChannel};
-
-use super::gl;
+use crate::gfx_worker::{GfxBackBuffer, GfxRequest, GfxWorkerChannel};
+use crate::gl;
 
 pub struct Gfx<T> {
     filter: T,
     canvas: OffscreenCanvas,
     rx: Option<Receiver<GfxRequest>>,
-    tx: Sender<GfxResponse>,
     gl: gl::GlContext,
     screen: gl::GlModel<Vertex>,
     program: gl::GlProgram,
     size: (f64, f64),
     render_size: (u32, u32),
     resize_count: usize,
-    frame: Option<Vec<u16>>,
+    frame: Vec<u16>,
+    back_buffer: GfxBackBuffer,
 }
 
 impl<T: Filter> Gfx<T> {
     pub fn new(canvas: OffscreenCanvas, filter: T, channel: GfxWorkerChannel) -> Self {
-        let GfxWorkerChannel { tx, rx } = channel;
+        let GfxWorkerChannel { rx, back_buffer } = channel;
         let (width, height) = filter.dimensions();
         let size = (width as f64, height as f64);
         let render_size = (width, height);
@@ -64,10 +60,10 @@ impl<T: Filter> Gfx<T> {
         let screen = gl::GlModel::new(&gl, shape);
         let program = gl::GlProgram::new(&gl, filter.vertex_shader(), filter.fragment_shader());
 
+        let frame = vec![15; 256 * 240];
         Self {
             filter,
             canvas,
-            tx,
             rx: Some(rx),
             gl,
             screen,
@@ -75,7 +71,8 @@ impl<T: Filter> Gfx<T> {
             size,
             render_size,
             resize_count: 0,
-            frame: None,
+            frame,
+            back_buffer,
         }
     }
 
@@ -91,9 +88,12 @@ impl<T: Filter> Gfx<T> {
 
     fn handle_request(&mut self, request: GfxRequest) {
         match request {
-            GfxRequest::Frame(frame) => self.update_frame(frame),
             GfxRequest::Redraw => self.render(),
             GfxRequest::Resize(width, height) => self.resize((width, height)),
+            GfxRequest::Frame => {
+                self.back_buffer.swap(&mut self.frame);
+                self.render();
+            }
         }
     }
 
@@ -138,21 +138,13 @@ impl<T: Filter> Gfx<T> {
         self.size = (width, height);
     }
 
-    pub fn update_frame(&mut self, frame: Vec<u16>) {
-        self.frame = Some(frame);
-    }
-
     pub fn render(&mut self) {
-        let Some(screen) = self.frame.as_ref() else {
-            return;
-        };
-
         let (render_width, render_height) = self.render_size;
 
         let uniforms = self.filter.process(
             &self.gl,
             (render_width as f64, render_height as f64),
-            screen.as_ref(),
+            self.frame.as_ref(),
         );
 
         let (width, height) = (render_width as i32, render_height as i32);

@@ -1,12 +1,12 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, OutputCallbackInfo, Sample};
 
+use direct_ring_buffer::{create_ring_buffer, Consumer, Producer};
+
 use std::collections::VecDeque;
-use std::sync::mpsc::{channel, Receiver, Sender};
 
 pub trait Audio {
     fn sample_rate(&self) -> u32;
-    fn add_samples(&mut self, samples: Vec<i16>);
     fn play(&mut self);
 }
 
@@ -16,7 +16,6 @@ impl Audio for Null {
     fn sample_rate(&self) -> u32 {
         48000
     }
-    fn add_samples(&mut self, _samples: Vec<i16>) {}
 
     fn play(&mut self) {}
 }
@@ -69,7 +68,6 @@ pub struct CpalAudio<P: Parker> {
     _device: cpal::Device,
     stream: cpal::Stream,
     format: cpal::StreamConfig,
-    tx: Sender<Vec<i16>>,
     _marker: std::marker::PhantomData<P>,
 }
 
@@ -78,7 +76,7 @@ impl<P: Parker> CpalAudio<P> {
         parker: P,
         refresh_rate: f64,
         device_buffer: usize,
-    ) -> Result<(CpalAudio<P>, P), Error> {
+    ) -> Result<(CpalAudio<P>, P, SamplesProducer), Error> {
         let allowed_sample_rates = [
             cpal::SampleRate(48000),
             cpal::SampleRate(44100),
@@ -182,7 +180,7 @@ impl<P: Parker> CpalAudio<P> {
         };
         let channels = format.channels as usize;
 
-        let (tx, rx) = channel();
+        let (tx, rx) = create_ring_buffer(best_match.sample_rate.0 as usize);
         let samples = SamplesIterator::new(rx);
 
         let unparker = parker.unparker();
@@ -218,10 +216,10 @@ impl<P: Parker> CpalAudio<P> {
                 _device: device,
                 stream,
                 format,
-                tx,
                 _marker: Default::default(),
             },
             parker,
+            SamplesProducer { tx },
         ))
     }
 }
@@ -255,10 +253,6 @@ impl<P: Parker> Audio for CpalAudio<P> {
         rate
     }
 
-    fn add_samples(&mut self, samples: Vec<i16>) {
-        let _ = self.tx.send(samples).unwrap();
-    }
-
     fn play(&mut self) {
         let _ = self.stream.play();
     }
@@ -275,14 +269,14 @@ pub trait Unparker: Send + 'static {
 }
 
 struct SamplesIterator<T> {
-    rx: Receiver<Vec<T>>,
+    rx: Consumer<T>,
     buf: VecDeque<T>,
     pending_req: bool,
     last_sample: T,
 }
 
-impl<T: Default> SamplesIterator<T> {
-    fn new(rx: Receiver<Vec<T>>) -> SamplesIterator<T> {
+impl<T: Default + Copy> SamplesIterator<T> {
+    fn new(rx: Consumer<T>) -> SamplesIterator<T> {
         SamplesIterator {
             rx,
             buf: VecDeque::new(),
@@ -304,17 +298,38 @@ impl<T: Default> SamplesIterator<T> {
     }
 }
 
+pub struct SamplesProducer {
+    tx: Producer<i16>,
+}
+
+impl SamplesProducer {
+    pub fn add_samples(&mut self, samples: &[i16]) {
+        let mut total_count = 0;
+        self.tx.write_slices(
+            |buf, _offset| {
+                let to_write = (samples.len() - total_count).min(buf.len());
+                buf[..to_write].copy_from_slice(&samples[total_count..total_count + to_write]);
+                total_count += to_write;
+                to_write
+            },
+            Some(samples.len()),
+        );
+    }
+}
+
 impl<T: Copy> Iterator for SamplesIterator<T> {
     type Item = T;
 
     fn next(&mut self) -> Option<T> {
-        match self.rx.try_recv() {
-            Ok(r) => {
+        self.rx.read_slices(
+            |samples, _offset| {
+                self.buf.extend(samples);
                 self.pending_req = false;
-                self.buf.extend(r);
-            }
-            Err(_) => (),
-        }
+                samples.len()
+            },
+            None,
+        );
+
         if let Some(sample) = self.buf.pop_front() {
             self.last_sample = sample;
             Some(sample)
@@ -334,13 +349,6 @@ impl<P: Parker> Audio for AudioDevices<P> {
         match self {
             AudioDevices::Cpal(a) => a.sample_rate(),
             AudioDevices::Null(a) => a.sample_rate(),
-        }
-    }
-
-    fn add_samples(&mut self, samples: Vec<i16>) {
-        match self {
-            AudioDevices::Cpal(a) => a.add_samples(samples),
-            AudioDevices::Null(a) => a.add_samples(samples),
         }
     }
 

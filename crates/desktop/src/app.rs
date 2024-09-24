@@ -8,12 +8,11 @@ use ui::filters::Filter;
 use ui::gamepad::{GamepadEvent, GilrsInput};
 use ui::input::InputMap;
 
-use super::gfx::Gfx;
+use super::gfx::{Gfx, GfxBackBuffer};
 use super::sync::FrameSync;
 
-enum UserEvent {
-    Frame(Frame),
-    Samples(Samples),
+pub enum UserEvent {
+    Frame,
     Gamepad(GamepadEvent),
     Sync,
 }
@@ -24,10 +23,6 @@ impl From<GamepadEvent> for UserEvent {
     }
 }
 
-pub struct Frame(Vec<u16>);
-
-struct Samples(Vec<i16>);
-
 pub struct App<F, A, S> {
     audio: A,
     sync: Option<S>,
@@ -37,6 +32,7 @@ pub struct App<F, A, S> {
     event_loop: Option<winit::event_loop::EventLoop<UserEvent>>,
     input: InputMap,
     input_tx: Option<std::sync::mpsc::Sender<UserInput>>,
+    back_buffer: GfxBackBuffer,
 }
 
 impl<F: Filter, A: Audio, S: FrameSync> App<F, A, S> {
@@ -55,7 +51,9 @@ impl<F: Filter, A: Audio, S: FrameSync> App<F, A, S> {
             .with_title("Mass NES")
             .build(&event_loop);
 
-        let gfx = Gfx::new(display, filter);
+        let proxy = event_loop.create_proxy();
+        let back_buffer = GfxBackBuffer::new(proxy);
+        let gfx = Gfx::new(display, back_buffer.clone(), filter);
 
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
         window.set_cursor_visible(false);
@@ -67,6 +65,7 @@ impl<F: Filter, A: Audio, S: FrameSync> App<F, A, S> {
             sync: Some(sync),
             window,
             gfx,
+            back_buffer,
             event_loop: Some(event_loop),
             input: InputMap::new(),
             input_tx: None,
@@ -82,18 +81,16 @@ impl<F: Filter, A: Audio, S: FrameSync> App<F, A, S> {
         event_loop.create_proxy()
     }
 
-    pub fn nes_io(&mut self) -> (NesInputs, NesOutputs) {
-        let output = NesOutputs {
-            proxy: self.proxy(),
-        };
+    pub fn back_buffer(&self) -> GfxBackBuffer {
+        self.back_buffer.clone()
+    }
 
+    pub fn nes_io(&mut self) -> NesInputs {
         let (tx, rx) = std::sync::mpsc::channel();
 
         self.input_tx = Some(tx);
 
-        let input = NesInputs { rx };
-
-        (input, output)
+        NesInputs { rx }
     }
 
     pub fn run(mut self) -> ! {
@@ -121,6 +118,8 @@ impl<F: Filter, A: Audio, S: FrameSync> App<F, A, S> {
         let Some(event_loop) = self.event_loop.take() else {
             panic!("no event loop created");
         };
+
+        self.audio.play();
 
         let Err(err) = event_loop.run_app(&mut self) else {
             std::process::exit(0)
@@ -179,11 +178,10 @@ impl<F: Filter, A: Audio, S: FrameSync> winit::application::ApplicationHandler<U
 
     fn user_event(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop, event: UserEvent) {
         match event {
-            UserEvent::Frame(Frame(frame)) => {
-                self.gfx.update_frame(frame);
+            UserEvent::Frame => {
+                self.gfx.swap();
                 self.window.request_redraw();
             }
-            UserEvent::Samples(Samples(samples)) => self.audio.add_samples(samples),
             UserEvent::Sync => {
                 if let Some(tx) = self.input_tx.as_ref() {
                     let p1 = self.input.controller();
@@ -224,19 +222,5 @@ pub struct NesInputs {
 impl NesInputs {
     pub fn inputs(self) -> impl Iterator<Item = UserInput> {
         self.rx.into_iter()
-    }
-}
-
-pub struct NesOutputs {
-    proxy: winit::event_loop::EventLoopProxy<UserEvent>,
-}
-
-impl NesOutputs {
-    pub fn send_frame(&self, frame: Vec<u16>) {
-        let _ = self.proxy.send_event(UserEvent::Frame(Frame(frame)));
-    }
-
-    pub fn send_samples(&self, samples: Vec<i16>) {
-        let _ = self.proxy.send_event(UserEvent::Samples(Samples(samples)));
     }
 }

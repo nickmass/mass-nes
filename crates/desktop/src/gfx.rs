@@ -1,12 +1,15 @@
 use glium::glutin::surface::WindowSurface;
 use glium::texture::{ClientFormat, MipmapsOption, RawImage2d, Texture2d, UnsignedTexture2d};
 use glium::uniforms::{UniformValue, Uniforms};
+use glium::winit::event_loop::EventLoopProxy;
 use glium::{implement_vertex, Display, Program, Surface, VertexBuffer};
 
 use std::borrow::Cow;
+use std::sync::{Arc, Mutex};
 
 use ui::filters::{Filter, FilterContext, FilterUniforms, NesNtscSetup, TextureFormat};
 
+use crate::app::UserEvent;
 use crate::TracyExt;
 
 #[derive(Copy, Clone)]
@@ -24,12 +27,13 @@ pub struct Gfx<T> {
     program: Program,
     vertex_buffer: VertexBuffer<Vertex>,
     size: (f64, f64),
-    frame: Option<Vec<u16>>,
+    frame: Vec<u16>,
     tracy: Tracy,
+    back_buffer: GfxBackBuffer,
 }
 
 impl<T: Filter> Gfx<T> {
-    pub fn new(display: Display<WindowSurface>, filter: T) -> Self {
+    pub fn new(display: Display<WindowSurface>, back_buffer: GfxBackBuffer, filter: T) -> Self {
         let ver = display.get_opengl_version_string();
         let glsl = display.get_supported_glsl_version();
         let vendor = display.get_opengl_vendor_string();
@@ -91,7 +95,8 @@ impl<T: Filter> Gfx<T> {
             program,
             vertex_buffer,
             size,
-            frame: None,
+            back_buffer,
+            frame: vec![15; 240 * 256],
             tracy,
         }
     }
@@ -102,15 +107,12 @@ impl<T: Filter> Gfx<T> {
         self.size = size;
     }
 
-    pub fn update_frame(&mut self, frame: Vec<u16>) {
-        self.frame = Some(frame);
+    pub fn swap(&mut self) {
+        self.back_buffer.swap(&mut self.frame);
     }
 
     pub fn render(&mut self) {
-        let Some(screen) = self.frame.as_ref() else {
-            return;
-        };
-        let uniforms = self.filter.process(&self.display, self.size, screen);
+        let uniforms = self.filter.process(&self.display, self.size, &self.frame);
         let mut target = self.display.draw();
 
         let (filter_width, filter_height) = self.filter.dimensions();
@@ -163,7 +165,33 @@ impl<T: Filter> Gfx<T> {
             )
             .unwrap();
         target.finish().unwrap();
-        self.tracy.frame(screen);
+        self.tracy.frame(&self.frame);
+    }
+}
+
+#[derive(Clone)]
+pub struct GfxBackBuffer {
+    frame: Arc<Mutex<Vec<u16>>>,
+    tx: EventLoopProxy<UserEvent>,
+}
+
+impl GfxBackBuffer {
+    pub fn new(tx: EventLoopProxy<UserEvent>) -> Self {
+        let frame = Arc::new(Mutex::new(vec![0; 256 * 240]));
+        Self { frame, tx }
+    }
+
+    pub fn update<F: FnOnce(&mut [u16])>(&mut self, func: F) {
+        {
+            let mut frame = self.frame.lock().unwrap();
+            func(&mut frame);
+        }
+        let _ = self.tx.send_event(UserEvent::Frame);
+    }
+
+    pub fn swap(&self, other: &mut Vec<u16>) {
+        let mut frame = self.frame.lock().unwrap();
+        std::mem::swap(&mut *frame, other);
     }
 }
 

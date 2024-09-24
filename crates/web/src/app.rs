@@ -7,7 +7,7 @@ use winit::keyboard::PhysicalKey;
 use winit::platform::web::{EventLoopExtWebSys, WindowAttributesExtWebSys};
 use winit::window::{Window, WindowAttributes};
 
-use crate::worker::{GfxRequest, GfxWorker};
+use crate::gfx_worker::{GfxRequest, GfxWorker};
 
 use super::sync::FrameSync;
 
@@ -28,8 +28,6 @@ impl From<UserInput> for EmulatorInput {
 }
 
 pub enum UserEvent {
-    Frame(Frame),
-    Samples(Samples),
     Gamepad(GamepadEvent),
     Load(Vec<u8>),
     Sync,
@@ -40,10 +38,6 @@ impl From<GamepadEvent> for UserEvent {
         UserEvent::Gamepad(value)
     }
 }
-
-pub struct Frame(Vec<u16>);
-
-pub struct Samples(Vec<i16>);
 
 pub struct App<A, S> {
     audio: A,
@@ -92,18 +86,12 @@ impl<A: Audio + 'static, S: FrameSync + 'static> App<A, S> {
         event_loop.create_proxy()
     }
 
-    pub fn nes_io(&mut self) -> (NesInputs, NesOutputs) {
-        let output = NesOutputs {
-            proxy: self.proxy(),
-        };
-
+    pub fn nes_io(&mut self) -> NesInputs {
         let (tx, rx) = futures::channel::mpsc::channel(10);
 
         self.input_tx = Some(tx);
 
-        let input = NesInputs { rx };
-
-        (input, output)
+        NesInputs { rx }
     }
 
     pub fn run(mut self) {
@@ -177,11 +165,6 @@ impl<A: Audio, S: FrameSync> ApplicationHandler<UserEvent> for App<A, S> {
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
-            UserEvent::Frame(Frame(frame)) => {
-                let _ = self.gfx_worker.tx.try_send(GfxRequest::Frame(frame));
-                self.window.request_redraw();
-            }
-            UserEvent::Samples(Samples(samples)) => self.audio.add_samples(samples),
             UserEvent::Sync => {
                 if let Some(tx) = self.input_tx.as_mut() {
                     let p1 = self.input.controller();
@@ -234,19 +217,5 @@ pub struct NesInputs {
 impl NesInputs {
     pub fn inputs(self) -> impl Stream<Item = EmulatorInput> {
         self.rx
-    }
-}
-
-pub struct NesOutputs {
-    proxy: EventLoopProxy<UserEvent>,
-}
-
-impl NesOutputs {
-    pub fn send_frame(&self, frame: Vec<u16>) {
-        let _ = self.proxy.send_event(UserEvent::Frame(Frame(frame)));
-    }
-
-    pub fn send_samples(&self, samples: Vec<i16>) {
-        let _ = self.proxy.send_event(UserEvent::Samples(Samples(samples)));
     }
 }

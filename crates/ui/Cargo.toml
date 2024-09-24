@@ -12,6 +12,7 @@ bytemuck = "1.18.0"
 const_format = "0.2.33"
 nes-ntsc-rust = { path = "../nes-ntsc-rust" }
 tracing = "0.1.40"
+direct_ring_buffer = "0.2"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cpal = "0.15"
