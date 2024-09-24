@@ -1,10 +1,22 @@
-use futures::{channel::mpsc::Receiver, StreamExt};
+use futures::{
+    channel::mpsc::{Receiver, Sender},
+    SinkExt, StreamExt,
+};
 use web_sys::OffscreenCanvas;
+
+use std::sync::{Arc, Mutex};
 
 use ui::filters::Filter;
 
-use crate::gfx_worker::{GfxBackBuffer, GfxRequest, GfxWorkerChannel};
 use crate::gl;
+use crate::offscreen_gfx::OffscreenGfxSpawner;
+
+#[derive(Debug, Clone)]
+pub enum GfxRequest {
+    Frame,
+    Redraw,
+    Resize(u32, u32),
+}
 
 pub struct Gfx<T> {
     filter: T,
@@ -21,8 +33,8 @@ pub struct Gfx<T> {
 }
 
 impl<T: Filter> Gfx<T> {
-    pub fn new(canvas: OffscreenCanvas, filter: T, channel: GfxWorkerChannel) -> Self {
-        let GfxWorkerChannel { rx, back_buffer } = channel;
+    pub fn new(filter: T, channel: OffscreenGfxSpawner, canvas: OffscreenCanvas) -> Self {
+        let OffscreenGfxSpawner { rx, back_buffer } = channel;
         let (width, height) = filter.dimensions();
         let size = (width as f64, height as f64);
         let render_size = (width, height);
@@ -196,6 +208,32 @@ impl ui::filters::FilterUniforms<gl::GlContext> for gl::GlUniformCollection {
 
     fn add_texture(&mut self, name: &'static str, value: gl::GlTexture) {
         self.add(name, value);
+    }
+}
+
+#[derive(Clone)]
+pub struct GfxBackBuffer {
+    frame: Arc<Mutex<Vec<u16>>>,
+    tx: Sender<GfxRequest>,
+}
+
+impl GfxBackBuffer {
+    pub fn new(tx: Sender<GfxRequest>) -> Self {
+        let frame = Arc::new(Mutex::new(vec![0; 256 * 240]));
+        Self { frame, tx }
+    }
+
+    pub async fn update<F: FnOnce(&mut [u16])>(&mut self, func: F) {
+        {
+            let mut frame = self.frame.lock().unwrap();
+            func(&mut frame);
+        }
+        self.tx.send(GfxRequest::Frame).await.unwrap();
+    }
+
+    pub fn swap(&self, other: &mut Vec<u16>) {
+        let mut frame = self.frame.lock().unwrap();
+        std::mem::swap(&mut *frame, other);
     }
 }
 

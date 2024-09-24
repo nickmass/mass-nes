@@ -1,4 +1,5 @@
 use futures::Stream;
+use web_sys::wasm_bindgen::JsError;
 use web_sys::HtmlCanvasElement;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -8,9 +9,8 @@ use winit::keyboard::PhysicalKey;
 use winit::platform::web::{EventLoopExtWebSys, WindowAttributesExtWebSys};
 use winit::window::{Window, WindowAttributes};
 
-use crate::gfx_worker::{GfxRequest, GfxWorker};
-
-use super::sync::FrameSync;
+use crate::gfx::GfxRequest;
+use crate::offscreen_gfx::GfxWorker;
 
 use nes::UserInput;
 use ui::audio::Audio;
@@ -40,9 +40,8 @@ impl From<GamepadEvent> for UserEvent {
     }
 }
 
-pub struct App<A, S> {
+pub struct App<A> {
     audio: A,
-    sync: Option<S>,
     gamepad: Option<GilrsInput<UserEvent>>,
     canvas: HtmlCanvasElement,
     window: Option<Window>,
@@ -52,17 +51,20 @@ pub struct App<A, S> {
     gfx_worker: GfxWorker,
 }
 
-impl<A: Audio + 'static, S: FrameSync + 'static> App<A, S> {
-    pub fn new(gfx_worker: GfxWorker, audio: A, sync: S, canvas: HtmlCanvasElement) -> Self {
-        let event_loop = EventLoop::with_user_event().build().unwrap();
+impl<A: Audio + 'static> App<A> {
+    pub fn new(
+        gfx_worker: GfxWorker,
+        audio: A,
+        canvas: HtmlCanvasElement,
+    ) -> Result<Self, JsError> {
+        let event_loop = EventLoop::with_user_event().build()?;
 
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
 
-        let gamepad = GilrsInput::new(event_loop.create_proxy()).unwrap();
+        let gamepad = GilrsInput::new(event_loop.create_proxy())?;
 
-        Self {
+        Ok(Self {
             audio,
-            sync: Some(sync),
             canvas,
             window: None,
             event_loop: Some(event_loop),
@@ -70,7 +72,7 @@ impl<A: Audio + 'static, S: FrameSync + 'static> App<A, S> {
             input_tx: None,
             gamepad: Some(gamepad),
             gfx_worker,
-        }
+        })
     }
 
     pub fn proxy(&self) -> EventLoopProxy<UserEvent> {
@@ -90,13 +92,6 @@ impl<A: Audio + 'static, S: FrameSync + 'static> App<A, S> {
     }
 
     pub fn run(mut self) {
-        if let Some(sync) = self.sync.take() {
-            let sync_proxy = self.proxy();
-            wasm_bindgen_futures::spawn_local(sync_loop(sync, sync_proxy));
-        } else {
-            panic!("no frame sync provided");
-        }
-
         let Some(event_loop) = self.event_loop.take() else {
             panic!("no event loop created");
         };
@@ -115,7 +110,7 @@ impl<A: Audio + 'static, S: FrameSync + 'static> App<A, S> {
     }
 }
 
-impl<A, S> App<A, S> {
+impl<A> App<A> {
     fn request_redraw(&self) {
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
@@ -123,14 +118,7 @@ impl<A, S> App<A, S> {
     }
 }
 
-async fn sync_loop<S: FrameSync>(mut sync: S, proxy: EventLoopProxy<UserEvent>) {
-    loop {
-        sync.sync_frame().await;
-        let _ = proxy.send_event(UserEvent::Sync);
-    }
-}
-
-impl<A: Audio, S: FrameSync> ApplicationHandler<UserEvent> for App<A, S> {
+impl<A: Audio> ApplicationHandler<UserEvent> for App<A> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;

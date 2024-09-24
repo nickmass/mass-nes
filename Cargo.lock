@@ -2686,6 +2686,7 @@ dependencies = [
  "byteorder",
  "console_error_panic_hook",
  "cpal",
+ "crossbeam",
  "direct_ring_buffer",
  "futures",
  "gloo",

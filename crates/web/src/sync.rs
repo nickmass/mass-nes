@@ -1,29 +1,71 @@
-use futures::{Future, StreamExt};
-use gloo::timers::future::IntervalStream;
+use crossbeam::sync::{Parker, Unparker};
+use wasm_bindgen::prelude::*;
+use web_sys::{js_sys::Array, wasm_bindgen};
+use winit::event_loop::EventLoopProxy;
 
-pub struct NaiveSync {
-    timer: IntervalStream,
+use crate::{app::UserEvent, worker::WorkerSpawn};
+
+pub trait FrameSync {
+    fn sync_frame(&mut self);
 }
 
-#[allow(dead_code)]
-impl NaiveSync {
-    pub fn new(refresh_rate: f64) -> NaiveSync {
-        NaiveSync {
-            timer: IntervalStream::new(((1.0 / refresh_rate) * 1000.0) as u32),
+pub struct CpalSync {
+    parker: Parker,
+}
+
+impl CpalSync {
+    pub fn new() -> Self {
+        Self {
+            parker: Parker::new(),
         }
     }
+}
 
-    async fn wait(&mut self) {
-        self.timer.next().await.unwrap();
+impl ui::audio::Parker for CpalSync {
+    type Unparker = CpalUnparker;
+
+    fn unparker(&self) -> Self::Unparker {
+        CpalUnparker(self.parker.unparker().clone())
     }
 }
 
-impl FrameSync for NaiveSync {
-    fn sync_frame(&mut self) -> impl Future<Output = ()> {
-        self.wait()
+pub struct CpalUnparker(Unparker);
+
+impl ui::audio::Unparker for CpalUnparker {
+    fn unpark(&mut self) {
+        self.0.unpark()
     }
 }
 
-pub trait FrameSync: 'static {
-    fn sync_frame(&mut self) -> impl Future<Output = ()>;
+impl FrameSync for CpalSync {
+    fn sync_frame(&mut self) {
+        self.parker.park()
+    }
+}
+
+pub struct SyncSpawner<T> {
+    sync: T,
+    proxy: EventLoopProxy<UserEvent>,
+}
+
+impl<T> SyncSpawner<T> {
+    pub fn new(sync: T, proxy: EventLoopProxy<UserEvent>) -> Self {
+        Self { sync, proxy }
+    }
+}
+
+#[wasm_bindgen]
+pub async fn sync_worker(ptr: u32, transferables: Array) {
+    crate::worker::worker::<SyncSpawner<CpalSync>>(ptr, transferables).await
+}
+
+impl<T: FrameSync + Send + 'static> WorkerSpawn for SyncSpawner<T> {
+    const KIND: &'static str = "sync";
+
+    async fn run(mut self, _transferables: Array) {
+        loop {
+            self.sync.sync_frame();
+            let _ = self.proxy.send_event(UserEvent::Sync);
+        }
+    }
 }

@@ -1,26 +1,55 @@
 use futures::StreamExt;
 use web_sys::{
-    js_sys::{self, Object},
-    wasm_bindgen::{self, closure::Closure, prelude::*, JsCast, JsValue},
-    DedicatedWorkerGlobalScope, Worker, WorkerOptions,
+    js_sys::Array,
+    wasm_bindgen::{self, prelude::*},
 };
 
 use ui::audio::SamplesProducer;
 
 use crate::{
     app::{EmulatorInput, NesInputs},
-    gfx_worker::GfxBackBuffer,
+    gfx::GfxBackBuffer,
+    worker::WorkerSpawn,
 };
 
-#[wasm_bindgen]
-pub async fn worker_machine(channel: u32) {
-    let channel = unsafe { MachineWorkerChannel::from_raw(channel) };
-    let global: DedicatedWorkerGlobalScope = js_sys::global().dyn_into().unwrap();
-    global.post_message(&JsValue::TRUE).unwrap();
+pub struct MachineSpawner {
+    pub region: nes::Region,
+    pub sample_rate: u32,
+    back_buffer: GfxBackBuffer,
+    samples_producer: SamplesProducer,
+    nes_inputs: NesInputs,
+}
 
-    let machine = MachineRunner::new(*channel);
-    machine.run().await;
-    tracing::debug!("machine exit");
+impl MachineSpawner {
+    pub fn new(
+        region: nes::Region,
+        sample_rate: u32,
+        back_buffer: GfxBackBuffer,
+        samples_producer: SamplesProducer,
+        nes_inputs: NesInputs,
+    ) -> Self {
+        Self {
+            region,
+            sample_rate,
+            back_buffer,
+            samples_producer,
+            nes_inputs,
+        }
+    }
+}
+
+#[wasm_bindgen]
+pub async fn machine_worker(ptr: u32, transferables: Array) {
+    crate::worker::worker::<MachineSpawner>(ptr, transferables).await
+}
+
+impl WorkerSpawn for MachineSpawner {
+    const KIND: &'static str = "machine";
+
+    async fn run(self, _transferables: Array) {
+        let runner = MachineRunner::new(self);
+        runner.run().await;
+    }
 }
 
 struct MachineRunner {
@@ -35,8 +64,8 @@ struct MachineRunner {
 }
 
 impl MachineRunner {
-    fn new(channel: MachineWorkerChannel) -> Self {
-        let MachineWorkerChannel {
+    fn new(channel: MachineSpawner) -> Self {
+        let MachineSpawner {
             region,
             sample_rate,
             nes_inputs,
@@ -116,91 +145,5 @@ impl MachineRunner {
                 }
             }
         }
-    }
-}
-
-pub struct MachineWorker;
-
-impl MachineWorker {
-    pub async fn new(
-        nes_inputs: NesInputs,
-        back_buffer: GfxBackBuffer,
-        samples_producer: SamplesProducer,
-        region: nes::Region,
-        sample_rate: u32,
-    ) {
-        let opts = WorkerOptions::new();
-        opts.set_type(web_sys::WorkerType::Module);
-        let worker = Worker::new_with_options("worker.js", &opts).unwrap();
-
-        let (init_tx, init_rx) = futures::channel::oneshot::channel();
-        let on_message = Closure::once_into_js(move || {
-            init_tx.send(()).unwrap_throw();
-        });
-        worker.set_onmessage(Some(&on_message.as_ref().unchecked_ref()));
-
-        let channel = MachineWorkerChannel {
-            region,
-            sample_rate,
-            nes_inputs,
-            back_buffer,
-            samples_producer,
-        };
-
-        let init: JsValue = MachineWorkerInit::new(channel).into();
-        worker.post_message(&init).unwrap();
-        init_rx.await.unwrap();
-    }
-}
-
-pub struct MachineWorkerChannel {
-    pub region: nes::Region,
-    pub sample_rate: u32,
-    back_buffer: GfxBackBuffer,
-    samples_producer: SamplesProducer,
-    nes_inputs: NesInputs,
-}
-
-impl MachineWorkerChannel {
-    unsafe fn from_raw(raw: u32) -> Box<Self> {
-        Box::from_raw(raw as *mut _)
-    }
-}
-
-struct MachineWorkerInit {
-    memory: JsValue,
-    module: JsValue,
-    channel: u32,
-}
-
-impl MachineWorkerInit {
-    fn new(channel: MachineWorkerChannel) -> Self {
-        let channel = Box::new(channel);
-        let channel = Box::into_raw(channel) as u32;
-        Self {
-            memory: wasm_bindgen::memory(),
-            module: wasm_bindgen::module(),
-            channel,
-        }
-    }
-}
-
-impl Into<JsValue> for MachineWorkerInit {
-    fn into(self) -> JsValue {
-        let obj = Object::new();
-        let _ = js_sys::Reflect::set(
-            obj.as_ref(),
-            &JsValue::from_str("worker_type"),
-            &JsValue::from_str("machine"),
-        );
-        let _ = js_sys::Reflect::set(obj.as_ref(), &JsValue::from_str("memory"), &self.memory);
-        let _ = js_sys::Reflect::set(obj.as_ref(), &JsValue::from_str("module"), &self.module);
-        let _ = js_sys::Reflect::set(
-            obj.as_ref(),
-            &JsValue::from_str("channel"),
-            &JsValue::from_f64(self.channel as f64),
-        );
-
-        obj.into()
     }
 }

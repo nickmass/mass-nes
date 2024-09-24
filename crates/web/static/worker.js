@@ -1,4 +1,4 @@
-import init, { worker_gfx, worker_machine } from "./pkg/web.js";
+import init, { gfx_worker, machine_worker, sync_worker } from "./pkg/web.js";
 
 let finished = false;
 onmessage = async function (event) {
@@ -8,16 +8,27 @@ onmessage = async function (event) {
   }
   finished = true;
 
-  await init({ module: event.data.module, memory: event.data.memory });
-  switch (event.data.worker_type) {
-    case "gfx":
-      await worker_gfx(event.data.offscreen_canvas, event.data.channel);
-      break;
-    case "machine":
-      await worker_machine(event.data.channel);
-      break;
-    default:
-      console.log("invalid worker type");
-      break;
+  let { module, memory, ptr, transferables, worker_type } = event.data;
+
+  await init({ module, memory });
+  try {
+    switch (worker_type) {
+      case "gfx":
+        await gfx_worker(ptr, transferables);
+        break;
+      case "machine":
+        await machine_worker(ptr, transferables);
+        break;
+      case "sync":
+        await sync_worker(ptr, transferables);
+        break;
+      default:
+        throw new Error("invalid worker type");
+        break;
+    }
+  } catch (err) {
+    console.error(err);
+    postMessage(false);
+    throw err;
   }
 };

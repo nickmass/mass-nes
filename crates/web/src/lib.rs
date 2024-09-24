@@ -7,12 +7,12 @@ use nes::Region;
 use ui::audio::Audio;
 
 mod app;
-mod audio;
 mod gfx;
-mod gfx_worker;
 mod gl;
-mod machine_worker;
+mod offscreen_gfx;
+mod runner;
 mod sync;
+mod worker;
 
 use app::UserEvent;
 
@@ -34,38 +34,41 @@ pub struct Emulator {
 #[wasm_bindgen]
 impl Emulator {
     #[wasm_bindgen(constructor)]
-    pub async fn new(region: String, canvas: HtmlCanvasElement) -> Option<Emulator> {
+    pub async fn new(region: String, canvas: HtmlCanvasElement) -> Result<Emulator, JsError> {
         let region = region.to_lowercase();
         let region = match region.as_str() {
             "pal" => Region::Pal,
             "ntsc" | _ => Region::Ntsc,
         };
 
-        let sync = audio::CpalSync::new();
+        let sync = sync::CpalSync::new();
         let (audio, sync, samples_producer) =
-            ui::audio::CpalAudio::new(sync, region.refresh_rate(), 128).ok()?;
+            ui::audio::CpalAudio::new(sync, region.refresh_rate(), 128)?;
 
         let sample_rate = audio.sample_rate();
 
-        let gfx_worker = gfx_worker::GfxWorker::new(&canvas).await;
+        let gfx_worker = offscreen_gfx::GfxWorker::new(&canvas).await?;
         let back_buffer = gfx_worker.back_buffer.clone();
-        let mut app = app::App::new(gfx_worker, audio, sync, canvas);
+        let mut app = app::App::new(gfx_worker, audio, canvas)?;
+
+        let sync_spawner = sync::SyncSpawner::new(sync, app.proxy());
+        worker::spawn_worker(sync_spawner).await?;
 
         let nes_inputs = app.nes_io();
 
-        machine_worker::MachineWorker::new(
-            nes_inputs,
-            back_buffer,
-            samples_producer,
+        let machine_spawner = runner::MachineSpawner::new(
             region,
             sample_rate,
-        )
-        .await;
+            back_buffer,
+            samples_producer,
+            nes_inputs,
+        );
+        worker::spawn_worker(machine_spawner).await?;
 
         let proxy = app.proxy();
         app.run();
 
-        Some(Self { proxy })
+        Ok(Self { proxy })
     }
 
     fn load_rom_bytes(&self, bytes: Vec<u8>) {
