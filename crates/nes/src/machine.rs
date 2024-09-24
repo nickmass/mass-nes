@@ -11,7 +11,6 @@ use crate::region::Region;
 
 pub use crate::input::{Controller, InputDevice};
 
-use std::cell::Cell;
 use std::rc::Rc;
 
 #[derive(Debug, Copy, Clone)]
@@ -109,10 +108,10 @@ impl Machine {
 
             match tick_result {
                 TickResult::Read(addr) => {
-                    let value = self.cpu_bus.read(&self, addr);
+                    let value = self.read(addr);
                     self.cpu_pin_in.data = value;
                 }
-                TickResult::Write(addr, value) => self.cpu_bus.write(&self, addr, value),
+                TickResult::Write(addr, value) => self.write(addr, value),
                 // DMC Read holding bus
                 TickResult::Idle => {}
                 TickResult::DmcRead(value) => self.apu.dmc.dmc_read(value),
@@ -140,11 +139,43 @@ impl Machine {
         }
     }
 
+    fn read(&mut self, addr: u16) -> u8 {
+        let value = match self.cpu_bus.read_addr(addr) {
+            Some((addr, DeviceKind::CpuRam)) => self.cpu_mem.read(addr),
+            Some((addr, DeviceKind::Ppu)) => self.ppu.read(addr),
+            Some((addr, DeviceKind::Mapper)) => self.mapper.read(BusKind::Cpu, addr),
+            Some((addr, DeviceKind::Input)) => self.input.read(addr, self.cpu_bus.open_bus.get()),
+            Some((addr, DeviceKind::Apu)) => self.apu.read(addr),
+            None => self.cpu_bus.open_bus.get(),
+            _ => unimplemented!(),
+        };
+        self.cpu_bus.open_bus.set(value);
+
+        value
+    }
+
+    fn write(&mut self, addr: u16, value: u8) {
+        use crate::channel::Channel;
+        match self.cpu_bus.write_addr(addr) {
+            Some((addr, DeviceKind::CpuRam)) => self.cpu_mem.write(addr, value),
+            Some((addr, DeviceKind::Ppu)) => self.ppu.write(addr, value),
+            Some((addr, DeviceKind::Mapper)) => self.mapper.write(BusKind::Cpu, addr, value),
+            Some((addr, DeviceKind::Input)) => self.input.write(addr, value),
+            Some((addr, DeviceKind::Apu)) => self.apu.write(addr, value),
+            Some((addr, DeviceKind::PulseOne)) => self.apu.pulse_one.write(addr, value),
+            Some((addr, DeviceKind::PulseTwo)) => self.apu.pulse_two.write(addr, value),
+            Some((addr, DeviceKind::Noise)) => self.apu.noise.write(addr, value),
+            Some((addr, DeviceKind::Triangle)) => self.apu.triangle.write(addr, value),
+            Some((addr, DeviceKind::Dmc)) => self.apu.dmc.write(addr, value),
+            None => (),
+        }
+    }
+
     pub fn get_debug(&self) -> &Debug {
         &self.debug
     }
 
-    pub fn get_screen(&mut self) -> &[Cell<u16>] {
+    pub fn get_screen(&self) -> &[u16] {
         self.ppu.screen()
     }
 

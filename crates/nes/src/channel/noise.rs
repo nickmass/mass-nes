@@ -1,11 +1,14 @@
-use crate::apu::ApuState;
+use crate::apu::ApuSnapshot;
 use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
 
-use std::cell::RefCell;
+//Im not sure if these are in CPU clocks, or APU clocks.
+const RATES: &[u16] = &[
+    4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068,
+];
 
 #[derive(Default)]
-struct NoiseState {
+pub struct Noise {
     timer_counter: u16,
     length_counter: u8,
     enabled: bool,
@@ -18,7 +21,18 @@ struct NoiseState {
     forced_clock: bool,
 }
 
-impl NoiseState {
+impl Noise {
+    pub fn new() -> Noise {
+        Noise {
+            shifter: 1,
+            ..Default::default()
+        }
+    }
+
+    pub fn forced_clock(&mut self) {
+        self.forced_clock = true;
+    }
+
     fn length_load(&self) -> u8 {
         if !self.enabled {
             0
@@ -62,32 +76,7 @@ impl NoiseState {
     }
 
     fn timer_period(&self) -> u16 {
-        let rates = [
-            4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068,
-        ]; //Im not sure if these are in CPU clocks, or APU clocks.
-        rates[(self.regs[2] & 0xf) as usize]
-    }
-}
-
-pub struct Noise {
-    state: RefCell<NoiseState>,
-}
-
-impl Noise {
-    pub fn new() -> Noise {
-        let state = NoiseState {
-            shifter: 1,
-            ..Default::default()
-        };
-
-        Noise {
-            state: RefCell::new(state),
-        }
-    }
-
-    pub fn forced_clock(&self) {
-        let mut channel = self.state.borrow_mut();
-        channel.forced_clock = true;
+        RATES[(self.regs[2] & 0xf) as usize]
     }
 }
 
@@ -96,82 +85,74 @@ impl Channel for Noise {
         cpu.register_write(DeviceKind::Noise, AndEqualsAndMask(0xfffc, 0x400c, 0x3));
     }
 
-    fn write(&self, addr: u16, value: u8) {
-        let mut channel = self.state.borrow_mut();
-        channel.regs[addr as usize] = value;
+    fn write(&mut self, addr: u16, value: u8) {
+        self.regs[addr as usize] = value;
         match addr {
             0 => {}
             1 => {}
             2 => {}
             3 => {
-                channel.length_counter = channel.length_load();
-                channel.envelope_start = true;
+                self.length_counter = self.length_load();
+                self.envelope_start = true;
             }
             _ => unreachable!(),
         }
     }
 
-    fn tick(&self, state: &ApuState) -> u8 {
-        let mut channel = self.state.borrow_mut();
-        channel.current_tick += 1;
+    fn tick(&mut self, state: ApuSnapshot) -> u8 {
+        self.current_tick += 1;
 
-        if channel.current_tick & 1 == 0 {
-            if channel.timer_counter == 0 {
-                channel.timer_counter = channel.timer_period();
-                channel.clock_shifter();
+        if self.current_tick & 1 == 0 {
+            if self.timer_counter == 0 {
+                self.timer_counter = self.timer_period();
+                self.clock_shifter();
             } else {
-                channel.timer_counter -= 1;
+                self.timer_counter -= 1;
             }
         }
 
-        if state.is_quarter_frame() || channel.forced_clock {
-            if channel.envelope_start {
-                channel.envelope_start = false;
-                channel.decay_counter = 0xf;
-                channel.envelope_divider = channel.envelope_volume();
-            } else if channel.envelope_divider == 0 {
-                channel.envelope_divider = channel.envelope_volume();
-                if channel.decay_counter == 0 {
-                    if channel.halt() {
-                        channel.decay_counter = 0xf
+        if state.is_quarter_frame || self.forced_clock {
+            if self.envelope_start {
+                self.envelope_start = false;
+                self.decay_counter = 0xf;
+                self.envelope_divider = self.envelope_volume();
+            } else if self.envelope_divider == 0 {
+                self.envelope_divider = self.envelope_volume();
+                if self.decay_counter == 0 {
+                    if self.halt() {
+                        self.decay_counter = 0xf
                     }
                 } else {
-                    channel.decay_counter -= 1;
+                    self.decay_counter -= 1;
                 }
             } else {
-                channel.envelope_divider -= 1;
+                self.envelope_divider -= 1;
             }
         }
 
-        if (state.is_half_frame() || channel.forced_clock)
-            && channel.length_counter != 0
-            && !channel.halt()
-        {
-            channel.length_counter -= 1;
+        if (state.is_half_frame || self.forced_clock) && self.length_counter != 0 && !self.halt() {
+            self.length_counter -= 1;
         }
 
-        channel.forced_clock = false;
+        self.forced_clock = false;
 
-        if (channel.shifter & 1) == 1 || channel.length_counter == 0 {
+        if (self.shifter & 1) == 1 || self.length_counter == 0 {
             0
         } else {
-            channel.envelope_output()
+            self.envelope_output()
         }
     }
 
-    fn enable(&self) {
-        let mut channel = self.state.borrow_mut();
-        channel.enabled = true;
+    fn enable(&mut self) {
+        self.enabled = true;
     }
 
-    fn disable(&self) {
-        let mut channel = self.state.borrow_mut();
-        channel.enabled = false;
-        channel.length_counter = 0;
+    fn disable(&mut self) {
+        self.enabled = false;
+        self.length_counter = 0;
     }
 
     fn get_state(&self) -> bool {
-        let channel = self.state.borrow();
-        channel.length_counter > 0
+        self.length_counter > 0
     }
 }

@@ -1,8 +1,6 @@
-use crate::apu::ApuState;
+use crate::apu::ApuSnapshot;
 use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
-
-use std::cell::RefCell;
 
 #[derive(Copy, Clone)]
 pub enum PulseChannel {
@@ -17,7 +15,7 @@ impl Default for PulseChannel {
 }
 
 #[derive(Default)]
-struct PulseState {
+pub struct Pulse {
     channel: PulseChannel,
     period: u16,
     timer_counter: u16,
@@ -34,7 +32,18 @@ struct PulseState {
     forced_clock: bool,
 }
 
-impl PulseState {
+impl Pulse {
+    pub fn new(channel: PulseChannel) -> Pulse {
+        Pulse {
+            channel,
+            ..Default::default()
+        }
+    }
+
+    pub fn forced_clock(&mut self) {
+        self.forced_clock = true;
+    }
+
     fn timer_load(&self) -> u16 {
         (self.regs[2] as u16) | ((self.regs[3] as u16 & 7) << 8)
     }
@@ -138,30 +147,6 @@ impl PulseState {
     }
 }
 
-pub struct Pulse {
-    state: RefCell<PulseState>,
-    channel: PulseChannel,
-}
-
-impl Pulse {
-    pub fn new(channel: PulseChannel) -> Pulse {
-        let state = PulseState {
-            channel,
-            ..Default::default()
-        };
-
-        Pulse {
-            state: RefCell::new(state),
-            channel,
-        }
-    }
-
-    pub fn forced_clock(&self) {
-        let mut channel = self.state.borrow_mut();
-        channel.forced_clock = true;
-    }
-}
-
 impl Channel for Pulse {
     fn register(&self, cpu: &mut AddressBus) {
         match self.channel {
@@ -174,99 +159,94 @@ impl Channel for Pulse {
         }
     }
 
-    fn write(&self, addr: u16, value: u8) {
-        let mut channel = self.state.borrow_mut();
-        channel.regs[addr as usize] = value;
+    fn write(&mut self, addr: u16, value: u8) {
+        self.regs[addr as usize] = value;
         match addr {
             0 => {}
             1 => {
-                channel.sweep_reload = true;
+                self.sweep_reload = true;
             }
             2 => {
-                channel.period = channel.timer_load();
+                self.period = self.timer_load();
             }
             3 => {
-                channel.period = channel.timer_load();
-                channel.sequencer = 0;
-                channel.length_counter = channel.length_load();
-                channel.envelope_start = true;
+                self.period = self.timer_load();
+                self.sequencer = 0;
+                self.length_counter = self.length_load();
+                self.envelope_start = true;
             }
             _ => unreachable!(),
         }
     }
 
-    fn tick(&self, state: &ApuState) -> u8 {
-        let mut channel = self.state.borrow_mut();
-        channel.current_tick += 1;
+    fn tick(&mut self, state: ApuSnapshot) -> u8 {
+        self.current_tick += 1;
 
-        if channel.current_tick & 1 == 0 {
-            if channel.timer_counter == 0 {
-                channel.timer_counter = channel.period;
-                channel.sequencer = channel.sequencer.wrapping_add(1);
+        if self.current_tick & 1 == 0 {
+            if self.timer_counter == 0 {
+                self.timer_counter = self.period;
+                self.sequencer = self.sequencer.wrapping_add(1);
             } else {
-                channel.timer_counter -= 1;
+                self.timer_counter -= 1;
             }
         }
 
-        if state.is_quarter_frame() || channel.forced_clock {
-            if channel.envelope_start {
-                channel.envelope_start = false;
-                channel.decay_counter = 0xf;
-                channel.envelope_divider = channel.envelope_volume();
-            } else if channel.envelope_divider == 0 {
-                channel.envelope_divider = channel.envelope_volume();
-                if channel.decay_counter == 0 {
-                    if channel.halt() {
-                        channel.decay_counter = 0xf
+        if state.is_quarter_frame || self.forced_clock {
+            if self.envelope_start {
+                self.envelope_start = false;
+                self.decay_counter = 0xf;
+                self.envelope_divider = self.envelope_volume();
+            } else if self.envelope_divider == 0 {
+                self.envelope_divider = self.envelope_volume();
+                if self.decay_counter == 0 {
+                    if self.halt() {
+                        self.decay_counter = 0xf
                     }
                 } else {
-                    channel.decay_counter -= 1;
+                    self.decay_counter -= 1;
                 }
             } else {
-                channel.envelope_divider -= 1;
+                self.envelope_divider -= 1;
             }
         }
 
-        if state.is_half_frame() || channel.forced_clock {
-            if channel.length_counter != 0 && !channel.halt() {
-                channel.length_counter -= 1;
+        if state.is_half_frame || self.forced_clock {
+            if self.length_counter != 0 && !self.halt() {
+                self.length_counter -= 1;
             }
 
-            if channel.sweep_reload {
-                if channel.sweep_divider == 0 {
-                    channel.period = channel.sweep_timer();
+            if self.sweep_reload {
+                if self.sweep_divider == 0 {
+                    self.period = self.sweep_timer();
                 }
-                channel.sweep_divider = channel.sweep_load();
-                channel.sweep_reload = false;
-            } else if channel.sweep_divider != 0 {
-                channel.sweep_divider -= 1;
+                self.sweep_divider = self.sweep_load();
+                self.sweep_reload = false;
+            } else if self.sweep_divider != 0 {
+                self.sweep_divider -= 1;
             } else {
-                channel.period = channel.sweep_timer();
-                channel.sweep_divider = channel.sweep_load();
+                self.period = self.sweep_timer();
+                self.sweep_divider = self.sweep_load();
             }
         }
 
-        channel.forced_clock = false;
-        if !channel.duty() || channel.length_counter == 0 || channel.timer_counter < 8 {
+        self.forced_clock = false;
+        if !self.duty() || self.length_counter == 0 || self.timer_counter < 8 {
             0
         } else {
-            channel.sweep_output()
+            self.sweep_output()
         }
     }
 
-    fn enable(&self) {
-        let mut channel = self.state.borrow_mut();
-        channel.enabled = true;
+    fn enable(&mut self) {
+        self.enabled = true;
     }
 
-    fn disable(&self) {
-        let mut channel = self.state.borrow_mut();
-        channel.enabled = false;
-        channel.length_counter = 0;
+    fn disable(&mut self) {
+        self.enabled = false;
+        self.length_counter = 0;
     }
 
     fn get_state(&self) -> bool {
-        let channel = self.state.borrow();
-        channel.length_counter > 0
+        self.length_counter > 0
     }
 }

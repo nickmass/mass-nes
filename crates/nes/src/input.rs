@@ -1,14 +1,4 @@
-use std::cell::RefCell;
-
 use crate::bus::{Address, AddressBus, DeviceKind};
-
-#[derive(Default)]
-pub struct InputState {
-    read_counter: u32,
-    read_shifter: u8,
-    input_buffer: u8,
-    input: u8,
-}
 
 pub trait InputDevice {
     fn to_byte(&self) -> u8;
@@ -73,14 +63,18 @@ impl InputDevice for Controller {
     }
 }
 
+#[derive(Default)]
 pub struct Input {
-    state: RefCell<InputState>,
+    read_counter: u32,
+    read_shifter: u8,
+    input_buffer: u8,
+    input: u8,
 }
 
 impl Input {
     pub fn new() -> Input {
         Input {
-            state: RefCell::new(InputState::default()),
+            ..Default::default()
         }
     }
 
@@ -91,13 +85,12 @@ impl Input {
     }
 
     pub fn peek(&self, addr: u16, open_bus: u8) -> u8 {
-        let state = self.state.borrow();
         let value = match addr {
             0x4016 => {
-                if state.read_counter == 0 {
+                if self.read_counter == 0 {
                     0x01
                 } else {
-                    state.read_shifter & 1
+                    self.read_shifter & 1
                 }
             }
             0x4017 => 0x00,
@@ -107,16 +100,15 @@ impl Input {
         value | (open_bus & 0xe0)
     }
 
-    pub fn read(&self, addr: u16, open_bus: u8) -> u8 {
-        let mut state = self.state.borrow_mut();
+    pub fn read(&mut self, addr: u16, open_bus: u8) -> u8 {
         let value = match addr {
             0x4016 => {
-                if state.read_counter == 0 {
+                if self.read_counter == 0 {
                     0x01
                 } else {
-                    let value = state.read_shifter & 1;
-                    state.read_shifter >>= 1;
-                    state.read_counter -= 1;
+                    let value = self.read_shifter & 1;
+                    self.read_shifter >>= 1;
+                    self.read_counter -= 1;
                     value
                 }
             }
@@ -127,15 +119,14 @@ impl Input {
         value | (open_bus & 0xe0)
     }
 
-    pub fn write(&self, addr: u16, value: u8) {
-        let mut state = self.state.borrow_mut();
+    pub fn write(&mut self, addr: u16, value: u8) {
         match addr {
             0x4016 => {
                 if value & 0x01 == 1 {
-                    state.input_buffer = state.input;
+                    self.input_buffer = self.input;
                 } else {
-                    state.read_shifter = state.input_buffer;
-                    state.read_counter = 8;
+                    self.read_shifter = self.input_buffer;
+                    self.read_counter = 8;
                 }
             }
             _ => unimplemented!(),
@@ -143,7 +134,6 @@ impl Input {
     }
 
     pub fn set_input(&mut self, input: u8) {
-        let mut state = self.state.borrow_mut();
-        state.input = input;
+        self.input = input;
     }
 }

@@ -1,4 +1,3 @@
-use crate::channel::Channel;
 use crate::Machine;
 
 #[derive(Debug, Clone, Copy)]
@@ -13,8 +12,6 @@ pub enum DeviceKind {
     Ppu,
     Mapper,
     Input,
-    Expansion,
-    Debug,
     Apu,
     PulseOne,
     PulseTwo,
@@ -55,11 +52,11 @@ pub struct AddressBus {
     kind: BusKind,
     block_size: u16,
     mask: u16,
-    open_bus: std::cell::Cell<u8>,
+    pub(crate) open_bus: std::cell::Cell<u8>,
 }
 
 impl AddressBus {
-    pub fn new(kind: BusKind, block_size: u32, mask: u16) -> AddressBus {
+    pub(crate) fn new(kind: BusKind, block_size: u32, mask: u16) -> AddressBus {
         AddressBus {
             read_mapping: DeviceMapping::new(),
             write_mapping: DeviceMapping::new(),
@@ -70,14 +67,14 @@ impl AddressBus {
         }
     }
 
-    pub fn register_read<T>(&mut self, device: DeviceKind, addr_val: T)
+    pub(crate) fn register_read<T>(&mut self, device: DeviceKind, addr_val: T)
     where
         T: Into<MappingFn>,
     {
         self.read_mapping.insert(addr_val, device);
     }
 
-    pub fn register_write<T>(&mut self, device: DeviceKind, addr_val: T)
+    pub(crate) fn register_write<T>(&mut self, device: DeviceKind, addr_val: T)
     where
         T: Into<MappingFn>,
     {
@@ -98,48 +95,18 @@ impl AddressBus {
         }
     }
 
-    pub fn read(&self, system: &Machine, addr: u16) -> u8 {
+    pub(crate) fn read_addr(&self, addr: u16) -> Option<(u16, DeviceKind)> {
         let addr = (addr & !(self.block_size - 1)) & self.mask;
-        let mapping = self.read_mapping.map(addr);
-        let value = match mapping {
-            Some((addr, DeviceKind::CpuRam)) => system.cpu_mem.read(addr),
-            Some((addr, DeviceKind::Ppu)) => system.ppu.read(addr),
-            Some((addr, DeviceKind::Mapper)) => system.mapper.read(self.kind, addr),
-            Some((addr, DeviceKind::Input)) => system.input.read(addr, self.open_bus.get()),
-            Some((addr, DeviceKind::Apu)) => system.apu.read(addr),
-            None => self.open_bus.get(),
-            _ => unimplemented!(),
-        };
-
-        self.open_bus.set(value);
-        value
+        self.read_mapping.map(addr)
     }
 
-    pub fn write(&self, system: &Machine, addr: u16, value: u8) {
+    pub(crate) fn write_addr(&self, addr: u16) -> Option<(u16, DeviceKind)> {
         let addr = (addr & !(self.block_size - 1)) & self.mask;
-        let mapping = self.write_mapping.map(addr);
-        match mapping {
-            Some((addr, DeviceKind::CpuRam)) => system.cpu_mem.write(addr, value),
-            Some((addr, DeviceKind::Ppu)) => system.ppu.write(addr, value),
-            Some((addr, DeviceKind::Mapper)) => system.mapper.write(self.kind, addr, value),
-            Some((addr, DeviceKind::Input)) => system.input.write(addr, value),
-            Some((addr, DeviceKind::Apu)) => system.apu.write(addr, value),
-            Some((addr, DeviceKind::PulseOne)) => system.apu.pulse_one.write(addr, value),
-            Some((addr, DeviceKind::PulseTwo)) => system.apu.pulse_two.write(addr, value),
-            Some((addr, DeviceKind::Noise)) => system.apu.noise.write(addr, value),
-            Some((addr, DeviceKind::Triangle)) => system.apu.triangle.write(addr, value),
-            Some((addr, DeviceKind::Dmc)) => system.apu.dmc.write(addr, value),
-            None => (),
-            _ => unimplemented!(),
-        }
+        self.write_mapping.map(addr)
     }
 
     pub fn peek_word(&self, system: &Machine, addr: u16) -> u16 {
         (self.peek(system, addr) as u16) | (self.peek(system, addr + 1) as u16) << 8
-    }
-
-    pub fn read_word(&self, system: &Machine, addr: u16) -> u16 {
-        (self.read(system, addr) as u16) | (self.read(system, addr + 1) as u16) << 8
     }
 }
 

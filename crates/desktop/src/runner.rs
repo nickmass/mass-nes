@@ -81,9 +81,7 @@ impl Runner {
     #[instrument(skip_all)]
     fn update_frame(&mut self) {
         self.back_buffer.update(|frame| {
-            for (a, b) in frame.iter_mut().zip(self.machine.get_screen()) {
-                *a = b.get();
-            }
+            frame.copy_from_slice(self.machine.get_screen());
         });
     }
 }

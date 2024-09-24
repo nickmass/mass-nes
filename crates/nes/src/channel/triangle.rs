@@ -1,11 +1,9 @@
-use crate::apu::ApuState;
+use crate::apu::ApuSnapshot;
 use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
 
-use std::cell::RefCell;
-
 #[derive(Default)]
-struct TriangleState {
+pub struct Triangle {
     timer_counter: u16,
     linear_counter: u8,
     linear_reload: bool,
@@ -17,7 +15,17 @@ struct TriangleState {
     forced_clock: bool,
 }
 
-impl TriangleState {
+impl Triangle {
+    pub fn new() -> Triangle {
+        Triangle {
+            ..Default::default()
+        }
+    }
+
+    pub fn forced_clock(&mut self) {
+        self.forced_clock = true;
+    }
+
     fn timer_load(&self) -> u16 {
         (self.regs[2] as u16) | ((self.regs[3] as u16 & 7) << 8)
     }
@@ -48,96 +56,67 @@ impl TriangleState {
     }
 }
 
-pub struct Triangle {
-    state: RefCell<TriangleState>,
-}
-
-impl Triangle {
-    pub fn new() -> Triangle {
-        let state = TriangleState {
-            ..Default::default()
-        };
-
-        Triangle {
-            state: RefCell::new(state),
-        }
-    }
-
-    pub fn forced_clock(&self) {
-        let mut channel = self.state.borrow_mut();
-        channel.forced_clock = true;
-    }
-}
-
 impl Channel for Triangle {
     fn register(&self, cpu: &mut AddressBus) {
         cpu.register_write(DeviceKind::Triangle, AndEqualsAndMask(0xfffc, 0x4008, 0x3));
     }
 
-    fn write(&self, addr: u16, value: u8) {
-        let mut channel = self.state.borrow_mut();
-        channel.regs[addr as usize] = value;
+    fn write(&mut self, addr: u16, value: u8) {
+        self.regs[addr as usize] = value;
         match addr {
             0 => {}
             1 => {}
             2 => {}
             3 => {
-                channel.length_counter = channel.length_load();
-                channel.linear_reload = true;
+                self.length_counter = self.length_load();
+                self.linear_reload = true;
             }
             _ => unreachable!(),
         }
     }
 
-    fn tick(&self, state: &ApuState) -> u8 {
-        let mut channel = self.state.borrow_mut();
-        channel.current_tick += 1;
+    fn tick(&mut self, state: ApuSnapshot) -> u8 {
+        self.current_tick += 1;
 
-        if channel.timer_counter == 0 {
-            channel.timer_counter = channel.timer_load();
-            if channel.length_counter != 0 && channel.linear_counter != 0 {
-                channel.sequencer = channel.sequencer.wrapping_add(1);
+        if self.timer_counter == 0 {
+            self.timer_counter = self.timer_load();
+            if self.length_counter != 0 && self.linear_counter != 0 {
+                self.sequencer = self.sequencer.wrapping_add(1);
             }
         } else {
-            channel.timer_counter -= 1;
+            self.timer_counter -= 1;
         }
 
-        if (state.is_quarter_frame() || channel.forced_clock) && channel.current_tick & 1 == 0 {
-            if channel.linear_reload {
-                channel.linear_counter = channel.linear_load();
-            } else if channel.linear_counter != 0 {
-                channel.linear_counter -= 1;
+        if (state.is_quarter_frame || self.forced_clock) && self.current_tick & 1 == 0 {
+            if self.linear_reload {
+                self.linear_counter = self.linear_load();
+            } else if self.linear_counter != 0 {
+                self.linear_counter -= 1;
             }
-            if !channel.halt() {
-                channel.linear_reload = false;
+            if !self.halt() {
+                self.linear_reload = false;
             }
         }
 
-        if (state.is_half_frame() || channel.forced_clock)
-            && channel.length_counter != 0
-            && !channel.halt()
-        {
-            channel.length_counter -= 1;
+        if (state.is_half_frame || self.forced_clock) && self.length_counter != 0 && !self.halt() {
+            self.length_counter -= 1;
         }
 
-        channel.forced_clock = false;
+        self.forced_clock = false;
 
-        channel.sequence()
+        self.sequence()
     }
 
-    fn enable(&self) {
-        let mut channel = self.state.borrow_mut();
-        channel.enabled = true;
+    fn enable(&mut self) {
+        self.enabled = true;
     }
 
-    fn disable(&self) {
-        let mut channel = self.state.borrow_mut();
-        channel.enabled = false;
-        channel.length_counter = 0;
+    fn disable(&mut self) {
+        self.enabled = false;
+        self.length_counter = 0;
     }
 
     fn get_state(&self) -> bool {
-        let channel = self.state.borrow();
-        channel.length_counter > 0
+        self.length_counter > 0
     }
 }

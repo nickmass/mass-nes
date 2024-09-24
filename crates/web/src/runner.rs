@@ -137,9 +137,7 @@ impl MachineRunner {
 
                     self.back_buffer
                         .update(|frame| {
-                            for (a, b) in frame.iter_mut().zip(machine.get_screen()) {
-                                *a = b.get();
-                            }
+                            frame.copy_from_slice(machine.get_screen());
                         })
                         .await;
                 }
