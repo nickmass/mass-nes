@@ -4,6 +4,7 @@ use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::keyboard::PhysicalKey;
+#[cfg(target_arch = "wasm32")]
 use winit::platform::web::{EventLoopExtWebSys, WindowAttributesExtWebSys};
 use winit::window::{Window, WindowAttributes};
 
@@ -43,7 +44,8 @@ pub struct App<A, S> {
     audio: A,
     sync: Option<S>,
     gamepad: Option<GilrsInput<UserEvent>>,
-    window: Window,
+    canvas: HtmlCanvasElement,
+    window: Option<Window>,
     event_loop: Option<EventLoop<UserEvent>>,
     input: InputMap,
     input_tx: Option<futures::channel::mpsc::Sender<EmulatorInput>>,
@@ -54,14 +56,6 @@ impl<A: Audio + 'static, S: FrameSync + 'static> App<A, S> {
     pub fn new(gfx_worker: GfxWorker, audio: A, sync: S, canvas: HtmlCanvasElement) -> Self {
         let event_loop = EventLoop::with_user_event().build().unwrap();
 
-        let window = event_loop
-            .create_window(
-                WindowAttributes::default()
-                    .with_prevent_default(true)
-                    .with_canvas(Some(canvas.clone())),
-            )
-            .unwrap();
-
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
 
         let gamepad = GilrsInput::new(event_loop.create_proxy()).unwrap();
@@ -69,7 +63,8 @@ impl<A: Audio + 'static, S: FrameSync + 'static> App<A, S> {
         Self {
             audio,
             sync: Some(sync),
-            window,
+            canvas,
+            window: None,
             event_loop: Some(event_loop),
             input: InputMap::new(),
             input_tx: None,
@@ -106,7 +101,25 @@ impl<A: Audio + 'static, S: FrameSync + 'static> App<A, S> {
             panic!("no event loop created");
         };
 
+        self.run_loop(event_loop)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn run_loop(self, event_loop: EventLoop<UserEvent>) {
         event_loop.spawn_app(self);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn run_loop(self, _event_loop: EventLoop<UserEvent>) {
+        panic!("unsupported platform")
+    }
+}
+
+impl<A, S> App<A, S> {
+    fn request_redraw(&self) {
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
     }
 }
 
@@ -118,7 +131,14 @@ async fn sync_loop<S: FrameSync>(mut sync: S, proxy: EventLoopProxy<UserEvent>) 
 }
 
 impl<A: Audio, S: FrameSync> ApplicationHandler<UserEvent> for App<A, S> {
-    fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.window.is_some() {
+            return;
+        }
+        self.window = event_loop
+            .create_window(window_attributes(self.canvas.clone()))
+            .ok();
+    }
 
     fn window_event(
         &mut self,
@@ -130,7 +150,7 @@ impl<A: Audio, S: FrameSync> ApplicationHandler<UserEvent> for App<A, S> {
             WindowEvent::Resized(size) => {
                 let (x, y) = size.into();
                 let _ = self.gfx_worker.tx.try_send(GfxRequest::Resize(x, y));
-                self.window.request_redraw();
+                self.request_redraw();
             }
             WindowEvent::CloseRequested => {
                 event_loop.exit();
@@ -152,12 +172,10 @@ impl<A: Audio, S: FrameSync> ApplicationHandler<UserEvent> for App<A, S> {
                 scale_factor: _,
                 inner_size_writer: _,
             } => {
-                self.window.request_redraw();
+                self.request_redraw();
             }
             WindowEvent::RedrawRequested => {
-                if self.window.is_visible() != Some(false) {
-                    let _ = self.gfx_worker.tx.try_send(GfxRequest::Redraw);
-                }
+                let _ = self.gfx_worker.tx.try_send(GfxRequest::Redraw);
             }
             _ => (),
         }
@@ -208,6 +226,18 @@ impl<A: Audio, S: FrameSync> ApplicationHandler<UserEvent> for App<A, S> {
             gamepad.poll();
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn window_attributes(canvas: HtmlCanvasElement) -> WindowAttributes {
+    WindowAttributes::default()
+        .with_prevent_default(true)
+        .with_canvas(Some(canvas))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn window_attributes(_canvas: HtmlCanvasElement) -> WindowAttributes {
+    WindowAttributes::default()
 }
 
 pub struct NesInputs {

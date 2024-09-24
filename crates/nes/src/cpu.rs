@@ -7,7 +7,6 @@ use std::rc::Rc;
 pub struct CpuPinIn {
     pub data: u8,
     pub irq: bool,
-    pub nmi: bool,
     pub reset: bool,
     pub power: bool,
     pub dmc_req: Option<u16>,
