@@ -1,3 +1,5 @@
+use nes_traits::SaveState;
+
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::{CartMirroring, Cartridge};
 use crate::mapper::Mapper;
@@ -7,6 +9,7 @@ use std::cell::RefCell;
 
 use super::{Nametable, SimpleMirroring};
 
+#[derive(SaveState)]
 pub struct TxromState {
     current_tick: u64,
     last_a12_tick: u64,
@@ -111,8 +114,11 @@ impl TxromState {
     }
 }
 
+#[derive(SaveState)]
 pub struct Txrom {
+    #[save(skip)]
     cartridge: Cartridge,
+    #[save(nested)]
     state: RefCell<TxromState>,
     mirroring: SimpleMirroring,
 }

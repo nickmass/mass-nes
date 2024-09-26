@@ -1,9 +1,15 @@
+use std::collections::VecDeque;
+
 use blip_buf_rs::Blip;
 use nes::{Cartridge, Machine, Region, UserInput};
 use tracing::instrument;
 use ui::audio::SamplesProducer;
 
-use crate::{app::NesInputs, gfx::GfxBackBuffer, TracyExt};
+use crate::{
+    app::{EmulatorInput, NesInputs},
+    gfx::GfxBackBuffer,
+    TracyExt,
+};
 
 pub struct Runner {
     machine: Machine,
@@ -13,6 +19,9 @@ pub struct Runner {
     blip: Blip,
     blip_delta: i32,
     audio_buffer: Vec<i16>,
+    save_states: Vec<Option<(usize, nes::SaveData)>>,
+    save_store: SaveStore,
+    frame: usize,
 }
 
 impl Runner {
@@ -39,6 +48,9 @@ impl Runner {
             blip,
             blip_delta: 0,
             audio_buffer: vec![0; 1024],
+            save_states: vec![None; 10],
+            save_store: SaveStore::new(32000, 5),
+            frame: 0,
         }
     }
 
@@ -48,13 +60,36 @@ impl Runner {
         };
 
         for input in inputs.inputs() {
-            self.handle_input(input)
+            match input {
+                EmulatorInput::Nes(input) => self.handle_input(input),
+                EmulatorInput::SaveState(slot) => {
+                    let data = self.machine.save_state();
+
+                    self.save_states[slot as usize] = Some((self.frame, data));
+                }
+                EmulatorInput::RestoreState(slot) => {
+                    if let Some((frame, data)) = self.save_states[slot as usize].as_ref() {
+                        self.frame = *frame;
+                        self.machine.restore_state(data);
+                    }
+                }
+                EmulatorInput::Rewind => {
+                    if let Some((frame, data)) = self.save_store.pop() {
+                        self.frame = frame;
+                        self.machine.restore_state(&data);
+                    }
+                }
+            }
         }
     }
 
     fn handle_input(&mut self, input: UserInput) {
         self.machine.handle_input(input);
         self.machine.run();
+
+        self.frame += 1;
+        self.save_store
+            .push(self.frame, || self.machine.save_state());
 
         self.update_audio();
         self.update_frame();
@@ -105,10 +140,44 @@ fn instrument_machine(machine: Machine) -> Machine {
                 client.plot_int(c"vblank", ppu.vblank as i64);
                 vblank = ppu.vblank;
             }
-            if nmi != ppu.triggered_nmi {
-                client.plot_int(c"nmi", ppu.triggered_nmi as i64);
-                nmi = ppu.triggered_nmi;
+            if nmi != ppu.nmi {
+                client.plot_int(c"nmi", ppu.nmi as i64);
+                nmi = ppu.nmi;
             }
         }
     })
+}
+
+struct SaveStore {
+    limit: usize,
+    freq: usize,
+    saves: VecDeque<(usize, nes::SaveData)>,
+}
+
+impl SaveStore {
+    fn new(limit: usize, freq: usize) -> Self {
+        Self {
+            limit,
+            freq,
+            saves: VecDeque::new(),
+        }
+    }
+
+    fn pop(&mut self) -> Option<(usize, nes::SaveData)> {
+        self.saves.pop_back()
+    }
+
+    fn push<F: FnOnce() -> nes::SaveData>(&mut self, frame: usize, func: F) {
+        if frame % self.freq != 0 {
+            return;
+        }
+
+        let data = func();
+
+        if self.saves.len() == self.limit {
+            self.saves.pop_front();
+        }
+
+        self.saves.push_back((frame, data));
+    }
 }

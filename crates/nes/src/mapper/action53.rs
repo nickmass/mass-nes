@@ -1,3 +1,5 @@
+use nes_traits::SaveState;
+
 use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind, RangeAndMask};
 use crate::cartridge::Cartridge;
 use crate::mapper::Mapper;
@@ -7,6 +9,7 @@ use std::cell::RefCell;
 
 use super::SimpleMirroring;
 
+#[derive(SaveState)]
 pub struct Action53State {
     prg: MappedMemory,
     chr: MappedMemory,
@@ -104,8 +107,11 @@ impl Action53State {
     }
 }
 
+#[derive(SaveState)]
 pub struct Action53 {
+    #[save(skip)]
     cartridge: Cartridge,
+    #[save(nested)]
     state: RefCell<Action53State>,
 }
 

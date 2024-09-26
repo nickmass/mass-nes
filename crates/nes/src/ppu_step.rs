@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 use crate::region::Region;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum BackgroundStep {
     VertReset,
     HorzReset,
@@ -13,7 +15,7 @@ pub enum BackgroundStep {
     HighPattern,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum SpriteStep {
     Clear,
     Eval,
@@ -24,16 +26,14 @@ pub enum SpriteStep {
     BackgroundWait,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum StateChange {
     SkippedTick,
-    SetNmi,
     SetVblank,
     ClearVblank,
-    ClearFlags,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct PpuStep {
     pub background: Option<BackgroundStep>,
     pub sprite: Option<SpriteStep>,
@@ -42,6 +42,7 @@ pub struct PpuStep {
     pub dot: u32,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PpuSteps {
     index: usize,
     steps: Vec<PpuStep>,
@@ -75,12 +76,8 @@ pub fn generate_steps(region: Region) -> PpuSteps {
     loop {
         let state = if scanline == prerender && dot == 1 {
             Some(StateChange::ClearVblank)
-        } else if scanline == prerender - 1 && dot == 340 {
-            Some(StateChange::ClearFlags)
         } else if scanline == prerender && dot == 340 && skip {
             Some(StateChange::SkippedTick)
-        } else if dot == 0 && scanline == vblank + 1 {
-            Some(StateChange::SetNmi)
         } else if dot == 1 && scanline == vblank + 1 {
             Some(StateChange::SetVblank)
         } else {

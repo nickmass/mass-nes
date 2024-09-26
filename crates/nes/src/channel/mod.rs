@@ -3,10 +3,10 @@ mod noise;
 mod pulse;
 mod triangle;
 
-pub use self::dmc::Dmc;
-pub use self::noise::Noise;
-pub use self::pulse::{Pulse, PulseChannel};
-pub use self::triangle::Triangle;
+pub use dmc::Dmc;
+pub use noise::Noise;
+pub use pulse::{Pulse, PulseChannel};
+pub use triangle::Triangle;
 
 use crate::apu::ApuSnapshot;
 use crate::bus::AddressBus;

@@ -1,13 +1,15 @@
+use serde::{Deserialize, Serialize};
+
 use crate::cartridge::Cartridge;
 
 use std::cell::Cell;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 pub struct Page {
     start: usize,
 }
 
-#[derive(Default)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Pages {
     data: Vec<Cell<u8>>,
 }
@@ -35,6 +37,7 @@ impl Pages {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MemoryBlock {
     mem: Pages,
     page: Page,
@@ -57,11 +60,13 @@ impl MemoryBlock {
     }
 }
 
+#[derive(Copy, Clone, Serialize, Deserialize)]
 pub enum MemKind {
     Prg,
     Chr,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Banks {
     data: Vec<Page>,
     kind: MemKind,
@@ -92,18 +97,19 @@ impl Banks {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 enum Mapped {
     Page(usize),
     Bank(usize),
 }
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Serialize, Deserialize)]
 pub enum BankKind {
     Ram,
     Rom,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MappedMemory {
     mem: Pages,
     banks: Banks,

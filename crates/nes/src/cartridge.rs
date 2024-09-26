@@ -1,6 +1,5 @@
-use crate::mapper::{self, Mapper};
+use crate::mapper::{self};
 
-use std::rc::Rc;
 use std::{fmt, io};
 
 #[derive(Debug)]
@@ -176,7 +175,7 @@ impl Cartridge {
         None
     }
 
-    pub fn build_mapper(self) -> Rc<dyn Mapper> {
+    pub fn build_mapper(self) -> mapper::RcMapper {
         mapper::ines(self.mapper_number, self)
     }
 }

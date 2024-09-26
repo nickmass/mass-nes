@@ -1,3 +1,5 @@
+use nes_traits::SaveState;
+
 use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind};
 use crate::cartridge::Cartridge;
 use crate::mapper::Mapper;
@@ -7,6 +9,7 @@ use std::cell::RefCell;
 
 use super::SimpleMirroring;
 
+#[derive(SaveState)]
 pub struct PxromState {
     prg_bank_count: usize,
     chr_bank_count: usize,
@@ -50,8 +53,11 @@ impl PxromState {
     }
 }
 
+#[derive(SaveState)]
 pub struct Pxrom {
+    #[save(skip)]
     cartridge: Cartridge,
+    #[save(nested)]
     state: RefCell<PxromState>,
     mirroring: SimpleMirroring,
 }

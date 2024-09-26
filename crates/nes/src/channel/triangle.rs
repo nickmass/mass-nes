@@ -1,8 +1,10 @@
+use nes_traits::SaveState;
+
 use crate::apu::ApuSnapshot;
 use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
 
-#[derive(Default)]
+#[derive(Default, SaveState)]
 pub struct Triangle {
     timer_counter: u16,
     linear_counter: u8,

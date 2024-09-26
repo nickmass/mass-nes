@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 pub const OPS: [Op; 0x100] = Op::load();
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Instruction {
     Adc(ReadExec),
     And(ReadExec),
@@ -180,26 +182,26 @@ impl Instruction {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum ReadExec {
     Read,
     Exec,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum ReadDummyExec {
     Read,
     Dummy,
     Exec(u8),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Branch {
     Check,
     Branch,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Break {
     ReadDummy,
     WriteRegPcHigh,
@@ -210,21 +212,21 @@ pub enum Break {
     UpdateRegPc(u16),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Jsr {
     ReadDummy,
     WriteRegPcHigh,
     WriteRegPcLow,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum DummyReadExec {
     Dummy,
     Read,
     Exec,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Rti {
     Dummy,
     ReadRegP,
@@ -233,7 +235,7 @@ pub enum Rti {
     Exec(u16),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Rts {
     Dummy,
     ReadRegPcLow,
@@ -241,33 +243,33 @@ pub enum Rts {
     Exec(u16),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum ZeroPage {
     Read,
     Decode,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum AbsoluteOffset {
     ReadLow,
     ReadHigh,
     Decode(u16),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Absolute {
     ReadLow,
     ReadHigh,
     Decode(u16),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum ZeroPageOffset {
     ReadImmediate,
     ApplyOffset,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum IndirectAbsolute {
     ReadLow,
     ReadHigh,
@@ -276,13 +278,13 @@ pub enum IndirectAbsolute {
     Decode(u16),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Relative {
     ReadRegPc,
     Decode,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum IndirectX {
     ReadBase,
     ReadDummy,
@@ -291,7 +293,7 @@ pub enum IndirectX {
     Decode(u16),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum IndirectY {
     ReadBase,
     ReadZeroPageLow,
@@ -299,19 +301,19 @@ pub enum IndirectY {
     Decode(u16),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Reg {
     X,
     Y,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum DummyRead {
     Always,
     OnCarry,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Addressing {
     None,
     ZeroPage(ZeroPage),

@@ -1,3 +1,5 @@
+use nes_traits::SaveState;
+
 use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind};
 use crate::cartridge::Cartridge;
 use crate::mapper::Mapper;
@@ -7,13 +9,17 @@ use std::cell::RefCell;
 
 use super::SimpleMirroring;
 
+#[derive(SaveState)]
 pub struct Bf909xState {
     mem: MappedMemory,
 }
 
+#[derive(SaveState)]
 pub struct Bf909x {
+    #[save(skip)]
     cartridge: Cartridge,
     chr_ram: MemoryBlock,
+    #[save(nested)]
     state: RefCell<Bf909xState>,
     mirroring: SimpleMirroring,
     prg_len: usize,

@@ -1,3 +1,5 @@
+use nes_traits::SaveState;
+
 use crate::bus::{Address, AddressBus, DeviceKind};
 
 pub trait InputDevice {
@@ -63,7 +65,7 @@ impl InputDevice for Controller {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, SaveState)]
 pub struct Input {
     read_counter: u32,
     read_shifter: u8,
@@ -84,6 +86,7 @@ impl Input {
         cpu.register_write(DeviceKind::Input, Address(0x4016));
     }
 
+    #[cfg(feature = "debugger")]
     pub fn peek(&self, addr: u16, open_bus: u8) -> u8 {
         let value = match addr {
             0x4016 => {

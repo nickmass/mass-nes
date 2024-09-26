@@ -1,8 +1,11 @@
+use nes_traits::SaveState;
+use serde::{Deserialize, Serialize};
+
 use crate::apu::ApuSnapshot;
 use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 pub enum PulseChannel {
     InternalOne,
     InternalTwo,
@@ -14,7 +17,7 @@ impl Default for PulseChannel {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, SaveState)]
 pub struct Pulse {
     channel: PulseChannel,
     period: u16,

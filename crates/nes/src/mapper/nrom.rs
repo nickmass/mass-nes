@@ -1,9 +1,13 @@
+use nes_traits::SaveState;
+
 use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind};
 use crate::cartridge::Cartridge;
 use crate::mapper::{Mapper, SimpleMirroring};
 use crate::memory::MemoryBlock;
 
+#[derive(SaveState)]
 pub struct Nrom {
+    #[save(skip)]
     cartridge: Cartridge,
     chr_ram: MemoryBlock,
     mirroring: SimpleMirroring,

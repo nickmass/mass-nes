@@ -1,3 +1,5 @@
+use nes_traits::SaveState;
+
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::Cartridge;
 use crate::mapper::Mapper;
@@ -7,6 +9,7 @@ use std::cell::RefCell;
 
 use super::SimpleMirroring;
 
+#[derive(SaveState)]
 pub struct SxromState {
     prg: MappedMemory,
     chr: MappedMemory,
@@ -75,8 +78,11 @@ impl SxromState {
     }
 }
 
+#[derive(SaveState)]
 pub struct Sxrom {
+    #[save(skip)]
     cartridge: Cartridge,
+    #[save(nested)]
     state: RefCell<SxromState>,
 }
 

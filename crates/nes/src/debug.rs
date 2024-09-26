@@ -148,10 +148,6 @@ mod debugger {
             }
         }
 
-        pub fn peek(&self, system: &Machine, addr: u16) -> u8 {
-            system.cpu_bus.peek(system, addr)
-        }
-
         pub fn frame(&self, system: &Machine) -> u32 {
             system.ppu.frame()
         }
@@ -202,9 +198,15 @@ mod debugger {
         pub fn trace(&self, system: &Machine, cpu_state: CpuDebugState, ppu_state: PpuDebugState) {
             let mut state = self.state.borrow_mut();
             if let Some(inst_addr) = cpu_state.instruction_addr {
-                if Some(inst_addr) == state.log_range.as_ref().map(|r| r.0) {
-                    state.logging_range = true;
-                }
+                state.logging_range = if let Some(&(start, end)) = state.log_range.as_ref() {
+                    if inst_addr >= start && inst_addr <= end {
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
                 if state.trace_instrs != 0 || state.logging_range {
                     let log = self.trace_instruction(system, &cpu_state, &ppu_state);
                     tracing::info!("{}", log);
@@ -212,13 +214,10 @@ mod debugger {
                         state.trace_instrs -= 1;
                     }
                 }
-                if Some(inst_addr) == state.log_range.as_ref().map(|r| r.1) {
-                    state.logging_range = false;
-                }
 
                 state.log_inst((cpu_state, ppu_state));
 
-                let inst = OPS[self.peek(system, inst_addr) as usize];
+                let inst = OPS[system.peek(inst_addr) as usize];
                 if let Instruction::IllKil = inst.instruction {
                     self.do_log_history(system, &*state);
                     panic!("KIL");
@@ -237,9 +236,7 @@ mod debugger {
             ppu_state: PpuDebugState,
         ) {
             let mut state = self.state.borrow_mut();
-            if state.logging_range {
-                tracing::info!("{:?}", ppu_state);
-            }
+
             if let Some(trace_fn) = state.trace_fn.as_mut() {
                 trace_fn(cpu_state, ppu_state);
             }
@@ -252,17 +249,17 @@ mod debugger {
             ppu_state: &PpuDebugState,
         ) -> String {
             let addr = cpu_state.instruction_addr.unwrap();
-            let instr = self.peek(system, addr);
+            let instr = system.peek(addr);
 
             let op = OPS[instr as usize];
             let name = op.instruction.name();
             let len = op.addressing.length() as u16;
 
             let mut addr_inc = addr + 1;
-            let read = |addr| -> u8 { self.peek(system, addr) };
+            let read = |addr| -> u8 { system.peek(addr) };
 
             let mut read_pc = || -> u8 {
-                let val = self.peek(system, addr_inc);
+                let val = system.peek(addr_inc);
                 addr_inc = addr_inc.wrapping_add(1);
                 val
             };
@@ -377,8 +374,11 @@ mod debugger {
 
             let ppu_string = {
                 format!(
-                    "DOT: {:3} SL: {:3} TICK: {:9}",
-                    ppu_state.dot, ppu_state.scanline, ppu_state.tick
+                    "DOT: {:3} SL: {:3} TICK: {:9} S0:{}",
+                    ppu_state.dot,
+                    ppu_state.scanline,
+                    ppu_state.tick,
+                    if ppu_state.sprite_zero_hit { 1 } else { 0 }
                 )
             };
 
@@ -408,10 +408,6 @@ pub mod no_debugger {
     impl Debug {
         pub fn new() -> Self {
             Debug
-        }
-
-        pub fn peek(&self, _system: &Machine, _addr: u16) -> u8 {
-            0
         }
 
         pub fn frame(&self, _system: &Machine) -> u32 {

@@ -1,3 +1,5 @@
+use nes_traits::SaveState;
+
 use crate::apu::ApuSnapshot;
 use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
@@ -7,7 +9,7 @@ const RATES: &[u16] = &[
     4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068,
 ];
 
-#[derive(Default)]
+#[derive(Default, SaveState)]
 pub struct Noise {
     timer_counter: u16,
     length_counter: u8,

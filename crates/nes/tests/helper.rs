@@ -54,14 +54,14 @@ where
         let done = match run_until {
             RunUntil::Frame(frame) => nes_frame >= frame,
             RunUntil::NotEqual(address, value) => {
-                let nes_val = debug.peek(&machine, address);
+                let nes_val = machine.peek(address);
                 value != nes_val
             }
         };
         if done {
             match condition {
                 Condition::Equals(a, v) => {
-                    let nes_val = debug.peek(&machine, a);
+                    let nes_val = machine.peek(a);
                     assert!(
                         v == nes_val,
                         "Expected '0x{:04X}' to be '0x{:02X}', found '0x{:02X}'.",

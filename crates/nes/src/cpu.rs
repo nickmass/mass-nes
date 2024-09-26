@@ -1,9 +1,11 @@
+use nes_traits::SaveState;
+use serde::{Deserialize, Serialize};
+
 use crate::ops::*;
 
 use std::cell::Cell;
-use std::rc::Rc;
 
-#[derive(Default, Debug, Copy, Clone)]
+#[derive(Default, Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct CpuPinIn {
     pub data: u8,
     pub irq: bool,
@@ -11,22 +13,24 @@ pub struct CpuPinIn {
     pub power: bool,
     pub dmc_req: Option<u16>,
     pub oam_req: Option<u8>,
+    pub nmi: bool,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 enum PendingDmcRead {
     Pending(u16, u32),
     Reading,
     Resume,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 enum OamDma {
+    Prepare(u16),
     Read(u16, u16),
     Write(u16, u16),
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 enum Irq {
     ReadPcOne(u16),
     ReadPcTwo(u16),
@@ -38,14 +42,14 @@ enum Irq {
     UpdateRegPc,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 enum Power {
     ReadRegPcLow,
     ReadRegPcHigh,
     UpdateRegPc(u16),
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub enum TickResult {
     Read(u16),
     Write(u16, u8),
@@ -53,21 +57,21 @@ pub enum TickResult {
     DmcRead(u8),
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 enum AddressResult {
     Address(u16),
     TickAddress(TickResult, u16),
     Next(TickResult, Addressing),
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 enum ExecResult {
     Done,
     Next(TickResult, Instruction),
     Tick(TickResult),
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 enum Stage {
     Fetch,
     Decode,
@@ -79,39 +83,51 @@ enum Stage {
     Irq(Irq),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, SaveState, Serialize, Deserialize)]
 pub struct CpuNmiInterrupt {
-    inner: Rc<CpuNmiInterruptInner>,
-}
-
-#[derive(Debug)]
-struct CpuNmiInterruptInner {
-    pending_nmi: Cell<Option<u32>>,
+    was_nmi_set: bool,
+    pending_nmi: Option<u32>,
 }
 
 impl CpuNmiInterrupt {
     fn new() -> Self {
         Self {
-            inner: Rc::new(CpuNmiInterruptInner {
-                pending_nmi: Cell::new(None),
-            }),
+            was_nmi_set: false,
+            pending_nmi: None,
         }
     }
 
-    pub fn nmi_req(&self, delay: u32) {
-        self.inner.pending_nmi.set(Some(delay));
+    fn tick(&mut self, nmi: bool) {
+        const MAX_NMI_DELAY: u32 = 1;
+        match self.pending_nmi {
+            Some(0) => (),
+            Some(MAX_NMI_DELAY) if !nmi => self.clear(),
+            Some(n) => {
+                self.pending_nmi = Some(n - 1);
+            }
+            _ => {
+                if !self.was_nmi_set && nmi {
+                    self.pending_nmi = Some(MAX_NMI_DELAY);
+                }
+            }
+        }
+        self.was_nmi_set = nmi;
     }
 
-    pub fn nmi_cancel(&self) {
-        self.inner.pending_nmi.set(None);
+    fn interrupt(&mut self) -> bool {
+        if let Some(0) = self.pending_nmi {
+            true
+        } else {
+            false
+        }
     }
 
-    fn get(&self) -> Option<u32> {
-        self.inner.pending_nmi.get()
+    fn pending(&self) -> bool {
+        self.pending_nmi.is_some()
     }
 
-    fn set(&self, v: Option<u32>) {
-        self.inner.pending_nmi.set(v)
+    fn clear(&mut self) {
+        self.pending_nmi = None;
     }
 }
 
@@ -133,8 +149,10 @@ pub struct CpuDebugState {
 #[derive(Debug, Copy, Clone)]
 pub struct CpuDebugState;
 
+#[derive(SaveState)]
 pub struct Cpu {
     current_tick: u64,
+    #[save(skip)]
     power_up_pc: Option<u16>,
     pin_in: CpuPinIn,
     reg_a: u32,
@@ -159,7 +177,7 @@ pub struct Cpu {
     pending_reset: bool,
     irq_delay: u32,
     irq_set_delay: u32,
-    pub nmi: CpuNmiInterrupt,
+    nmi: CpuNmiInterrupt,
 }
 
 impl Cpu {
@@ -295,6 +313,7 @@ impl Cpu {
         self.current_tick += 1;
         self.oam_dma_req();
         self.dmc_req();
+        self.nmi.tick(self.pin_in.nmi);
         self.instruction_addr = None;
 
         if self.pin_in.power {
@@ -386,16 +405,24 @@ impl Cpu {
 
     fn oam_dma(&mut self, oam: OamDma) -> TickResult {
         match oam {
+            OamDma::Prepare(addr) => {
+                // Oam idles for 1 or 2 cycles depedning on odd/even cycle.
+                // total duration is 513 or 514
+                if self.current_tick & 1 == 0 {
+                    self.stage = Stage::OamDma(OamDma::Read(addr << 8, 0))
+                }
+                TickResult::Idle
+            }
             OamDma::Read(high_addr, low_addr) => {
                 self.stage = Stage::OamDma(OamDma::Write(high_addr, low_addr));
                 TickResult::Read(high_addr | low_addr)
             }
             OamDma::Write(high_addr, low_addr) => {
-                if low_addr == 255 {
-                    self.stage = Stage::Fetch;
+                self.stage = if low_addr == 255 {
+                    Stage::Fetch
                 } else {
-                    self.stage = Stage::OamDma(OamDma::Read(high_addr, low_addr + 1));
-                }
+                    Stage::OamDma(OamDma::Read(high_addr, low_addr + 1))
+                };
                 TickResult::Write(0x2004, self.pin_in.data)
             }
         }
@@ -423,8 +450,8 @@ impl Cpu {
                 self.push_stack(val as u8)
             }
             WriteRegP(addr) => {
-                if self.nmi.get().is_some() {
-                    self.nmi.set(None);
+                if self.nmi.pending() {
+                    self.nmi.clear();
                     self.stage = Stage::Irq(Irq::ReadHighJump(0xfffa));
                 } else {
                     self.stage = Stage::Irq(Irq::ReadHighJump(addr));
@@ -454,15 +481,16 @@ impl Cpu {
     fn interrupt(&mut self) -> Stage {
         let mut stage = Stage::Decode;
 
-        if let Some(high_addr) = self.pending_oam_dma.get() {
+        if let Some(addr) = self.pending_oam_dma.get() {
             self.pending_oam_dma.set(None);
-            stage = Stage::OamDma(OamDma::Read((high_addr as u16) << 8, 0))
+            stage = Stage::OamDma(OamDma::Prepare(addr as u16));
         }
 
         if self.pin_in.irq && (self.flag_i == 0 || self.irq_set_delay != 0) && self.irq_delay == 0 {
             if self.irq_set_delay != 0 {
                 self.irq_set_delay -= 1;
             }
+
             stage = Stage::Irq(Irq::ReadPcOne(0xfffe))
         }
 
@@ -474,15 +502,8 @@ impl Cpu {
             self.irq_delay -= 1;
         }
 
-        match self.nmi.get() {
-            Some(0) => {
-                self.nmi.set(None);
-                stage = Stage::Irq(Irq::ReadPcOne(0xfffa));
-            }
-            Some(count) => {
-                self.nmi.set(Some(count - 1));
-            }
-            None => (),
+        if self.nmi.interrupt() {
+            stage = Stage::Irq(Irq::ReadPcOne(0xfffa));
         }
 
         if self.pin_in.power {
@@ -502,7 +523,7 @@ impl Cpu {
         self.stage = self.interrupt();
 
         match self.stage {
-            Stage::Fetch => self.read_pc(),
+            Stage::Fetch => unreachable!(),
             Stage::Decode => {
                 self.instruction_addr = Some(self.reg_pc as u16);
                 self.read_pc()
@@ -1016,12 +1037,11 @@ impl Cpu {
             WriteRegP => {
                 let reg_p = self.reg_p() | 0x30;
                 self.flag_i = 1;
-                let jump = match self.nmi.get() {
-                    Some(_) => {
-                        self.nmi.set(None);
-                        ReadHighJump(0xfffa)
-                    }
-                    _ => ReadHighJump(0xfffe),
+                let jump = if self.nmi.pending() {
+                    self.nmi.clear();
+                    ReadHighJump(0xfffa)
+                } else {
+                    ReadHighJump(0xfffe)
                 };
                 Next(self.push_stack(reg_p), Instruction::Brk(jump))
             }

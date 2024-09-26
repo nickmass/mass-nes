@@ -23,6 +23,19 @@ impl From<GamepadEvent> for UserEvent {
     }
 }
 
+pub enum EmulatorInput {
+    Nes(UserInput),
+    SaveState(u8),
+    RestoreState(u8),
+    Rewind,
+}
+
+impl From<UserInput> for EmulatorInput {
+    fn from(value: UserInput) -> Self {
+        EmulatorInput::Nes(value)
+    }
+}
+
 pub struct App<F, A, S> {
     audio: A,
     sync: Option<S>,
@@ -31,7 +44,7 @@ pub struct App<F, A, S> {
     window: winit::window::Window,
     event_loop: Option<winit::event_loop::EventLoop<UserEvent>>,
     input: InputMap,
-    input_tx: Option<std::sync::mpsc::Sender<UserInput>>,
+    input_tx: Option<std::sync::mpsc::Sender<EmulatorInput>>,
     back_buffer: GfxBackBuffer,
 }
 
@@ -187,14 +200,26 @@ impl<F: Filter, A: Audio, S: FrameSync> winit::application::ApplicationHandler<U
                     let p1 = self.input.controller();
 
                     if self.input.reset() {
-                        let _ = tx.send(UserInput::Reset);
+                        let _ = tx.send(UserInput::Reset.into());
                     }
 
                     if self.input.power() {
-                        let _ = tx.send(UserInput::Power);
+                        let _ = tx.send(UserInput::Power.into());
                     }
 
-                    let _ = tx.send(UserInput::PlayerOne(p1));
+                    if let Some(slot) = self.input.save_state() {
+                        let _ = tx.send(EmulatorInput::SaveState(slot));
+                    }
+
+                    if let Some(slot) = self.input.restore_state() {
+                        let _ = tx.send(EmulatorInput::RestoreState(slot));
+                    }
+
+                    if self.input.rewind() {
+                        let _ = tx.send(EmulatorInput::Rewind);
+                    }
+
+                    let _ = tx.send(UserInput::PlayerOne(p1).into());
                 }
             }
             UserEvent::Gamepad(ev) => match ev {
@@ -216,11 +241,11 @@ impl<F: Filter, A: Audio, S: FrameSync> winit::application::ApplicationHandler<U
 }
 
 pub struct NesInputs {
-    rx: std::sync::mpsc::Receiver<UserInput>,
+    rx: std::sync::mpsc::Receiver<EmulatorInput>,
 }
 
 impl NesInputs {
-    pub fn inputs(self) -> impl Iterator<Item = UserInput> {
+    pub fn inputs(self) -> impl Iterator<Item = EmulatorInput> {
         self.rx.into_iter()
     }
 }

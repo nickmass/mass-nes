@@ -15,4 +15,9 @@ mod region;
 
 pub use cartridge::Cartridge;
 pub use machine::{Controller, Machine, UserInput};
+use nes_traits::SaveState;
 pub use region::Region;
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SaveData(<Machine as SaveState>::Data);

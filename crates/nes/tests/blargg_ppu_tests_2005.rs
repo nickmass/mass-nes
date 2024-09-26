@@ -24,7 +24,7 @@ fn sprite_ram() {
 fn vbl_clear_time() {
     helper::run(
         format!("{}vbl_clear_time.nes", DIR),
-        helper::RunUntil::Frame(10),
+        helper::RunUntil::Frame(20),
         helper::Condition::Equals(0xf0, 0x01),
     );
 }

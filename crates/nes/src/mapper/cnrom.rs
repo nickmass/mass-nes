@@ -1,3 +1,5 @@
+use nes_traits::SaveState;
+
 use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind};
 use crate::cartridge::Cartridge;
 use crate::mapper::Mapper;
@@ -7,12 +9,16 @@ use std::cell::RefCell;
 
 use super::SimpleMirroring;
 
+#[derive(SaveState)]
 pub struct CnromState {
     chr: MappedMemory,
 }
 
+#[derive(SaveState)]
 pub struct Cnrom {
+    #[save(skip)]
     cartridge: Cartridge,
+    #[save(nested)]
     state: RefCell<CnromState>,
     mirroring: SimpleMirroring,
     prg_len: usize,

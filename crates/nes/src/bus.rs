@@ -1,5 +1,3 @@
-use crate::Machine;
-
 #[derive(Debug, Clone, Copy)]
 pub enum BusKind {
     Cpu,
@@ -49,18 +47,16 @@ impl DeviceMapping {
 pub struct AddressBus {
     read_mapping: DeviceMapping,
     write_mapping: DeviceMapping,
-    kind: BusKind,
     block_size: u16,
     mask: u16,
     pub(crate) open_bus: std::cell::Cell<u8>,
 }
 
 impl AddressBus {
-    pub(crate) fn new(kind: BusKind, block_size: u32, mask: u16) -> AddressBus {
+    pub(crate) fn new(block_size: u32, mask: u16) -> AddressBus {
         AddressBus {
             read_mapping: DeviceMapping::new(),
             write_mapping: DeviceMapping::new(),
-            kind,
             block_size: 2u16.pow(block_size),
             open_bus: std::cell::Cell::new(0),
             mask,
@@ -81,20 +77,6 @@ impl AddressBus {
         self.write_mapping.insert(addr_val, device);
     }
 
-    pub fn peek(&self, system: &Machine, addr: u16) -> u8 {
-        let addr = (addr & !(self.block_size - 1)) & self.mask;
-        let mapping = self.read_mapping.map(addr);
-        match mapping {
-            Some((addr, DeviceKind::CpuRam)) => system.cpu_mem.read(addr),
-            Some((addr, DeviceKind::Ppu)) => system.ppu.peek(addr),
-            Some((addr, DeviceKind::Mapper)) => system.mapper.peek(self.kind, addr),
-            Some((addr, DeviceKind::Input)) => system.input.peek(addr, self.open_bus.get()),
-            Some((addr, DeviceKind::Apu)) => system.apu.peek(addr),
-            None => self.open_bus.get(),
-            _ => unimplemented!(),
-        }
-    }
-
     pub(crate) fn read_addr(&self, addr: u16) -> Option<(u16, DeviceKind)> {
         let addr = (addr & !(self.block_size - 1)) & self.mask;
         self.read_mapping.map(addr)
@@ -103,10 +85,6 @@ impl AddressBus {
     pub(crate) fn write_addr(&self, addr: u16) -> Option<(u16, DeviceKind)> {
         let addr = (addr & !(self.block_size - 1)) & self.mask;
         self.write_mapping.map(addr)
-    }
-
-    pub fn peek_word(&self, system: &Machine, addr: u16) -> u16 {
-        (self.peek(system, addr) as u16) | (self.peek(system, addr + 1) as u16) << 8
     }
 }
 

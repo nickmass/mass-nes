@@ -1,17 +1,18 @@
+use nes_traits::SaveState;
+
 use crate::apu::Apu;
 use crate::bus::{AddressBus, BusKind, DeviceKind, RangeAndMask};
 use crate::cartridge::Cartridge;
-use crate::cpu::{Cpu, CpuPinIn, TickResult};
+use crate::cpu::{Cpu, CpuDebugState, CpuPinIn, TickResult};
 use crate::debug::Debug;
 use crate::input::Input;
-use crate::mapper::Mapper;
+use crate::mapper::{Mapper, RcMapper};
 use crate::memory::MemoryBlock;
 use crate::ppu::Ppu;
 use crate::region::Region;
 
 pub use crate::input::{Controller, InputDevice};
-
-use std::rc::Rc;
+use crate::SaveData;
 
 #[derive(Debug, Copy, Clone)]
 pub enum UserInput {
@@ -20,17 +21,26 @@ pub enum UserInput {
     Reset,
 }
 
+#[derive(SaveState)]
 pub struct Machine {
+    #[save(skip)]
     region: Region,
     cycle: u64,
 
+    #[save(nested)]
     pub(crate) ppu: Ppu,
+    #[save(nested)]
     pub(crate) cpu: Cpu,
+    #[save(skip)]
     pub(crate) cpu_bus: AddressBus,
     pub(crate) cpu_mem: MemoryBlock,
+    #[save(nested)]
     pub(crate) apu: Apu,
+    #[save(nested)]
     pub(crate) input: Input,
-    pub(crate) mapper: Rc<dyn Mapper>,
+    #[save(nested)]
+    pub(crate) mapper: RcMapper,
+    #[save(skip)]
     debug: Debug,
     cpu_pin_in: CpuPinIn,
 }
@@ -38,12 +48,12 @@ pub struct Machine {
 impl Machine {
     pub fn new(region: Region, cartridge: Cartridge) -> Machine {
         let cpu = Cpu::new();
-        let mut cpu_bus = AddressBus::new(BusKind::Cpu, 0, 0xffff);
+        let mut cpu_bus = AddressBus::new(0, 0xffff);
         let cpu_mem = MemoryBlock::new(2);
         let apu = Apu::new(region);
         let input = Input::new();
         let mapper = cartridge.build_mapper();
-        let ppu = Ppu::new(region, cpu.nmi.clone(), mapper.clone());
+        let ppu = Ppu::new(region, mapper.clone());
 
         cpu_bus.register_read(DeviceKind::CpuRam, RangeAndMask(0x0000, 0x2000, 0x07ff));
         cpu_bus.register_write(DeviceKind::CpuRam, RangeAndMask(0x0000, 0x2000, 0x07ff));
@@ -103,8 +113,8 @@ impl Machine {
             self.apu.tick();
             self.mapper.tick();
 
-            let apu_irq = self.apu.get_irq();
-            let mapper_irq = self.mapper.get_irq();
+            self.tick_ppu(cpu_state);
+            self.tick_ppu(cpu_state);
 
             match tick_result {
                 TickResult::Read(addr) => {
@@ -112,31 +122,35 @@ impl Machine {
                     self.cpu_pin_in.data = value;
                 }
                 TickResult::Write(addr, value) => self.write(addr, value),
-                // DMC Read holding bus
+                // DMC Read or OAM DMA holding bus
                 TickResult::Idle => {}
                 TickResult::DmcRead(value) => self.apu.dmc.dmc_read(value),
             }
+
+            self.tick_ppu(cpu_state);
+            self.cpu_pin_in.nmi = self.ppu.nmi();
+
+            if self.region.extra_ppu_tick() && self.cycle % 5 == 0 {
+                self.tick_ppu(cpu_state);
+            }
+
+            let apu_irq = self.apu.get_irq();
+            let mapper_irq = self.mapper.get_irq();
 
             self.cpu_pin_in.irq = apu_irq | mapper_irq;
             self.cpu_pin_in.dmc_req = self.apu.get_dmc_req();
             self.cpu_pin_in.oam_req = self.apu.get_oam_req();
 
-            for _ in 0..3 {
-                self.ppu.tick();
-                let ppu_state = self.ppu.debug_state();
-                self.debug.trace_ppu(&self, cpu_state, ppu_state);
-            }
-
-            if self.region.extra_ppu_tick() && self.cycle % 5 == 0 {
-                self.ppu.tick();
-                let ppu_state = self.ppu.debug_state();
-                self.debug.trace_ppu(&self, cpu_state, ppu_state);
-            }
-
             self.cpu_pin_in.power = false;
             self.cpu_pin_in.reset = false;
             self.cycle += 1;
         }
+    }
+
+    fn tick_ppu(&mut self, cpu_state: CpuDebugState) {
+        self.ppu.tick();
+        let ppu_state = self.ppu.debug_state();
+        self.debug.trace_ppu(&self, cpu_state, ppu_state);
     }
 
     fn read(&mut self, addr: u16) -> u8 {
@@ -168,6 +182,19 @@ impl Machine {
             Some((addr, DeviceKind::Triangle)) => self.apu.triangle.write(addr, value),
             Some((addr, DeviceKind::Dmc)) => self.apu.dmc.write(addr, value),
             None => (),
+        }
+    }
+
+    #[cfg(feature = "debugger")]
+    pub fn peek(&self, addr: u16) -> u8 {
+        match self.cpu_bus.read_addr(addr) {
+            Some((addr, DeviceKind::CpuRam)) => self.cpu_mem.read(addr),
+            Some((addr, DeviceKind::Ppu)) => self.ppu.peek(addr),
+            Some((addr, DeviceKind::Mapper)) => self.mapper.peek(BusKind::Ppu, addr),
+            Some((addr, DeviceKind::Input)) => self.input.peek(addr, self.cpu_bus.open_bus.get()),
+            Some((addr, DeviceKind::Apu)) => self.apu.peek(addr),
+            None => self.cpu_bus.open_bus.get(),
+            _ => unimplemented!(),
         }
     }
 
@@ -208,5 +235,13 @@ impl Machine {
         self.cpu_pin_in.reset = true;
         self.apu.reset();
         self.ppu.reset();
+    }
+
+    pub fn save_state(&self) -> SaveData {
+        SaveData(<Self as SaveState>::save_state(self))
+    }
+
+    pub fn restore_state(&mut self, state: &SaveData) {
+        <Self as SaveState>::restore_state(self, &state.0)
     }
 }

@@ -1,5 +1,5 @@
-use winit::keyboard::KeyCode;
 use gilrs::Button;
+use winit::keyboard::KeyCode;
 
 use nes::Controller;
 
@@ -55,6 +55,56 @@ impl InputMap {
 
     pub fn reset(&self) -> bool {
         self.is_pressed(KeyCode::Backspace)
+    }
+
+    pub fn save_state(&self) -> Option<u8> {
+        const MAP: &[(KeyCode, u8)] = &[
+            (KeyCode::Digit1, 0),
+            (KeyCode::Digit2, 1),
+            (KeyCode::Digit3, 2),
+            (KeyCode::Digit4, 3),
+            (KeyCode::Digit5, 4),
+            (KeyCode::Digit6, 5),
+            (KeyCode::Digit7, 6),
+            (KeyCode::Digit8, 7),
+            (KeyCode::Digit9, 8),
+            (KeyCode::Digit0, 9),
+        ];
+
+        for &(key, slot) in MAP.iter() {
+            if self.is_pressed(key) {
+                return Some(slot);
+            }
+        }
+
+        None
+    }
+
+    pub fn restore_state(&self) -> Option<u8> {
+        const MAP: &[(KeyCode, u8)] = &[
+            (KeyCode::F1, 0),
+            (KeyCode::F2, 1),
+            (KeyCode::F3, 2),
+            (KeyCode::F4, 3),
+            (KeyCode::F5, 4),
+            (KeyCode::F6, 5),
+            (KeyCode::F7, 6),
+            (KeyCode::F8, 7),
+            (KeyCode::F9, 8),
+            (KeyCode::F10, 9),
+        ];
+
+        for &(key, slot) in MAP.iter() {
+            if self.is_pressed(key) {
+                return Some(slot);
+            }
+        }
+
+        None
+    }
+
+    pub fn rewind(&self) -> bool {
+        self.is_pressed(KeyCode::Tab) | self.is_pressed(Button::LeftTrigger)
     }
 }
 

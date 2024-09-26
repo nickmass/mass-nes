@@ -1,3 +1,6 @@
+use nes_traits::SaveState;
+use serde::{Deserialize, Serialize};
+
 use crate::bus::{Address, AddressBus, DeviceKind};
 use crate::channel::{Channel, Dmc, Noise, Pulse, PulseChannel, Triangle};
 use crate::region::Region;
@@ -8,7 +11,7 @@ pub const LENGTH_TABLE: [u8; 0x20] = [
     192, 24, 72, 26, 16, 28, 32, 30,
 ];
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 enum SequenceMode {
     FourStep,
     FiveStep,
@@ -20,16 +23,27 @@ pub struct ApuSnapshot {
     pub is_quarter_frame: bool,
 }
 
+#[derive(SaveState)]
 pub struct Apu {
+    #[save(skip)]
     region: Region,
+    #[save(nested)]
     pub pulse_one: Pulse,
+    #[save(nested)]
     pub pulse_two: Pulse,
+    #[save(nested)]
     pub triangle: Triangle,
+    #[save(nested)]
     pub noise: Noise,
+    #[save(nested)]
     pub dmc: Dmc,
+    #[save(skip)]
     pulse_table: Vec<i16>,
+    #[save(skip)]
     tnd_table: Vec<i16>,
+    #[save(skip)]
     samples: Vec<i16>,
+    #[save(skip)]
     sample_index: usize,
     current_tick: u32,
     reset_delay: u32,
@@ -86,16 +100,23 @@ impl Apu {
         }
         self.write(0x4015, 0);
         self.write(0x4017, 0);
-        self.reset_delay = 6;
+
+        // Apu appears to run for some ticks before the CPU boots
+        for _ in 0..9 {
+            self.tick();
+        }
     }
 
     pub fn reset(&mut self) {
         self.write(0x4015, 0);
-        let val = self.last_4017;
-        self.write(0x4017, val);
-        self.reset_delay = 6;
+        self.write(0x4017, 0);
+
+        for _ in 0..9 {
+            self.tick();
+        }
     }
 
+    #[cfg(feature = "debugger")]
     pub fn peek(&self, addr: u16) -> u8 {
         match addr {
             0x4015 => {
@@ -304,8 +325,8 @@ impl Apu {
             SequenceMode::FourStep => {
                 let steps = self.sequence_steps();
                 !self.irq_inhibit
-                    && (self.frame_counter == steps[3] - 1
-                        || self.frame_counter == steps[3]
+                    && (self.frame_counter == steps[3]
+                        || self.frame_counter == steps[3] - 1
                         || self.frame_counter == 0)
             }
             SequenceMode::FiveStep => false,

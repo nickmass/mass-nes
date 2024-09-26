@@ -9,12 +9,16 @@ mod sxrom;
 mod txrom;
 mod uxrom;
 
+use nes_traits::{BinarySaveState, SaveState};
+use serde::{Deserialize, Serialize};
+
 use crate::bus::{AddressBus, BusKind};
 use crate::cartridge::Cartridge;
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
-pub trait Mapper {
+pub trait Mapper: BinarySaveState {
     fn register(&self, cpu: &mut AddressBus);
 
     fn peek(&self, bus: BusKind, addr: u16) -> u8;
@@ -34,26 +38,81 @@ pub trait Mapper {
     fn ppu_fetch(&self, address: u16) -> Nametable;
 }
 
-pub fn ines(ines_number: u8, cart: Cartridge) -> Rc<dyn Mapper> {
+#[derive(Clone)]
+pub struct RcMapper(Rc<RefCell<dyn Mapper>>);
+
+impl RcMapper {
+    fn new<T: Mapper + 'static>(mapper: T) -> Self {
+        RcMapper(Rc::new(RefCell::new(mapper)))
+    }
+}
+
+impl Mapper for RcMapper {
+    fn register(&self, cpu: &mut AddressBus) {
+        self.0.borrow().register(cpu)
+    }
+
+    fn peek(&self, bus: BusKind, addr: u16) -> u8 {
+        self.0.borrow().peek(bus, addr)
+    }
+
+    fn read(&self, bus: BusKind, addr: u16) -> u8 {
+        self.0.borrow().read(bus, addr)
+    }
+
+    fn write(&self, bus: BusKind, addr: u16, value: u8) {
+        self.0.borrow().write(bus, addr, value)
+    }
+
+    fn ppu_fetch(&self, address: u16) -> Nametable {
+        self.0.borrow().ppu_fetch(address)
+    }
+
+    fn get_irq(&self) -> bool {
+        self.0.borrow().get_irq()
+    }
+
+    fn tick(&self) {
+        self.0.borrow().tick()
+    }
+
+    fn update_ppu_addr(&self, addr: u16) {
+        self.0.borrow().update_ppu_addr(addr)
+    }
+}
+
+impl SaveState for RcMapper {
+    type Data = Vec<u8>;
+
+    fn save_state(&self) -> Self::Data {
+        self.0.borrow().binary_save_state()
+    }
+
+    fn restore_state(&mut self, state: &Self::Data) {
+        self.0.borrow_mut().binary_restore_state(state.as_slice());
+    }
+}
+
+pub fn ines(ines_number: u8, cart: Cartridge) -> RcMapper {
     match ines_number {
-        0 => Rc::new(nrom::Nrom::new(cart)),
-        1 | 65 => Rc::new(sxrom::Sxrom::new(cart)),
-        2 => Rc::new(uxrom::Uxrom::new(cart)),
-        3 => Rc::new(cnrom::Cnrom::new(cart)),
-        4 => Rc::new(txrom::Txrom::new(cart)),
-        7 => Rc::new(axrom::Axrom::new(cart)),
-        9 => Rc::new(pxrom::Pxrom::new(cart)),
-        28 => Rc::new(action53::Action53::new(cart)),
-        69 => Rc::new(fme7::Fme7::new(cart)),
-        71 | 232 => Rc::new(bf909x::Bf909x::new(cart)),
+        0 => RcMapper::new(nrom::Nrom::new(cart)),
+        1 | 65 => RcMapper::new(sxrom::Sxrom::new(cart)),
+        2 => RcMapper::new(uxrom::Uxrom::new(cart)),
+        3 => RcMapper::new(cnrom::Cnrom::new(cart)),
+        4 => RcMapper::new(txrom::Txrom::new(cart)),
+        7 => RcMapper::new(axrom::Axrom::new(cart)),
+        9 => RcMapper::new(pxrom::Pxrom::new(cart)),
+        28 => RcMapper::new(action53::Action53::new(cart)),
+        69 => RcMapper::new(fme7::Fme7::new(cart)),
+        71 | 232 => RcMapper::new(bf909x::Bf909x::new(cart)),
         _ => {
             tracing::error!("mapper not implemented");
-            Rc::new(nrom::Nrom::new(cart))
+            RcMapper::new(nrom::Nrom::new(cart))
         }
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mirroring {
     Horizontal,
     Vertical,
@@ -61,13 +120,14 @@ pub enum Mirroring {
     Custom,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Nametable {
     InternalA,
     InternalB,
     External,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SimpleMirroring {
     mirroring: std::cell::Cell<Mirroring>,
 }

@@ -1,10 +1,13 @@
+use nes_traits::SaveState;
+
 use crate::apu::ApuSnapshot;
 use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
 use crate::region::Region;
 
-#[derive(Default)]
+#[derive(Default, SaveState)]
 pub struct Dmc {
+    #[save(skip)]
     region: Region,
     current_tick: u64,
     timer_counter: u16,

@@ -1,13 +1,13 @@
+use nes_traits::SaveState;
+use serde::{Deserialize, Serialize};
+
 use crate::bus::{AddressBus, BusKind, DeviceKind, RangeAndMask};
-use crate::cpu::CpuNmiInterrupt;
-use crate::mapper::{Mapper, Nametable};
+use crate::mapper::{Mapper, Nametable, RcMapper};
 use crate::memory::MemoryBlock;
 use crate::ppu_step::*;
 use crate::region::{EmphMode, Region};
 
-use std::rc::Rc;
-
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 struct SpriteData {
     active: u8,
     x: u8,
@@ -36,24 +36,28 @@ pub struct PpuDebugState {
     pub scanline: u32,
     pub dot: u32,
     pub vblank: bool,
-    pub triggered_nmi: bool,
+    pub nmi: bool,
+    pub sprite_zero_hit: bool,
 }
 
 #[cfg(not(feature = "debugger"))]
 #[derive(Debug, Copy, Clone)]
 pub struct PpuDebugState;
 
+#[derive(SaveState)]
 pub struct Ppu {
+    #[save(skip)]
     region: Region,
-    mapper: Rc<dyn Mapper>,
-    cpu_nmi: CpuNmiInterrupt,
+    #[save(skip)]
+    mapper: RcMapper,
     nt_internal_a: MemoryBlock,
     nt_internal_b: MemoryBlock,
+    #[save(skip)]
     screen: Vec<u16>,
 
     current_tick: u64,
     last_status_read: u64,
-    last_nmi_set: u64,
+    last_nmi_toggle: u64,
     pub frame: u32,
     regs: [u8; 8],
     vblank: bool,
@@ -70,7 +74,7 @@ pub struct Ppu {
     vram_fine_x: u16,
 
     oam_addr: u8,
-    oam_data: [u8; 256],
+    oam_data: Vec<u8>,
     line_oam_data: [u8; 32],
 
     palette_data: [u8; 32],
@@ -107,25 +111,23 @@ pub struct Ppu {
 
     reset_delay: u32,
 
+    #[save(skip)]
     ppu_steps: PpuSteps,
     step: PpuStep,
-
-    triggered_nmi: bool,
 }
 
 impl Ppu {
-    pub fn new(region: Region, cpu_nmi: CpuNmiInterrupt, mapper: Rc<dyn Mapper>) -> Ppu {
+    pub fn new(region: Region, mapper: RcMapper) -> Ppu {
         Ppu {
             region,
             mapper,
-            cpu_nmi,
             nt_internal_a: MemoryBlock::new(1),
             nt_internal_b: MemoryBlock::new(1),
             screen: vec![0x0f; 256 * 240],
 
             current_tick: 0,
             last_status_read: 0,
-            last_nmi_set: 0,
+            last_nmi_toggle: 0,
             frame: 0,
             regs: [0; 8],
             vblank: false,
@@ -142,7 +144,7 @@ impl Ppu {
             vram_fine_x: 0,
 
             oam_addr: 0,
-            oam_data: [0; 256],
+            oam_data: vec![0; 256],
             line_oam_data: [0; 32],
 
             palette_data: [0x0f; 32],
@@ -181,8 +183,6 @@ impl Ppu {
 
             ppu_steps: generate_steps(region),
             step: PpuStep::default(),
-
-            triggered_nmi: false,
         }
     }
 
@@ -223,7 +223,8 @@ impl Ppu {
             scanline: self.step.scanline,
             dot: self.step.dot,
             vblank: self.vblank,
-            triggered_nmi: self.triggered_nmi,
+            nmi: self.nmi(),
+            sprite_zero_hit: self.sprite_zero_hit,
         }
     }
     #[cfg(not(feature = "debugger"))]
@@ -231,6 +232,7 @@ impl Ppu {
         PpuDebugState
     }
 
+    #[cfg(feature = "debugger")]
     pub fn peek(&self, address: u16) -> u8 {
         match address {
             0x2000 => self.last_write,
@@ -272,11 +274,6 @@ impl Ppu {
                 self.write_latch = false;
                 self.vblank = false;
                 self.last_status_read = self.current_tick;
-                if self.last_nmi_set == self.current_tick
-                    || self.last_nmi_set == self.current_tick - 1
-                {
-                    self.cpu_nmi.nmi_cancel();
-                }
                 status
             }
             0x2003 => self.last_write, //OAMADDR
@@ -330,21 +327,16 @@ impl Ppu {
         match address {
             0x2000 => {
                 //PPUCTRL
+                let was_nmi_enabled = self.is_nmi_enabled();
                 if self.reset_delay != 0 {
                     return;
                 }
-                let was_nmi_enabled = self.is_nmi_enabled();
                 self.regs[0] = value;
                 self.vram_addr_temp &= 0xf3ff;
                 self.vram_addr_temp |= self.base_nametable();
-                if self.in_vblank() && !was_nmi_enabled && self.is_nmi_enabled() && self.vblank {
-                    self.last_nmi_set = self.current_tick;
-                    self.cpu_nmi.nmi_req(1);
-                } else if !self.is_nmi_enabled()
-                    && self.vblank
-                    && self.last_nmi_set > self.current_tick - 2
-                {
-                    self.cpu_nmi.nmi_cancel();
+
+                if was_nmi_enabled != self.is_nmi_enabled() {
+                    self.last_nmi_toggle = self.current_tick;
                 }
             }
             0x2001 => {
@@ -441,49 +433,38 @@ impl Ppu {
         }
     }
 
+    pub fn nmi(&self) -> bool {
+        self.vblank && self.is_nmi_enabled()
+    }
+
     pub fn tick(&mut self) {
-        self.triggered_nmi = false;
         if self.reset_delay != 0 {
             self.reset_delay -= 1;
         }
-
-        self.current_tick += 1;
 
         let mut step = self.ppu_steps.step();
 
         match step.state {
             Some(StateChange::SkippedTick) => {
-                if self.frame % 2 == 1 && self.is_background_enabled() {
-                    step = self.ppu_steps.step();
-                }
-            }
-            Some(StateChange::SetNmi) => {
-                if self.current_tick > self.last_status_read {
-                    if self.is_nmi_enabled() {
-                        self.cpu_nmi.nmi_req(1);
-                        self.triggered_nmi = true;
-                        self.last_nmi_set = self.current_tick;
-                    }
+                if self.frame % 2 == 1 && self.is_rendering() {
+                    let _ = self.ppu_steps.step();
+                    step.scanline = 0;
+                    step.dot = 0;
                 }
             }
             Some(StateChange::SetVblank) => {
-                if self.current_tick > self.last_status_read + 1 {
-                    self.vblank = true;
-                }
-            }
-            Some(StateChange::ClearFlags) => {
-                // This is wrong... it should happen in ClearVblank, but this passes the tests
-                // this is symptom of some other timing mistake - only leaving this in so I can
-                // investigate later
-                self.sprite_zero_hit = false;
-                self.sprite_overflow = false;
+                self.vblank = self.last_status_read != self.current_tick;
             }
             Some(StateChange::ClearVblank) => {
+                self.sprite_zero_hit = false;
+                self.sprite_overflow = false;
                 self.vblank = false;
                 self.frame += 1;
             }
             None => (),
         }
+
+        self.current_tick += 1;
 
         // Always reset sprite eval, even if rendering disabled
         if let Some(SpriteStep::Reset) = step.sprite {
