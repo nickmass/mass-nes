@@ -1,3 +1,4 @@
+#[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 
 use crate::apu::Apu;
@@ -12,7 +13,6 @@ use crate::ppu::Ppu;
 use crate::region::Region;
 
 pub use crate::input::{Controller, InputDevice};
-use crate::SaveData;
 
 #[derive(Debug, Copy, Clone)]
 pub enum UserInput {
@@ -21,26 +21,26 @@ pub enum UserInput {
     Reset,
 }
 
-#[derive(SaveState)]
+#[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Machine {
-    #[save(skip)]
+    #[cfg_attr(feature = "save-states", save(skip))]
     region: Region,
     cycle: u64,
 
-    #[save(nested)]
+    #[cfg_attr(feature = "save-states", save(nested))]
     pub(crate) ppu: Ppu,
-    #[save(nested)]
+    #[cfg_attr(feature = "save-states", save(nested))]
     pub(crate) cpu: Cpu,
-    #[save(skip)]
+    #[cfg_attr(feature = "save-states", save(skip))]
     pub(crate) cpu_bus: AddressBus,
     pub(crate) cpu_mem: MemoryBlock,
-    #[save(nested)]
+    #[cfg_attr(feature = "save-states", save(nested))]
     pub(crate) apu: Apu,
-    #[save(nested)]
+    #[cfg_attr(feature = "save-states", save(nested))]
     pub(crate) input: Input,
-    #[save(nested)]
+    #[cfg_attr(feature = "save-states", save(nested))]
     pub(crate) mapper: RcMapper,
-    #[save(skip)]
+    #[cfg_attr(feature = "save-states", save(skip))]
     debug: Debug,
     cpu_pin_in: CpuPinIn,
 }
@@ -237,11 +237,13 @@ impl Machine {
         self.ppu.reset();
     }
 
-    pub fn save_state(&self) -> SaveData {
-        SaveData(<Self as SaveState>::save_state(self))
+    #[cfg(feature = "save-states")]
+    pub fn save_state(&self) -> crate::SaveData {
+        crate::SaveData(<Self as SaveState>::save_state(self))
     }
 
-    pub fn restore_state(&mut self, state: &SaveData) {
+    #[cfg(feature = "save-states")]
+    pub fn restore_state(&mut self, state: &crate::SaveData) {
         <Self as SaveState>::restore_state(self, &state.0)
     }
 }

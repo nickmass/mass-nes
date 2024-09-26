@@ -1,15 +1,18 @@
+#[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
 
 use crate::cartridge::Cartridge;
 
 use std::cell::Cell;
 
-#[derive(Copy, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub struct Page {
     start: usize,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone)]
 pub struct Pages {
     data: Vec<Cell<u8>>,
 }
@@ -37,7 +40,8 @@ impl Pages {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone)]
 pub struct MemoryBlock {
     mem: Pages,
     page: Page,
@@ -60,13 +64,15 @@ impl MemoryBlock {
     }
 }
 
-#[derive(Copy, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum MemKind {
     Prg,
     Chr,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone)]
 pub struct Banks {
     data: Vec<Page>,
     kind: MemKind,
@@ -97,19 +103,22 @@ impl Banks {
     }
 }
 
-#[derive(Copy, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 enum Mapped {
     Page(usize),
     Bank(usize),
 }
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum BankKind {
     Ram,
     Rom,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone)]
 pub struct MappedMemory {
     mem: Pages,
     banks: Banks,

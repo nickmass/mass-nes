@@ -1,3 +1,4 @@
+#[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 
 use crate::apu::ApuSnapshot;
@@ -5,9 +6,10 @@ use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
 use crate::region::Region;
 
-#[derive(Default, SaveState)]
+#[cfg_attr(feature = "save-states", derive(SaveState))]
+#[derive(Default)]
 pub struct Dmc {
-    #[save(skip)]
+    #[cfg_attr(feature = "save-states", save(skip))]
     region: Region,
     current_tick: u64,
     timer_counter: u16,

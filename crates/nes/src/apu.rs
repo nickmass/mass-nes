@@ -1,4 +1,6 @@
+#[cfg(feature = "save-states")]
 use nes_traits::SaveState;
+#[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
 
 use crate::bus::{Address, AddressBus, DeviceKind};
@@ -11,39 +13,40 @@ pub const LENGTH_TABLE: [u8; 0x20] = [
     192, 24, 72, 26, 16, 28, 32, 30,
 ];
 
-#[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum SequenceMode {
     FourStep,
     FiveStep,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct ApuSnapshot {
     pub is_half_frame: bool,
     pub is_quarter_frame: bool,
 }
 
-#[derive(SaveState)]
+#[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Apu {
-    #[save(skip)]
+    #[cfg_attr(feature = "save-states", save(skip))]
     region: Region,
-    #[save(nested)]
+    #[cfg_attr(feature = "save-states", save(nested))]
     pub pulse_one: Pulse,
-    #[save(nested)]
+    #[cfg_attr(feature = "save-states", save(nested))]
     pub pulse_two: Pulse,
-    #[save(nested)]
+    #[cfg_attr(feature = "save-states", save(nested))]
     pub triangle: Triangle,
-    #[save(nested)]
+    #[cfg_attr(feature = "save-states", save(nested))]
     pub noise: Noise,
-    #[save(nested)]
+    #[cfg_attr(feature = "save-states", save(nested))]
     pub dmc: Dmc,
-    #[save(skip)]
+    #[cfg_attr(feature = "save-states", save(skip))]
     pulse_table: Vec<i16>,
-    #[save(skip)]
+    #[cfg_attr(feature = "save-states", save(skip))]
     tnd_table: Vec<i16>,
-    #[save(skip)]
+    #[cfg_attr(feature = "save-states", save(skip))]
     samples: Vec<i16>,
-    #[save(skip)]
+    #[cfg_attr(feature = "save-states", save(skip))]
     sample_index: usize,
     current_tick: u32,
     reset_delay: u32,

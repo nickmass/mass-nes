@@ -9,7 +9,7 @@ mod sxrom;
 mod txrom;
 mod uxrom;
 
-use nes_traits::{BinarySaveState, SaveState};
+#[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
 
 use crate::bus::{AddressBus, BusKind};
@@ -18,7 +18,35 @@ use crate::cartridge::Cartridge;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-pub trait Mapper: BinarySaveState {
+pub use traits::MapperState;
+#[cfg(feature = "save-states")]
+mod traits {
+    use super::{Mapper, RcMapper};
+    use nes_traits::{BinarySaveState, SaveState};
+    pub trait MapperState: Mapper + BinarySaveState {}
+    impl<T: Mapper + BinarySaveState> MapperState for T {}
+
+    impl SaveState for RcMapper {
+        type Data = Vec<u8>;
+
+        fn save_state(&self) -> Self::Data {
+            self.0.borrow().binary_save_state()
+        }
+
+        fn restore_state(&mut self, state: &Self::Data) {
+            self.0.borrow_mut().binary_restore_state(state.as_slice());
+        }
+    }
+}
+
+#[cfg(not(feature = "save-states"))]
+mod traits {
+    use super::Mapper;
+    pub trait MapperState: Mapper {}
+    impl<T: Mapper> MapperState for T {}
+}
+
+pub trait Mapper {
     fn register(&self, cpu: &mut AddressBus);
 
     fn peek(&self, bus: BusKind, addr: u16) -> u8;
@@ -39,10 +67,10 @@ pub trait Mapper: BinarySaveState {
 }
 
 #[derive(Clone)]
-pub struct RcMapper(Rc<RefCell<dyn Mapper>>);
+pub struct RcMapper(Rc<RefCell<dyn MapperState>>);
 
 impl RcMapper {
-    fn new<T: Mapper + 'static>(mapper: T) -> Self {
+    fn new<T: MapperState + 'static>(mapper: T) -> Self {
         RcMapper(Rc::new(RefCell::new(mapper)))
     }
 }
@@ -81,18 +109,6 @@ impl Mapper for RcMapper {
     }
 }
 
-impl SaveState for RcMapper {
-    type Data = Vec<u8>;
-
-    fn save_state(&self) -> Self::Data {
-        self.0.borrow().binary_save_state()
-    }
-
-    fn restore_state(&mut self, state: &Self::Data) {
-        self.0.borrow_mut().binary_restore_state(state.as_slice());
-    }
-}
-
 pub fn ines(ines_number: u8, cart: Cartridge) -> RcMapper {
     match ines_number {
         0 => RcMapper::new(nrom::Nrom::new(cart)),
@@ -112,7 +128,8 @@ pub fn ines(ines_number: u8, cart: Cartridge) -> RcMapper {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Mirroring {
     Horizontal,
     Vertical,
@@ -120,14 +137,16 @@ pub enum Mirroring {
     Custom,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Nametable {
     InternalA,
     InternalB,
     External,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone)]
 pub struct SimpleMirroring {
     mirroring: std::cell::Cell<Mirroring>,
 }

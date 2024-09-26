@@ -1,8 +1,10 @@
+#[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
 
 pub const OPS: [Op; 0x100] = Op::load();
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum Instruction {
     Adc(ReadExec),
     And(ReadExec),
@@ -182,26 +184,30 @@ impl Instruction {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum ReadExec {
     Read,
     Exec,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum ReadDummyExec {
     Read,
     Dummy,
     Exec(u8),
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum Branch {
     Check,
     Branch,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum Break {
     ReadDummy,
     WriteRegPcHigh,
@@ -212,21 +218,24 @@ pub enum Break {
     UpdateRegPc(u16),
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum Jsr {
     ReadDummy,
     WriteRegPcHigh,
     WriteRegPcLow,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum DummyReadExec {
     Dummy,
     Read,
     Exec,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum Rti {
     Dummy,
     ReadRegP,
@@ -235,7 +244,8 @@ pub enum Rti {
     Exec(u16),
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum Rts {
     Dummy,
     ReadRegPcLow,
@@ -243,33 +253,38 @@ pub enum Rts {
     Exec(u16),
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum ZeroPage {
     Read,
     Decode,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum AbsoluteOffset {
     ReadLow,
     ReadHigh,
     Decode(u16),
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum Absolute {
     ReadLow,
     ReadHigh,
     Decode(u16),
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum ZeroPageOffset {
     ReadImmediate,
     ApplyOffset,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum IndirectAbsolute {
     ReadLow,
     ReadHigh,
@@ -278,13 +293,15 @@ pub enum IndirectAbsolute {
     Decode(u16),
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum Relative {
     ReadRegPc,
     Decode,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum IndirectX {
     ReadBase,
     ReadDummy,
@@ -293,7 +310,8 @@ pub enum IndirectX {
     Decode(u16),
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum IndirectY {
     ReadBase,
     ReadZeroPageLow,
@@ -301,19 +319,22 @@ pub enum IndirectY {
     Decode(u16),
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum Reg {
     X,
     Y,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum DummyRead {
     Always,
     OnCarry,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum Addressing {
     None,
     ZeroPage(ZeroPage),
@@ -348,7 +369,7 @@ impl Addressing {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Copy, Clone)]
 pub struct Op {
     pub instruction: Instruction,
     pub addressing: Addressing,

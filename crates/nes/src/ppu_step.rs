@@ -1,8 +1,10 @@
+#[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
 
 use crate::region::Region;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum BackgroundStep {
     VertReset,
     HorzReset,
@@ -15,7 +17,8 @@ pub enum BackgroundStep {
     HighPattern,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum SpriteStep {
     Clear,
     Eval,
@@ -26,14 +29,16 @@ pub enum SpriteStep {
     BackgroundWait,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum StateChange {
     SkippedTick,
     SetVblank,
     ClearVblank,
 }
 
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Default, Copy, Clone)]
 pub struct PpuStep {
     pub background: Option<BackgroundStep>,
     pub sprite: Option<SpriteStep>,
@@ -42,7 +47,8 @@ pub struct PpuStep {
     pub dot: u32,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone)]
 pub struct PpuSteps {
     index: usize,
     steps: Vec<PpuStep>,

@@ -1,3 +1,4 @@
+#[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
@@ -9,7 +10,7 @@ use std::cell::RefCell;
 
 use super::{Nametable, SimpleMirroring};
 
-#[derive(SaveState)]
+#[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct TxromState {
     current_tick: u64,
     last_a12_tick: u64,
@@ -114,11 +115,11 @@ impl TxromState {
     }
 }
 
-#[derive(SaveState)]
+#[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Txrom {
-    #[save(skip)]
+    #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: Cartridge,
-    #[save(nested)]
+    #[cfg_attr(feature = "save-states", save(nested))]
     state: RefCell<TxromState>,
     mirroring: SimpleMirroring,
 }

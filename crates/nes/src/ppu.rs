@@ -1,4 +1,6 @@
+#[cfg(feature = "save-states")]
 use nes_traits::SaveState;
+#[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
 
 use crate::bus::{AddressBus, BusKind, DeviceKind, RangeAndMask};
@@ -7,7 +9,8 @@ use crate::memory::MemoryBlock;
 use crate::ppu_step::*;
 use crate::region::{EmphMode, Region};
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 struct SpriteData {
     active: u8,
     x: u8,
@@ -44,15 +47,15 @@ pub struct PpuDebugState {
 #[derive(Debug, Copy, Clone)]
 pub struct PpuDebugState;
 
-#[derive(SaveState)]
+#[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Ppu {
-    #[save(skip)]
+    #[cfg_attr(feature = "save-states", save(skip))]
     region: Region,
-    #[save(skip)]
+    #[cfg_attr(feature = "save-states", save(skip))]
     mapper: RcMapper,
     nt_internal_a: MemoryBlock,
     nt_internal_b: MemoryBlock,
-    #[save(skip)]
+    #[cfg_attr(feature = "save-states", save(skip))]
     screen: Vec<u16>,
 
     current_tick: u64,
@@ -111,7 +114,7 @@ pub struct Ppu {
 
     reset_delay: u32,
 
-    #[save(skip)]
+    #[cfg_attr(feature = "save-states", save(skip))]
     ppu_steps: PpuSteps,
     step: PpuStep,
 }

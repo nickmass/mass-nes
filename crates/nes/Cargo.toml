@@ -9,9 +9,10 @@ path = "src/lib.rs"
 
 [dependencies]
 tracing = "0.1.40"
-nes-traits = { path = "../nes-traits" }
-serde = { version = "1.0.210", features = ["derive"] }
+nes-traits = { path = "../nes-traits", optional = true }
+serde = { version = "1.0.210", features = ["derive"], optional = true }
 
 [features]
-default = ["debugger"]
+default = ["debugger", "save-states"]
 debugger = []
+save-states = ["serde", "nes-traits"]

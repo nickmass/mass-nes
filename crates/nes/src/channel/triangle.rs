@@ -1,10 +1,12 @@
+#[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 
 use crate::apu::ApuSnapshot;
 use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
 
-#[derive(Default, SaveState)]
+#[cfg_attr(feature = "save-states", derive(SaveState))]
+#[derive(Default)]
 pub struct Triangle {
     timer_counter: u16,
     linear_counter: u8,

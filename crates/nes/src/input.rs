@@ -1,3 +1,4 @@
+#[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 
 use crate::bus::{Address, AddressBus, DeviceKind};
@@ -6,7 +7,7 @@ pub trait InputDevice {
     fn to_byte(&self) -> u8;
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Controller {
     pub a: bool,
     pub b: bool,
@@ -65,7 +66,8 @@ impl InputDevice for Controller {
     }
 }
 
-#[derive(Default, SaveState)]
+#[cfg_attr(feature = "save-states", derive(SaveState))]
+#[derive(Default)]
 pub struct Input {
     read_counter: u32,
     read_shifter: u8,

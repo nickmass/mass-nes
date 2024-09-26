@@ -1,3 +1,4 @@
+#[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
@@ -9,7 +10,7 @@ use std::cell::RefCell;
 
 use super::SimpleMirroring;
 
-#[derive(SaveState)]
+#[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Fme7State {
     prg: MappedMemory,
     chr: MappedMemory,
@@ -75,11 +76,11 @@ impl Fme7State {
     }
 }
 
-#[derive(SaveState)]
+#[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Fme7 {
-    #[save(skip)]
+    #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: Cartridge,
-    #[save(nested)]
+    #[cfg_attr(feature = "save-states", save(nested))]
     state: RefCell<Fme7State>,
 }
 

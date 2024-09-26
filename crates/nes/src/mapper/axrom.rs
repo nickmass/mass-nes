@@ -1,3 +1,4 @@
+#[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 
 use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind};
@@ -9,17 +10,17 @@ use std::cell::RefCell;
 
 use super::SimpleMirroring;
 
-#[derive(SaveState)]
+#[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct AxromState {
     prg: MappedMemory,
 }
 
-#[derive(SaveState)]
+#[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Axrom {
-    #[save(skip)]
+    #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: Cartridge,
     chr_ram: MemoryBlock,
-    #[save(nested)]
+    #[cfg_attr(feature = "save-states", save(nested))]
     state: RefCell<AxromState>,
     mirroring: SimpleMirroring,
 }

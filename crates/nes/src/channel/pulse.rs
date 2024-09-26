@@ -1,11 +1,14 @@
+#[cfg(feature = "save-states")]
 use nes_traits::SaveState;
+#[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
 
 use crate::apu::ApuSnapshot;
 use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
 
-#[derive(Copy, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum PulseChannel {
     InternalOne,
     InternalTwo,
@@ -17,7 +20,8 @@ impl Default for PulseChannel {
     }
 }
 
-#[derive(Default, SaveState)]
+#[cfg_attr(feature = "save-states", derive(SaveState))]
+#[derive(Default)]
 pub struct Pulse {
     channel: PulseChannel,
     period: u16,

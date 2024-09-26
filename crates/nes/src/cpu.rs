@@ -1,11 +1,14 @@
+#[cfg(feature = "save-states")]
 use nes_traits::SaveState;
+#[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
 
 use crate::ops::*;
 
 use std::cell::Cell;
 
-#[derive(Default, Debug, Copy, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Default, Debug, Copy, Clone)]
 pub struct CpuPinIn {
     pub data: u8,
     pub irq: bool,
@@ -16,21 +19,24 @@ pub struct CpuPinIn {
     pub nmi: bool,
 }
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 enum PendingDmcRead {
     Pending(u16, u32),
     Reading,
     Resume,
 }
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 enum OamDma {
     Prepare(u16),
     Read(u16, u16),
     Write(u16, u16),
 }
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 enum Irq {
     ReadPcOne(u16),
     ReadPcTwo(u16),
@@ -42,14 +48,16 @@ enum Irq {
     UpdateRegPc,
 }
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 enum Power {
     ReadRegPcLow,
     ReadRegPcHigh,
     UpdateRegPc(u16),
 }
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 pub enum TickResult {
     Read(u16),
     Write(u16, u8),
@@ -57,21 +65,24 @@ pub enum TickResult {
     DmcRead(u8),
 }
 
-#[derive(Copy, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 enum AddressResult {
     Address(u16),
     TickAddress(TickResult, u16),
     Next(TickResult, Addressing),
 }
 
-#[derive(Copy, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 enum ExecResult {
     Done,
     Next(TickResult, Instruction),
     Tick(TickResult),
 }
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 enum Stage {
     Fetch,
     Decode,
@@ -83,7 +94,8 @@ enum Stage {
     Irq(Irq),
 }
 
-#[derive(Debug, Clone, SaveState, Serialize, Deserialize)]
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone)]
 pub struct CpuNmiInterrupt {
     was_nmi_set: bool,
     pending_nmi: Option<u32>,
@@ -149,10 +161,10 @@ pub struct CpuDebugState {
 #[derive(Debug, Copy, Clone)]
 pub struct CpuDebugState;
 
-#[derive(SaveState)]
+#[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Cpu {
     current_tick: u64,
-    #[save(skip)]
+    #[cfg_attr(feature = "save-states", save(skip))]
     power_up_pc: Option<u16>,
     pin_in: CpuPinIn,
     reg_a: u32,

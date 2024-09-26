@@ -1,3 +1,4 @@
+#[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 
 use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind};
@@ -9,7 +10,7 @@ use std::cell::RefCell;
 
 use super::SimpleMirroring;
 
-#[derive(SaveState)]
+#[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct PxromState {
     prg_bank_count: usize,
     chr_bank_count: usize,
@@ -53,11 +54,11 @@ impl PxromState {
     }
 }
 
-#[derive(SaveState)]
+#[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Pxrom {
-    #[save(skip)]
+    #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: Cartridge,
-    #[save(nested)]
+    #[cfg_attr(feature = "save-states", save(nested))]
     state: RefCell<PxromState>,
     mirroring: SimpleMirroring,
 }
