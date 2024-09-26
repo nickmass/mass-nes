@@ -8,6 +8,7 @@ use std::collections::VecDeque;
 pub trait Audio {
     fn sample_rate(&self) -> u32;
     fn play(&mut self);
+    fn pause(&mut self);
 }
 
 pub struct Null;
@@ -18,6 +19,7 @@ impl Audio for Null {
     }
 
     fn play(&mut self) {}
+    fn pause(&mut self) {}
 }
 
 const BUFFER_FRAMES: f64 = 2.0;
@@ -256,6 +258,10 @@ impl<P: Parker> Audio for CpalAudio<P> {
     fn play(&mut self) {
         let _ = self.stream.play();
     }
+
+    fn pause(&mut self) {
+        let _ = self.stream.pause();
+    }
 }
 
 pub trait Parker {
@@ -356,6 +362,13 @@ impl<P: Parker> Audio for AudioDevices<P> {
         match self {
             AudioDevices::Cpal(a) => a.play(),
             AudioDevices::Null(a) => a.play(),
+        }
+    }
+
+    fn pause(&mut self) {
+        match self {
+            AudioDevices::Cpal(a) => a.pause(),
+            AudioDevices::Null(a) => a.pause(),
         }
     }
 }

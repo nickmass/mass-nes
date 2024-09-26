@@ -46,6 +46,7 @@ pub struct App<F, A, S> {
     input: InputMap,
     input_tx: Option<std::sync::mpsc::Sender<EmulatorInput>>,
     back_buffer: GfxBackBuffer,
+    pause: bool,
 }
 
 impl<F: Filter, A: Audio, S: FrameSync> App<F, A, S> {
@@ -83,6 +84,7 @@ impl<F: Filter, A: Audio, S: FrameSync> App<F, A, S> {
             input: InputMap::new(),
             input_tx: None,
             gamepad: Some(gamepad),
+            pause: false,
         }
     }
 
@@ -171,6 +173,15 @@ impl<F: Filter, A: Audio, S: FrameSync> winit::application::ApplicationHandler<U
                         self.input.press(key);
                     } else {
                         self.input.release(key);
+                    }
+
+                    if self.input.pause() {
+                        self.pause = !self.pause;
+                        if self.pause {
+                            self.audio.pause();
+                        } else {
+                            self.audio.play();
+                        }
                     }
                 }
             }

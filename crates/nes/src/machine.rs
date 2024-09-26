@@ -190,7 +190,7 @@ impl Machine {
         match self.cpu_bus.read_addr(addr) {
             Some((addr, DeviceKind::CpuRam)) => self.cpu_mem.read(addr),
             Some((addr, DeviceKind::Ppu)) => self.ppu.peek(addr),
-            Some((addr, DeviceKind::Mapper)) => self.mapper.peek(BusKind::Ppu, addr),
+            Some((addr, DeviceKind::Mapper)) => self.mapper.peek(BusKind::Cpu, addr),
             Some((addr, DeviceKind::Input)) => self.input.peek(addr, self.cpu_bus.open_bus.get()),
             Some((addr, DeviceKind::Apu)) => self.apu.peek(addr),
             None => self.cpu_bus.open_bus.get(),

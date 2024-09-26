@@ -106,6 +106,10 @@ impl InputMap {
     pub fn rewind(&self) -> bool {
         self.is_pressed(KeyCode::Tab) | self.is_pressed(Button::LeftTrigger)
     }
+
+    pub fn pause(&self) -> bool {
+        self.is_pressed(KeyCode::Space)
+    }
 }
 
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]

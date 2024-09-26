@@ -49,6 +49,7 @@ pub struct App<A> {
     input: InputMap,
     input_tx: Option<futures::channel::mpsc::Sender<EmulatorInput>>,
     gfx_worker: GfxWorker,
+    pause: bool,
 }
 
 impl<A: Audio + 'static> App<A> {
@@ -72,6 +73,7 @@ impl<A: Audio + 'static> App<A> {
             input_tx: None,
             gamepad: Some(gamepad),
             gfx_worker,
+            pause: false,
         })
     }
 
@@ -153,6 +155,15 @@ impl<A: Audio> ApplicationHandler<UserEvent> for App<A> {
                         self.input.press(key);
                     } else {
                         self.input.release(key);
+                    }
+
+                    if self.input.pause() {
+                        self.pause = !self.pause;
+                        if self.pause {
+                            self.audio.pause();
+                        } else {
+                            self.audio.play();
+                        }
                     }
                 }
             }
