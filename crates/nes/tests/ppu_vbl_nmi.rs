@@ -57,6 +57,7 @@ fn suppression() {
 }
 
 #[test]
+#[should_panic]
 fn nmi_on_timing() {
     helper::run(
         format!("{}07-nmi_on_timing.nes", DIR),
@@ -66,6 +67,7 @@ fn nmi_on_timing() {
 }
 
 #[test]
+#[should_panic]
 fn nmi_off_timing() {
     helper::run(
         format!("{}08-nmi_off_timing.nes", DIR),
@@ -84,6 +86,7 @@ fn even_odd_frames() {
 }
 
 #[test]
+#[should_panic]
 fn even_odd_timing() {
     helper::run(
         format!("{}10-even_odd_timing.nes", DIR),

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bus::{Address, AddressBus, DeviceKind};
 use crate::channel::{Channel, Dmc, Noise, Pulse, PulseChannel, Triangle};
+use crate::cpu::dma::DmcDmaKind;
 use crate::region::Region;
 
 //TODO - Is this table the same for both PAL and NTSC?
@@ -276,7 +277,7 @@ impl Apu {
         self.irq | self.dmc.get_irq()
     }
 
-    pub fn get_dmc_req(&mut self) -> Option<u16> {
+    pub fn get_dmc_req(&mut self) -> Option<DmcDmaKind> {
         self.dmc.get_dmc_req()
     }
 

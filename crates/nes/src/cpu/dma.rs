@@ -13,11 +13,19 @@ enum DmcDma {
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Copy, Clone)]
+pub enum DmcDmaKind {
+    Load(u16),
+    Reload(u16),
+}
+
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
 enum OamDma {
     Read,
     Write,
 }
 
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Copy, Clone)]
 enum Alignment {
     Get,
@@ -28,6 +36,7 @@ enum Alignment {
 #[derive(Debug, Clone)]
 pub struct Dma {
     cycle: u64,
+    dmc_timer: Option<(u64, u16)>,
     want_dmc: Option<u16>,
     want_oam: Option<u16>,
     dmc_step: Option<DmcDma>,
@@ -43,6 +52,7 @@ impl Dma {
     pub fn new() -> Self {
         Dma {
             cycle: 0,
+            dmc_timer: None,
             want_dmc: None,
             want_oam: None,
             dmc_step: None,
@@ -58,6 +68,15 @@ impl Dma {
     pub fn tick(&mut self, pin_in: CpuPinIn) -> Option<TickResult> {
         self.cycle += 1;
 
+        if let Some((timer, addr)) = self.dmc_timer {
+            if timer == 0 {
+                self.want_dmc = Some(addr);
+                self.dmc_timer = None;
+            } else {
+                self.dmc_timer = Some((timer - 1, addr));
+            }
+        }
+
         if let Some(halt_addr) = self.halt_addr {
             if let Some(tick) = self.dmc(pin_in) {
                 return Some(tick);
@@ -70,7 +89,7 @@ impl Dma {
             if self.want_dmc.or(self.want_oam).is_none() {
                 self.halt_addr.take().map(TickResult::Read)
             } else {
-                Some(TickResult::Read(halt_addr))
+                Some(TickResult::Idle(halt_addr))
             }
         } else {
             None
@@ -78,27 +97,28 @@ impl Dma {
     }
 
     pub fn try_halt(&mut self, tick: TickResult) -> Option<TickResult> {
-        let res = match (self.halt_addr, self.want_dmc.or(self.want_oam)) {
+        match (self.halt_addr, self.want_dmc.or(self.want_oam)) {
             (None, Some(_)) => match tick {
                 TickResult::Read(addr) => {
                     self.halt_addr = Some(addr);
-                    self.halt_addr
+                    self.halt_addr.map(TickResult::Read)
                 }
-                TickResult::Write(_, _) => None,
+                TickResult::Write(_, _) | TickResult::Idle(_) => None,
             },
-            (Some(_), Some(_)) => self.halt_addr,
-            (Some(_), None) => self.halt_addr.take(),
+            (Some(_), Some(_)) => self.halt_addr.map(TickResult::Idle),
+            (Some(_), None) => self.halt_addr.take().map(TickResult::Read),
             (None, None) => None,
-        };
-
-        res.map(TickResult::Read)
+        }
     }
 
+    // the specific orientation of Get/Put has major effects on test roms,
+    // I think the issue is in my APU tick implmentation being 1:1 with the
+    // cpu ticks instead of 1:2
     fn alignment(&self) -> Alignment {
         if self.cycle & 1 == 0 {
-            Alignment::Get
-        } else {
             Alignment::Put
+        } else {
+            Alignment::Get
         }
     }
 
@@ -106,12 +126,16 @@ impl Dma {
         self.dmc_sample.take()
     }
 
-    pub fn request_dmc_dma(&mut self, addr: u16) {
-        self.want_dmc = Some(addr);
+    pub fn request_dmc_dma(&mut self, dma: DmcDmaKind) {
+        match (dma, self.alignment()) {
+            (DmcDmaKind::Load(addr), Alignment::Get) => self.dmc_timer = Some((3, addr)),
+            (DmcDmaKind::Load(addr), Alignment::Put) => self.dmc_timer = Some((2, addr)),
+            (DmcDmaKind::Reload(addr), _) => self.want_dmc = Some(addr),
+        }
     }
 
     pub fn request_oam_dma(&mut self, high_addr: u16) {
-        self.want_oam = Some(high_addr);
+        self.want_oam = Some(high_addr)
     }
 
     fn dmc(&mut self, pin_in: CpuPinIn) -> Option<TickResult> {
@@ -158,8 +182,7 @@ impl Dma {
         };
 
         match (step, self.alignment()) {
-            (OamDma::Read, Alignment::Put) => None,
-            (OamDma::Write, Alignment::Get) => None,
+            (OamDma::Read, Alignment::Put) | (OamDma::Write, Alignment::Get) => None,
             (OamDma::Read, Alignment::Get) => {
                 if !self.oam_active {
                     self.want_oam = None;

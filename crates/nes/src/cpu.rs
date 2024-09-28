@@ -5,9 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ops::*;
 
-use std::cell::Cell;
-
-mod dma;
+pub mod dma;
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Default, Debug, Copy, Clone)]
@@ -17,22 +15,6 @@ pub struct CpuPinIn {
     pub reset: bool,
     pub power: bool,
     pub nmi: bool,
-}
-
-#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
-#[derive(Debug, Copy, Clone)]
-enum PendingDmcRead {
-    Pending(u16, u32),
-    Reading,
-    Resume,
-}
-
-#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
-#[derive(Debug, Copy, Clone)]
-enum OamDma {
-    Prepare(u16),
-    Read(u16, u16),
-    Write(u16, u16),
 }
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
@@ -61,6 +43,7 @@ enum Power {
 pub enum TickResult {
     Read(u16),
     Write(u16, u8),
+    Idle(u16),
 }
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
@@ -176,12 +159,7 @@ pub struct Cpu {
     flag_v: u32,
     flag_s: u32,
     stage: Stage,
-    last_tick: TickResult,
     instruction_addr: Option<u16>,
-    dmc_hold: u8,
-    dmc_hold_addr: u16,
-    pending_dmc: Option<PendingDmcRead>,
-    pending_oam_dma: Cell<Option<u8>>,
     pending_power: bool,
     pending_reset: bool,
     irq_delay: u32,
@@ -208,12 +186,7 @@ impl Cpu {
             flag_v: 0,
             flag_s: 0,
             instruction_addr: None,
-            last_tick: TickResult::Read(0),
-            dmc_hold: 0,
-            dmc_hold_addr: 0,
             stage: Stage::Fetch,
-            pending_dmc: None,
-            pending_oam_dma: Cell::new(None),
             pending_power: false,
             pending_reset: false,
             irq_delay: 0,

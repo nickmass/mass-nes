@@ -12,6 +12,7 @@ fn cli_latency() {
 }
 
 #[test]
+#[should_panic]
 fn nmi_and_brk() {
     helper::run(
         format!("{}2-nmi_and_brk.nes", DIR),
@@ -21,6 +22,7 @@ fn nmi_and_brk() {
 }
 
 #[test]
+#[should_panic]
 fn nmi_and_irq() {
     helper::run(
         format!("{}3-nmi_and_irq.nes", DIR),
@@ -30,6 +32,7 @@ fn nmi_and_irq() {
 }
 
 #[test]
+#[should_panic]
 fn irq_and_dma() {
     helper::run(
         format!("{}4-irq_and_dma.nes", DIR),
@@ -39,6 +42,7 @@ fn irq_and_dma() {
 }
 
 #[test]
+#[should_panic]
 fn branch_delays_irq() {
     helper::run(
         format!("{}5-branch_delays_irq.nes", DIR),

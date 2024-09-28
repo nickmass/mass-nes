@@ -126,6 +126,14 @@ impl Machine {
                     self.cpu_pin_in.data = value;
                 }
                 TickResult::Write(addr, value) => self.write(addr, value),
+                // Idle ticks while DMC/OAM DMA holds the bus, this is a simplification as
+                // the behavior depends on the register and the model of console.
+                // 200x registers will see multiple reads and no idle cycles as the are
+                // external to the CPU, while 400X registers (controllers) will see one
+                // read per contiguous set of writes so using idle cycles may be useful.
+                // Going to use idle cycles for now as they seem less prone to breaking
+                // actual games.
+                TickResult::Idle(_) => (),
             }
 
             self.tick_ppu(cpu_state);

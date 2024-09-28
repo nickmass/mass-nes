@@ -4,6 +4,7 @@ use nes_traits::SaveState;
 use crate::apu::ApuSnapshot;
 use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
+use crate::cpu::dma::DmcDmaKind;
 use crate::region::Region;
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
@@ -24,7 +25,7 @@ pub struct Dmc {
     irq: bool,
     silence: bool,
     regs: [u8; 4],
-    dmc_req: Option<u16>,
+    dmc_req: Option<DmcDmaKind>,
 }
 
 impl Dmc {
@@ -56,7 +57,7 @@ impl Dmc {
         self.irq
     }
 
-    pub fn get_dmc_req(&mut self) -> Option<u16> {
+    pub fn get_dmc_req(&mut self) -> Option<DmcDmaKind> {
         self.dmc_req.take()
     }
 
@@ -112,7 +113,7 @@ impl Channel for Dmc {
         self.current_tick += 1;
 
         if !self.read_pending && self.sample_buffer_empty && self.bytes_remaining != 0 {
-            self.dmc_req = Some(self.address_counter);
+            self.dmc_req = Some(DmcDmaKind::Reload(self.address_counter));
             self.read_pending = true;
         }
 
@@ -159,6 +160,12 @@ impl Channel for Dmc {
             self.bytes_remaining = self.sample_length();
             self.address_counter = self.sample_address();
         }
+
+        if !self.read_pending && self.sample_buffer_empty && self.bytes_remaining != 0 {
+            self.read_pending = true;
+            self.dmc_req = Some(DmcDmaKind::Load(self.address_counter));
+        }
+
         self.irq = false;
     }
 
