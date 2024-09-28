@@ -7,6 +7,8 @@ use crate::ops::*;
 
 use std::cell::Cell;
 
+mod dma;
+
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Default, Debug, Copy, Clone)]
 pub struct CpuPinIn {
@@ -14,8 +16,6 @@ pub struct CpuPinIn {
     pub irq: bool,
     pub reset: bool,
     pub power: bool,
-    pub dmc_req: Option<u16>,
-    pub oam_req: Option<u8>,
     pub nmi: bool,
 }
 
@@ -61,8 +61,6 @@ enum Power {
 pub enum TickResult {
     Read(u16),
     Write(u16, u8),
-    Idle,
-    DmcRead(u8),
 }
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
@@ -88,7 +86,6 @@ enum Stage {
     Decode,
     Address(Addressing, Instruction),
     Execute(u16, Instruction),
-    OamDma(OamDma),
     Reset(Power),
     Power(Power),
     Irq(Irq),
@@ -190,6 +187,7 @@ pub struct Cpu {
     irq_delay: u32,
     irq_set_delay: u32,
     nmi: CpuNmiInterrupt,
+    pub dma: dma::Dma,
 }
 
 impl Cpu {
@@ -221,6 +219,7 @@ impl Cpu {
             irq_delay: 0,
             irq_set_delay: 0,
             nmi: CpuNmiInterrupt::new(),
+            dma: dma::Dma::new(),
         }
     }
 
@@ -308,23 +307,9 @@ impl Cpu {
         self.flag_s = val & 0x80;
     }
 
-    fn oam_dma_req(&self) {
-        if let Some(addr) = self.pin_in.oam_req {
-            self.pending_oam_dma.set(Some(addr));
-        }
-    }
-
-    fn dmc_req(&mut self) {
-        if let Some(addr) = self.pin_in.dmc_req {
-            self.pending_dmc = Some(PendingDmcRead::Pending(addr, 4));
-        }
-    }
-
     pub fn tick(&mut self, pin_in: CpuPinIn) -> TickResult {
         self.pin_in = pin_in;
         self.current_tick += 1;
-        self.oam_dma_req();
-        self.dmc_req();
         self.nmi.tick(self.pin_in.nmi);
         self.instruction_addr = None;
 
@@ -335,48 +320,12 @@ impl Cpu {
             self.pending_reset = true;
         }
 
-        match self.pending_dmc {
-            Some(PendingDmcRead::Pending(addr, count)) => {
-                let mut was_read = false;
-                if let TickResult::Read(addr) = self.last_tick {
-                    self.dmc_hold = self.pin_in.data;
-                    self.dmc_hold_addr = addr;
-                    was_read = true;
-                }
-
-                if count == 0 {
-                    self.pending_dmc = Some(PendingDmcRead::Reading);
-                    return TickResult::Read(addr);
-                } else {
-                    self.pending_dmc = Some(PendingDmcRead::Pending(addr, count - 1));
-                    if was_read {
-                        return TickResult::Idle;
-                    }
-                }
-            }
-            Some(PendingDmcRead::Reading) => {
-                self.pending_dmc = Some(PendingDmcRead::Resume);
-                return TickResult::DmcRead(self.pin_in.data);
-            }
-            Some(PendingDmcRead::Resume) => {
-                self.pending_dmc = None;
-                self.pin_in.data = self.dmc_hold;
-            }
-            None => (),
+        if let Some(result) = self.dma.tick(pin_in) {
+            result
+        } else {
+            let tick = self.step();
+            self.dma.try_halt(tick).unwrap_or(tick)
         }
-
-        self.last_tick = match self.stage {
-            Stage::Fetch => self.fetch(),
-            Stage::Decode => self.decode(),
-            Stage::Address(addressing, instruction) => self.addressing(addressing, instruction),
-            Stage::Execute(address, instruction) => self.execute(address, instruction),
-            Stage::OamDma(oam) => self.oam_dma(oam),
-            Stage::Irq(irq) => self.irq_nmi(irq),
-            Stage::Power(step) => self.power(step),
-            Stage::Reset(step) => self.reset(step),
-        };
-
-        self.last_tick
     }
 
     #[cfg(feature = "debugger")]
@@ -413,31 +362,6 @@ impl Cpu {
         let addr = self.reg_sp as u16 | 0x100;
         self.reg_sp = self.reg_sp.wrapping_sub(1) & 0xff;
         TickResult::Write(addr, value)
-    }
-
-    fn oam_dma(&mut self, oam: OamDma) -> TickResult {
-        match oam {
-            OamDma::Prepare(addr) => {
-                // Oam idles for 1 or 2 cycles depedning on odd/even cycle.
-                // total duration is 513 or 514
-                if self.current_tick & 1 == 0 {
-                    self.stage = Stage::OamDma(OamDma::Read(addr << 8, 0))
-                }
-                TickResult::Idle
-            }
-            OamDma::Read(high_addr, low_addr) => {
-                self.stage = Stage::OamDma(OamDma::Write(high_addr, low_addr));
-                TickResult::Read(high_addr | low_addr)
-            }
-            OamDma::Write(high_addr, low_addr) => {
-                self.stage = if low_addr == 255 {
-                    Stage::Fetch
-                } else {
-                    Stage::OamDma(OamDma::Read(high_addr, low_addr + 1))
-                };
-                TickResult::Write(0x2004, self.pin_in.data)
-            }
-        }
     }
 
     fn irq_nmi(&mut self, irq: Irq) -> TickResult {
@@ -490,20 +414,26 @@ impl Cpu {
         }
     }
 
-    fn interrupt(&mut self) -> Stage {
-        let mut stage = Stage::Decode;
-
-        if let Some(addr) = self.pending_oam_dma.get() {
-            self.pending_oam_dma.set(None);
-            stage = Stage::OamDma(OamDma::Prepare(addr as u16));
+    fn step(&mut self) -> TickResult {
+        match self.stage {
+            Stage::Fetch => self.fetch(),
+            Stage::Decode => self.decode(),
+            Stage::Address(addressing, instruction) => self.addressing(addressing, instruction),
+            Stage::Execute(address, instruction) => self.execute(address, instruction),
+            Stage::Irq(irq) => self.irq_nmi(irq),
+            Stage::Power(step) => self.power(step),
+            Stage::Reset(step) => self.reset(step),
         }
+    }
 
+    fn interrupt(&mut self) -> Option<Stage> {
+        let mut stage = None;
         if self.pin_in.irq && (self.flag_i == 0 || self.irq_set_delay != 0) && self.irq_delay == 0 {
             if self.irq_set_delay != 0 {
                 self.irq_set_delay -= 1;
             }
 
-            stage = Stage::Irq(Irq::ReadPcOne(0xfffe))
+            stage = Some(Stage::Irq(Irq::ReadPcOne(0xfffe)));
         }
 
         if self.irq_set_delay != 0 {
@@ -515,37 +445,31 @@ impl Cpu {
         }
 
         if self.nmi.interrupt() {
-            stage = Stage::Irq(Irq::ReadPcOne(0xfffa));
+            stage = Some(Stage::Irq(Irq::ReadPcOne(0xfffa)));
         }
 
         if self.pin_in.power {
             self.pin_in.power = false;
-            stage = Stage::Power(Power::ReadRegPcLow);
+            stage = Some(Stage::Power(Power::ReadRegPcLow));
         }
 
         if self.pending_reset {
             self.pending_reset = false;
-            stage = Stage::Reset(Power::ReadRegPcLow);
+            stage = Some(Stage::Reset(Power::ReadRegPcLow));
         }
 
         stage
     }
 
     fn fetch(&mut self) -> TickResult {
-        self.stage = self.interrupt();
-
-        match self.stage {
-            Stage::Fetch => unreachable!(),
-            Stage::Decode => {
-                self.instruction_addr = Some(self.reg_pc as u16);
-                self.read_pc()
-            }
-            Stage::Address(addressing, instruction) => self.addressing(addressing, instruction),
-            Stage::Execute(address, instruction) => self.execute(address, instruction),
-            Stage::OamDma(oam) => self.oam_dma(oam),
-            Stage::Irq(irq) => self.irq_nmi(irq),
-            Stage::Power(step) => self.power(step),
-            Stage::Reset(step) => self.reset(step),
+        if let Some(interrupt) = self.interrupt() {
+            self.stage = interrupt;
+            self.step()
+        } else {
+            self.stage = self.interrupt().unwrap_or(Stage::Fetch);
+            self.instruction_addr = Some(self.reg_pc as u16);
+            self.stage = Stage::Decode;
+            self.read_pc()
         }
     }
 

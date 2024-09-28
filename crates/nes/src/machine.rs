@@ -110,6 +110,10 @@ impl Machine {
             let ppu_state = self.ppu.debug_state();
             self.debug.trace(&self, cpu_state, ppu_state);
 
+            if let Some(sample) = self.cpu.dma.dmc_sample() {
+                self.apu.dmc.dmc_read(sample);
+            }
+
             self.apu.tick();
             self.mapper.tick();
 
@@ -122,24 +126,27 @@ impl Machine {
                     self.cpu_pin_in.data = value;
                 }
                 TickResult::Write(addr, value) => self.write(addr, value),
-                // DMC Read or OAM DMA holding bus
-                TickResult::Idle => {}
-                TickResult::DmcRead(value) => self.apu.dmc.dmc_read(value),
             }
 
             self.tick_ppu(cpu_state);
-            self.cpu_pin_in.nmi = self.ppu.nmi();
 
             if self.region.extra_ppu_tick() && self.cycle % 5 == 0 {
                 self.tick_ppu(cpu_state);
+            }
+
+            if let Some(addr) = self.apu.get_dmc_req() {
+                self.cpu.dma.request_dmc_dma(addr);
+            }
+
+            if let Some(addr) = self.apu.get_oam_req() {
+                self.cpu.dma.request_oam_dma(addr as u16);
             }
 
             let apu_irq = self.apu.get_irq();
             let mapper_irq = self.mapper.get_irq();
 
             self.cpu_pin_in.irq = apu_irq | mapper_irq;
-            self.cpu_pin_in.dmc_req = self.apu.get_dmc_req();
-            self.cpu_pin_in.oam_req = self.apu.get_oam_req();
+            self.cpu_pin_in.nmi = self.ppu.nmi();
 
             self.cpu_pin_in.power = false;
             self.cpu_pin_in.reset = false;
