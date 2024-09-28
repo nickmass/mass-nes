@@ -51,19 +51,23 @@ pub trait Mapper {
 
     fn peek(&self, bus: BusKind, addr: u16) -> u8;
 
-    fn read(&self, bus: BusKind, addr: u16) -> u8;
+    fn read(&mut self, bus: BusKind, addr: u16) -> u8;
 
-    fn write(&self, bus: BusKind, addr: u16, value: u8);
+    fn write(&mut self, bus: BusKind, addr: u16, value: u8);
 
-    fn get_irq(&self) -> bool {
+    fn get_irq(&mut self) -> bool {
         false
     }
 
-    fn tick(&self) {}
+    fn tick(&mut self) {}
 
-    fn update_ppu_addr(&self, _addr: u16) {}
+    fn update_ppu_addr(&mut self, _addr: u16) {}
 
-    fn ppu_fetch(&self, address: u16) -> Nametable;
+    fn ppu_fetch(&mut self, address: u16) -> Nametable;
+
+    fn get_sample(&self) -> Option<i16> {
+        None
+    }
 }
 
 #[derive(Clone)]
@@ -73,39 +77,41 @@ impl RcMapper {
     fn new<T: MapperState + 'static>(mapper: T) -> Self {
         RcMapper(Rc::new(RefCell::new(mapper)))
     }
-}
 
-impl Mapper for RcMapper {
-    fn register(&self, cpu: &mut AddressBus) {
+    pub fn register(&self, cpu: &mut AddressBus) {
         self.0.borrow().register(cpu)
     }
 
-    fn peek(&self, bus: BusKind, addr: u16) -> u8 {
+    pub fn peek(&self, bus: BusKind, addr: u16) -> u8 {
         self.0.borrow().peek(bus, addr)
     }
 
-    fn read(&self, bus: BusKind, addr: u16) -> u8 {
-        self.0.borrow().read(bus, addr)
+    pub fn read(&self, bus: BusKind, addr: u16) -> u8 {
+        self.0.borrow_mut().read(bus, addr)
     }
 
-    fn write(&self, bus: BusKind, addr: u16, value: u8) {
-        self.0.borrow().write(bus, addr, value)
+    pub fn write(&self, bus: BusKind, addr: u16, value: u8) {
+        self.0.borrow_mut().write(bus, addr, value)
     }
 
-    fn ppu_fetch(&self, address: u16) -> Nametable {
-        self.0.borrow().ppu_fetch(address)
+    pub fn ppu_fetch(&self, address: u16) -> Nametable {
+        self.0.borrow_mut().ppu_fetch(address)
     }
 
-    fn get_irq(&self) -> bool {
-        self.0.borrow().get_irq()
+    pub fn get_irq(&self) -> bool {
+        self.0.borrow_mut().get_irq()
     }
 
-    fn tick(&self) {
-        self.0.borrow().tick()
+    pub fn tick(&self) {
+        self.0.borrow_mut().tick()
     }
 
-    fn update_ppu_addr(&self, addr: u16) {
-        self.0.borrow().update_ppu_addr(addr)
+    pub fn update_ppu_addr(&self, addr: u16) {
+        self.0.borrow_mut().update_ppu_addr(addr)
+    }
+
+    pub fn get_sample(&self) -> Option<i16> {
+        self.0.borrow().get_sample()
     }
 }
 

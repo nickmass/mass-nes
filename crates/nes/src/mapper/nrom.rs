@@ -47,7 +47,7 @@ impl Mapper for Nrom {
         }
     }
 
-    fn read(&self, bus: BusKind, addr: u16) -> u8 {
+    fn read(&mut self, bus: BusKind, addr: u16) -> u8 {
         match bus {
             BusKind::Cpu => self.cartridge.prg_rom[addr as usize],
             BusKind::Ppu => {
@@ -60,7 +60,7 @@ impl Mapper for Nrom {
         }
     }
 
-    fn write(&self, bus: BusKind, addr: u16, value: u8) {
+    fn write(&mut self, bus: BusKind, addr: u16, value: u8) {
         match bus {
             BusKind::Cpu => (),
             BusKind::Ppu => {
@@ -71,7 +71,7 @@ impl Mapper for Nrom {
         }
     }
 
-    fn ppu_fetch(&self, address: u16) -> super::Nametable {
+    fn ppu_fetch(&mut self, address: u16) -> super::Nametable {
         self.mirroring.ppu_fetch(address)
     }
 }

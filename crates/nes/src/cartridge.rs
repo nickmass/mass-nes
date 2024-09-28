@@ -88,7 +88,11 @@ impl Cartridge {
         let chr_rom_bytes = (header[5] as usize | (chr_hi << 8)) << 13;
 
         let chr_ram_bytes = if nes_2 {
-            64 << (header[11] & 0x0f)
+            if header[11] & 0x0f != 0 {
+                64 << (header[11] & 0x0f)
+            } else {
+                0
+            }
         } else {
             if chr_rom_bytes == 0 {
                 0x2000

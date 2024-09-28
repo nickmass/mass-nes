@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::bus::{Address, AddressBus, DeviceKind};
 use crate::channel::{Channel, Dmc, Noise, Pulse, PulseChannel, Triangle};
 use crate::cpu::dma::DmcDmaKind;
+use crate::mapper::RcMapper;
 use crate::region::Region;
 
 //TODO - Is this table the same for both PAL and NTSC?
@@ -31,6 +32,8 @@ pub struct ApuSnapshot {
 pub struct Apu {
     #[cfg_attr(feature = "save-states", save(skip))]
     region: Region,
+    #[cfg_attr(feature = "save-states", save(skip))]
+    mapper: RcMapper,
     #[cfg_attr(feature = "save-states", save(nested))]
     pub pulse_one: Pulse,
     #[cfg_attr(feature = "save-states", save(nested))]
@@ -57,10 +60,11 @@ pub struct Apu {
     irq: bool,
     last_4017: u8,
     oam_req: Option<u8>,
+    ext_audio: bool,
 }
 
 impl Apu {
-    pub fn new(region: Region) -> Apu {
+    pub fn new(region: Region, mapper: RcMapper) -> Apu {
         let mut pulse_table = Vec::new();
         for x in 0..32 {
             let f_val = 95.52 / (8128.0 / (x as f64) + 100.0);
@@ -75,6 +79,7 @@ impl Apu {
 
         Apu {
             region,
+            mapper,
             pulse_one: Pulse::new(PulseChannel::InternalOne),
             pulse_two: Pulse::new(PulseChannel::InternalTwo),
             triangle: Triangle::new(),
@@ -92,6 +97,7 @@ impl Apu {
             irq: false,
             last_4017: 0,
             oam_req: None,
+            ext_audio: false,
         }
     }
 
@@ -265,9 +271,18 @@ impl Apu {
 
         let pulse_out = self.pulse_table[(pulse1 + pulse2) as usize];
         let tnd_out = self.tnd_table[((3 * triangle) + (2 * noise) + dmc) as usize];
+        self.ext_audio |= self.mapper.get_sample().is_some();
+        let ext_out = self.mapper.get_sample().unwrap_or(0);
 
-        if let Some(v) = self.samples.get_mut(self.sample_index) {
-            *v = pulse_out + tnd_out;
+        if self.ext_audio {
+            // laxy mixing
+            if let Some(v) = self.samples.get_mut(self.sample_index) {
+                *v = ((pulse_out + tnd_out) / 2) + (ext_out / 2);
+            }
+        } else {
+            if let Some(v) = self.samples.get_mut(self.sample_index) {
+                *v = pulse_out + tnd_out + ext_out;
+            }
         }
 
         self.sample_index += 1;

@@ -7,7 +7,7 @@ use crate::cartridge::Cartridge;
 use crate::cpu::{Cpu, CpuDebugState, CpuPinIn, TickResult};
 use crate::debug::Debug;
 use crate::input::Input;
-use crate::mapper::{Mapper, RcMapper};
+use crate::mapper::RcMapper;
 use crate::memory::MemoryBlock;
 use crate::ppu::Ppu;
 use crate::region::Region;
@@ -50,9 +50,9 @@ impl Machine {
         let cpu = Cpu::new();
         let mut cpu_bus = AddressBus::new(0, 0xffff);
         let cpu_mem = MemoryBlock::new(2);
-        let apu = Apu::new(region);
         let input = Input::new();
         let mapper = cartridge.build_mapper();
+        let apu = Apu::new(region, mapper.clone());
         let ppu = Ppu::new(region, mapper.clone());
 
         cpu_bus.register_read(DeviceKind::CpuRam, RangeAndMask(0x0000, 0x2000, 0x07ff));

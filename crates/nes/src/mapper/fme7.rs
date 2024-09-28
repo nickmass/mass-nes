@@ -6,12 +6,45 @@ use crate::cartridge::Cartridge;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind};
 
-use std::cell::RefCell;
-
 use super::SimpleMirroring;
 
+#[derive(Debug, Copy, Clone)]
+enum Channel {
+    A,
+    B,
+    C,
+}
+
+impl Channel {
+    fn period_low_reg(&self) -> usize {
+        match self {
+            Channel::A => 0x0,
+            Channel::B => 0x2,
+            Channel::C => 0x4,
+        }
+    }
+
+    fn period_high_reg(&self) -> usize {
+        match self {
+            Channel::A => 0x1,
+            Channel::B => 0x3,
+            Channel::C => 0x5,
+        }
+    }
+
+    fn envelope_reg(&self) -> usize {
+        match self {
+            Channel::A => 0x8,
+            Channel::B => 0x9,
+            Channel::C => 0xa,
+        }
+    }
+}
+
 #[cfg_attr(feature = "save-states", derive(SaveState))]
-pub struct Fme7State {
+pub struct Fme7 {
+    #[cfg_attr(feature = "save-states", save(skip))]
+    cartridge: Cartridge,
     prg: MappedMemory,
     chr: MappedMemory,
     command: u8,
@@ -23,9 +56,140 @@ pub struct Fme7State {
     ram_protect: bool,
     ram_enable: bool,
     mirroring: SimpleMirroring,
+
+    audio_enabled: bool,
+    audio_protect: bool,
+    audio_regs: [u8; 0xf],
+    audio_reg_select: u8,
+    audio_counter: u64,
+
+    channel_counters: [u16; 3],
+    noise_counter: u16,
+    envelope_counter: u16,
+
+    channel_state: [bool; 3],
+    noise_seed: u32,
+    envelope_volume: u8,
+
+    audio_lookup: Vec<i16>,
+    sample: i16,
 }
 
-impl Fme7State {
+impl Fme7 {
+    pub fn new(cartridge: Cartridge) -> Fme7 {
+        let chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
+        let mut prg = MappedMemory::new(&cartridge, 0x6000, 16, 48, MemKind::Prg);
+        prg.map(0x6000, 16, 0, BankKind::Ram);
+        prg.map(
+            0xe000,
+            8,
+            (cartridge.prg_rom.len() / 0x2000) - 1,
+            BankKind::Rom,
+        );
+        let mirroring = SimpleMirroring::new(cartridge.mirroring.into());
+
+        let mut audio_lookup = vec![0i16; 32];
+        let mut audio_tmp = [0f32; 32];
+
+        let inc = 10.0f32.powf(1.0 / 10.0);
+        let mut next = 1.0;
+
+        for i in audio_tmp.iter_mut().skip(2) {
+            *i = next;
+            next *= inc;
+        }
+
+        let max = audio_tmp[31];
+        let sample_max = i16::MAX as f32;
+        let channel_count = 3.0;
+
+        for (i, v) in audio_lookup.iter_mut().zip(audio_tmp) {
+            let ratio = v / max;
+            *i = (sample_max * ratio / channel_count) as i16;
+        }
+
+        let mut mapper = Fme7 {
+            cartridge,
+            prg,
+            chr,
+            command: 0,
+            parameter: 0,
+            irq_enable: false,
+            irq_counter_enable: false,
+            irq_counter: 0,
+            irq: false,
+            ram_protect: false,
+            ram_enable: false,
+            mirroring,
+
+            audio_enabled: false,
+            audio_protect: false,
+            audio_regs: [0; 0xf],
+            audio_reg_select: 0,
+            audio_counter: 0,
+
+            channel_counters: [0; 3],
+            noise_counter: 0,
+            envelope_counter: 0,
+
+            channel_state: [false; 3],
+            noise_seed: 0,
+            envelope_volume: 0,
+
+            audio_lookup,
+            sample: 0,
+        };
+
+        mapper.sync();
+
+        mapper
+    }
+
+    fn read_cpu(&self, addr: u16) -> u8 {
+        self.prg.read(&self.cartridge, addr)
+    }
+
+    fn read_ppu(&self, addr: u16) -> u8 {
+        self.chr.read(&self.cartridge, addr)
+    }
+
+    fn write_cpu(&mut self, addr: u16, value: u8) {
+        if addr & 0xe000 == 0x6000 {
+            if self.ram_enable && !self.ram_protect {
+                self.prg.write(addr, value);
+            }
+            return;
+        }
+
+        match addr {
+            0x8000 => {
+                self.command = value & 0xf;
+            }
+            0xa000 => {
+                self.parameter = value;
+                self.sync();
+            }
+            0xc000 => {
+                self.audio_protect = value & 0xf0 != 0;
+                self.audio_reg_select = value & 0xf;
+            }
+            0xe000 => {
+                if !self.audio_protect {
+                    self.audio_enabled = true;
+                    self.audio_regs[self.audio_reg_select as usize] = value;
+                    if self.audio_reg_select == 0x0d {
+                        self.envelope_counter = 0;
+                    }
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn write_ppu(&mut self, addr: u16, value: u8) {
+        self.chr.write(addr, value);
+    }
+
     fn sync(&mut self) {
         match self.command {
             0..=7 => self.chr.map(
@@ -74,83 +238,112 @@ impl Fme7State {
             _ => unreachable!(),
         }
     }
-}
 
-#[cfg_attr(feature = "save-states", derive(SaveState))]
-pub struct Fme7 {
-    #[cfg_attr(feature = "save-states", save(skip))]
-    cartridge: Cartridge,
-    #[cfg_attr(feature = "save-states", save(nested))]
-    state: RefCell<Fme7State>,
-}
+    fn channel_period(&self, channel: Channel) -> u16 {
+        let low = self.audio_regs[channel.period_low_reg()] as u16;
+        let high = self.audio_regs[channel.period_high_reg()] as u16 & 0xf;
 
-impl Fme7 {
-    pub fn new(cartridge: Cartridge) -> Fme7 {
-        let chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
-        let mut prg = MappedMemory::new(&cartridge, 0x6000, 16, 48, MemKind::Prg);
-        prg.map(0x6000, 16, 0, BankKind::Ram);
-        prg.map(
-            0xe000,
-            8,
-            (cartridge.prg_rom.len() / 0x2000) - 1,
-            BankKind::Rom,
-        );
-
-        let mut rom_state = Fme7State {
-            prg,
-            chr,
-            command: 0,
-            parameter: 0,
-            irq_enable: false,
-            irq_counter_enable: false,
-            irq_counter: 0,
-            irq: false,
-            ram_protect: false,
-            ram_enable: false,
-            mirroring: SimpleMirroring::new(cartridge.mirroring.into()),
-        };
-
-        rom_state.sync();
-
-        Fme7 {
-            state: RefCell::new(rom_state),
-            cartridge,
+        let period = high << 8 | low;
+        if period == 0 {
+            1
+        } else {
+            period
         }
     }
 
-    fn read_cpu(&self, addr: u16) -> u8 {
-        self.state.borrow().prg.read(&self.cartridge, addr)
+    fn noise_period(&self) -> u16 {
+        self.audio_regs[0x6] as u16 & 0x1f
     }
 
-    fn read_ppu(&self, addr: u16) -> u8 {
-        self.state.borrow().chr.read(&self.cartridge, addr)
+    fn tone_enabled(&self, channel: Channel) -> bool {
+        let val = self.audio_regs[0x7];
+
+        match channel {
+            Channel::A => val & 0x1 == 0,
+            Channel::B => val & 0x2 == 0,
+            Channel::C => val & 0x4 == 0,
+        }
     }
 
-    fn write_cpu(&self, addr: u16, value: u8) {
-        let mut rom = self.state.borrow_mut();
-        if addr & 0xe000 == 0x6000 {
-            if rom.ram_enable && !rom.ram_protect {
-                rom.prg.write(addr, value);
-            }
+    #[allow(dead_code)]
+    fn envelope_period(&self) -> u16 {
+        ((self.audio_regs[0xc] as u16) << 8) | self.audio_regs[0xb] as u16
+    }
+
+    fn noise_enabled(&self, channel: Channel) -> bool {
+        let val = self.audio_regs[0x7];
+
+        match channel {
+            Channel::A => val & 0x8 == 0,
+            Channel::B => val & 0x10 == 0,
+            Channel::C => val & 0x20 == 0,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn envelope_enabled(&self, channel: Channel) -> bool {
+        self.audio_regs[channel.envelope_reg()] & 0x10 != 0
+    }
+
+    fn volume(&self, channel: Channel) -> u8 {
+        let val = self.audio_regs[channel.envelope_reg()] & 0xf;
+        if val == 0 {
+            0
+        } else {
+            val * 2 + 1
+        }
+    }
+
+    fn noise(&self) -> bool {
+        self.noise_seed & 1 != 0
+    }
+
+    fn channel_value(&self, channel: Channel) -> u8 {
+        if !self.tone_enabled(channel) {
+            0
+        } else if self.envelope_enabled(channel) {
+            self.envelope_volume
+        } else if !self.noise_enabled(channel) || self.noise() {
+            self.volume(channel)
+        } else {
+            0
+        }
+    }
+
+    fn audio_tick(&mut self) {
+        self.audio_counter += 1;
+        if self.audio_counter < 16 {
             return;
         }
+        self.audio_counter = 0;
 
-        match addr {
-            0x8000 => {
-                rom.command = value & 0xf;
+        self.noise_counter += 1;
+        if self.noise_counter >= self.noise_period() * 2 {
+            self.noise_counter = 0;
+            if self.noise() {
+                self.noise_seed ^= 0x24000;
             }
-            0xa000 => {
-                rom.parameter = value;
-                rom.sync();
-            }
-            0xc000 => {}
-            0xe000 => {}
-            _ => unreachable!(),
+            self.noise_seed >>= 1;
         }
-    }
 
-    fn write_ppu(&self, addr: u16, value: u8) {
-        self.state.borrow_mut().chr.write(addr, value);
+        // envelope not implemented, unused by all comercial games
+
+        let channels = [Channel::A, Channel::B, Channel::C];
+        let mut sample = 0;
+
+        for (idx, channel) in channels.into_iter().enumerate() {
+            self.channel_counters[idx] += 1;
+            if self.channel_counters[idx] >= self.channel_period(channel) {
+                self.channel_counters[idx] = 0;
+                self.channel_state[idx] = !self.channel_state[idx];
+            }
+
+            if self.channel_state[idx] {
+                sample += self.audio_lookup[self.channel_value(channel) as usize]
+            }
+        }
+
+        self.sample = sample;
     }
 }
 
@@ -169,37 +362,42 @@ impl Mapper for Fme7 {
         }
     }
 
-    fn read(&self, bus: BusKind, addr: u16) -> u8 {
+    fn read(&mut self, bus: BusKind, addr: u16) -> u8 {
         match bus {
             BusKind::Cpu => self.read_cpu(addr),
             BusKind::Ppu => self.read_ppu(addr),
         }
     }
 
-    fn write(&self, bus: BusKind, addr: u16, value: u8) {
+    fn write(&mut self, bus: BusKind, addr: u16, value: u8) {
         match bus {
             BusKind::Cpu => self.write_cpu(addr, value),
             BusKind::Ppu => self.write_ppu(addr, value),
         }
     }
 
-    fn tick(&self) {
-        let mut rom = self.state.borrow_mut();
-        if rom.irq_counter_enable {
-            rom.irq_counter = rom.irq_counter.wrapping_sub(1);
-            if rom.irq_counter == 0xffff && rom.irq_enable {
-                rom.irq = true;
+    fn tick(&mut self) {
+        if self.irq_counter_enable {
+            self.irq_counter = self.irq_counter.wrapping_sub(1);
+            if self.irq_counter == 0xffff && self.irq_enable {
+                self.irq = true;
             }
+        }
+
+        if self.audio_enabled {
+            self.audio_tick();
         }
     }
 
-    fn get_irq(&self) -> bool {
-        let rom = self.state.borrow();
-        rom.irq
+    fn get_irq(&mut self) -> bool {
+        self.irq
     }
 
-    fn ppu_fetch(&self, address: u16) -> super::Nametable {
-        let rom = self.state.borrow();
-        rom.mirroring.ppu_fetch(address)
+    fn ppu_fetch(&mut self, address: u16) -> super::Nametable {
+        self.mirroring.ppu_fetch(address)
+    }
+
+    fn get_sample(&self) -> Option<i16> {
+        Some(self.sample)
     }
 }

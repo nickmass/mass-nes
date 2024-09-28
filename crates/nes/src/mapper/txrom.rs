@@ -326,35 +326,35 @@ impl Mapper for Txrom {
         }
     }
 
-    fn read(&self, bus: BusKind, addr: u16) -> u8 {
+    fn read(&mut self, bus: BusKind, addr: u16) -> u8 {
         match bus {
             BusKind::Cpu => self.read_cpu(addr),
             BusKind::Ppu => self.read_ppu(addr),
         }
     }
 
-    fn write(&self, bus: BusKind, addr: u16, value: u8) {
+    fn write(&mut self, bus: BusKind, addr: u16, value: u8) {
         match bus {
             BusKind::Cpu => self.write_cpu(addr, value),
             BusKind::Ppu => self.write_ppu(addr, value),
         }
     }
 
-    fn tick(&self) {
+    fn tick(&mut self) {
         let mut rom = self.state.borrow_mut();
         rom.current_tick += 1;
     }
 
-    fn get_irq(&self) -> bool {
+    fn get_irq(&mut self) -> bool {
         let rom = self.state.borrow();
         rom.irq
     }
 
-    fn update_ppu_addr(&self, addr: u16) {
+    fn update_ppu_addr(&mut self, addr: u16) {
         self.irq_tick(addr);
     }
 
-    fn ppu_fetch(&self, address: u16) -> super::Nametable {
+    fn ppu_fetch(&mut self, address: u16) -> super::Nametable {
         let rom = self.state.borrow();
         if let Some(_) = rom.ext_nt {
             if address & 0x2000 != 0 {

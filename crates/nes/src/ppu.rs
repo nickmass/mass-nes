@@ -4,7 +4,7 @@ use nes_traits::SaveState;
 use serde::{Deserialize, Serialize};
 
 use crate::bus::{AddressBus, BusKind, DeviceKind, RangeAndMask};
-use crate::mapper::{Mapper, Nametable, RcMapper};
+use crate::mapper::{Nametable, RcMapper};
 use crate::memory::MemoryBlock;
 use crate::ppu_step::*;
 use crate::region::{EmphMode, Region};
