@@ -293,6 +293,14 @@ impl Cpu {
             self.pending_reset = true;
         }
 
+        if self.irq_set_delay != 0 {
+            self.irq_set_delay -= 1;
+        }
+
+        if self.irq_delay != 0 {
+            self.irq_delay -= 1;
+        }
+
         if let Some(result) = self.dma.tick(pin_in) {
             result
         } else {
@@ -402,33 +410,21 @@ impl Cpu {
     fn interrupt(&mut self) -> Option<Stage> {
         let mut stage = None;
         if self.pin_in.irq && (self.flag_i == 0 || self.irq_set_delay != 0) && self.irq_delay == 0 {
-            if self.irq_set_delay != 0 {
-                self.irq_set_delay -= 1;
-            }
-
             stage = Some(Stage::Irq(Irq::ReadPcOne(0xfffe)));
-        }
-
-        if self.irq_set_delay != 0 {
-            self.irq_set_delay -= 1;
-        }
-
-        if self.irq_delay != 0 {
-            self.irq_delay -= 1;
         }
 
         if self.nmi.interrupt() {
             stage = Some(Stage::Irq(Irq::ReadPcOne(0xfffa)));
         }
 
-        if self.pin_in.power {
-            self.pin_in.power = false;
-            stage = Some(Stage::Power(Power::ReadRegPcLow));
-        }
-
         if self.pending_reset {
             self.pending_reset = false;
             stage = Some(Stage::Reset(Power::ReadRegPcLow));
+        }
+
+        if self.pin_in.power {
+            self.pin_in.power = false;
+            stage = Some(Stage::Power(Power::ReadRegPcLow));
         }
 
         stage

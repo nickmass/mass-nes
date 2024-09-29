@@ -6,36 +6,28 @@ use crate::cartridge::Cartridge;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
 
-use std::cell::RefCell;
-
 use super::SimpleMirroring;
-
-#[cfg_attr(feature = "save-states", derive(SaveState))]
-pub struct Bf909xState {
-    mem: MappedMemory,
-}
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Bf909x {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: Cartridge,
+    mem: MappedMemory,
     chr_ram: MemoryBlock,
-    #[cfg_attr(feature = "save-states", save(nested))]
-    state: RefCell<Bf909xState>,
     mirroring: SimpleMirroring,
     prg_len: usize,
 }
 
 impl Bf909x {
     pub fn new(cartridge: Cartridge) -> Bf909x {
-        let mut rom_state = Bf909xState {
-            mem: MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg),
-        };
+        let mut mem = MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg);
+
         let last_prg = (cartridge.prg_rom.len() / 0x4000) - 1;
-        rom_state.mem.map(0xC000, 16, last_prg, BankKind::Rom);
+        mem.map(0xC000, 16, last_prg, BankKind::Rom);
+
         Bf909x {
+            mem,
             chr_ram: MemoryBlock::new(cartridge.chr_ram_bytes >> 10),
-            state: RefCell::new(rom_state),
             mirroring: SimpleMirroring::new(cartridge.mirroring.into()),
             prg_len: cartridge.prg_rom.len(),
             cartridge,
@@ -43,7 +35,7 @@ impl Bf909x {
     }
 
     fn read_cpu(&self, addr: u16) -> u8 {
-        self.state.borrow().mem.read(&self.cartridge, addr)
+        self.mem.read(&self.cartridge, addr)
     }
 
     fn read_ppu(&self, addr: u16) -> u8 {
@@ -54,8 +46,7 @@ impl Bf909x {
         }
     }
 
-    fn write_cpu(&self, addr: u16, value: u8) {
-        let mut state = self.state.borrow_mut();
+    fn write_cpu(&mut self, addr: u16, value: u8) {
         match addr & 0xd000 {
             // 0x8000 - 0x9fff is the range for this reg, but it only exists on FireHawk and that game just writes to 0x9000 - 0x9fff
             // this if statement lets us hackily support FireHawk without caring about the submapper
@@ -66,7 +57,7 @@ impl Bf909x {
                     self.mirroring.internal_b();
                 }
             }
-            0xc000 | 0xd000 => state
+            0xc000 | 0xd000 => self
                 .mem
                 .map(0x8000, 16, (value & 0xf) as usize, BankKind::Rom),
             _ => (),

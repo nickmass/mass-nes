@@ -6,32 +6,23 @@ use crate::cartridge::Cartridge;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind};
 
-use std::cell::RefCell;
-
 use super::SimpleMirroring;
-
-#[cfg_attr(feature = "save-states", derive(SaveState))]
-pub struct CnromState {
-    chr: MappedMemory,
-}
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Cnrom {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: Cartridge,
-    #[cfg_attr(feature = "save-states", save(nested))]
-    state: RefCell<CnromState>,
+    chr: MappedMemory,
     mirroring: SimpleMirroring,
     prg_len: usize,
 }
 
 impl Cnrom {
     pub fn new(cartridge: Cartridge) -> Cnrom {
-        let rom_state = CnromState {
-            chr: MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr),
-        };
+        let chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
+
         Cnrom {
-            state: RefCell::new(rom_state),
+            chr,
             mirroring: SimpleMirroring::new(cartridge.mirroring.into()),
             prg_len: cartridge.prg_rom.len(),
             cartridge,
@@ -43,12 +34,11 @@ impl Cnrom {
     }
 
     fn read_ppu(&self, addr: u16) -> u8 {
-        self.state.borrow().chr.read(&self.cartridge, addr)
+        self.chr.read(&self.cartridge, addr)
     }
 
-    fn write_cpu(&self, _addr: u16, value: u8) {
-        let mut state = self.state.borrow_mut();
-        state.chr.map(0x0000, 8, (value) as usize, BankKind::Rom);
+    fn write_cpu(&mut self, _addr: u16, value: u8) {
+        self.chr.map(0x0000, 8, (value) as usize, BankKind::Rom);
     }
 }
 

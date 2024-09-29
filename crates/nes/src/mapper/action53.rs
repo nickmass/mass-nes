@@ -6,12 +6,12 @@ use crate::cartridge::Cartridge;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind};
 
-use std::cell::RefCell;
-
 use super::SimpleMirroring;
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
-pub struct Action53State {
+pub struct Action53 {
+    #[cfg_attr(feature = "save-states", save(skip))]
+    cartridge: Cartridge,
     prg: MappedMemory,
     chr: MappedMemory,
     regs: [u8; 4],
@@ -19,7 +19,76 @@ pub struct Action53State {
     reg_index: usize,
 }
 
-impl Action53State {
+impl Action53 {
+    pub fn new(cartridge: Cartridge) -> Action53 {
+        let chr_type = if cartridge.chr_rom.is_empty() {
+            BankKind::Ram
+        } else {
+            BankKind::Rom
+        };
+        let mut chr = match chr_type {
+            BankKind::Rom => MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr),
+            BankKind::Ram => MappedMemory::new(
+                &cartridge,
+                0x0000,
+                cartridge.chr_ram_bytes as u32 / 1024,
+                cartridge.chr_ram_bytes as u32 / 1024,
+                MemKind::Chr,
+            ),
+        };
+
+        let mut prg = MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg);
+        let last = (cartridge.prg_rom.len() / 0x4000) - 1;
+        prg.map(0x8000, 16, 0, BankKind::Rom);
+        prg.map(0xC000, 16, last, BankKind::Rom);
+        chr.map(0x0000, 8, 0, BankKind::Ram);
+
+        let regs = [0x00, 0x00, 0x02, 0xff];
+        let mirroring = SimpleMirroring::new(cartridge.mirroring.into());
+
+        let mut rom = Action53 {
+            cartridge,
+            prg,
+            chr,
+            regs,
+            reg_index: 0,
+            mirroring,
+        };
+
+        rom.sync();
+
+        rom
+    }
+
+    fn read_cpu(&self, addr: u16) -> u8 {
+        self.prg.read(&self.cartridge, addr)
+    }
+
+    fn read_ppu(&self, addr: u16) -> u8 {
+        self.chr.read(&self.cartridge, addr)
+    }
+
+    fn write_cpu(&mut self, addr: u16, value: u8) {
+        match addr & 0xf000 {
+            0x5000 => match value & 0x81 {
+                0x00 => self.reg_index = 0,
+                0x01 => self.reg_index = 1,
+                0x80 => self.reg_index = 2,
+                0x81 => self.reg_index = 3,
+                _ => unreachable!(),
+            },
+            _ => {
+                let index = self.reg_index & 3;
+                self.regs[index] = value;
+                self.sync();
+            }
+        }
+    }
+
+    fn write_ppu(&self, addr: u16, value: u8) {
+        self.chr.write(addr, value);
+    }
+
     fn sync(&mut self) {
         match self.reg_index {
             0x00 => {
@@ -108,87 +177,6 @@ impl Action53State {
     }
 }
 
-#[cfg_attr(feature = "save-states", derive(SaveState))]
-pub struct Action53 {
-    #[cfg_attr(feature = "save-states", save(skip))]
-    cartridge: Cartridge,
-    #[cfg_attr(feature = "save-states", save(nested))]
-    state: RefCell<Action53State>,
-}
-
-impl Action53 {
-    pub fn new(cartridge: Cartridge) -> Action53 {
-        let chr_type = if cartridge.chr_rom.is_empty() {
-            BankKind::Ram
-        } else {
-            BankKind::Rom
-        };
-        let mut chr = match chr_type {
-            BankKind::Rom => MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr),
-            BankKind::Ram => MappedMemory::new(
-                &cartridge,
-                0x0000,
-                cartridge.chr_ram_bytes as u32 / 1024,
-                cartridge.chr_ram_bytes as u32 / 1024,
-                MemKind::Chr,
-            ),
-        };
-
-        let mut prg = MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg);
-        let last = (cartridge.prg_rom.len() / 0x4000) - 1;
-        prg.map(0x8000, 16, 0, BankKind::Rom);
-        prg.map(0xC000, 16, last, BankKind::Rom);
-        chr.map(0x0000, 8, 0, BankKind::Ram);
-
-        let regs = [0x00, 0x00, 0x02, 0xff];
-
-        let mut rom_state = Action53State {
-            prg,
-            chr,
-            regs,
-            mirroring: SimpleMirroring::new(cartridge.mirroring.into()),
-            reg_index: 0,
-        };
-
-        rom_state.sync();
-
-        Action53 {
-            state: RefCell::new(rom_state),
-            cartridge,
-        }
-    }
-
-    fn read_cpu(&self, addr: u16) -> u8 {
-        self.state.borrow().prg.read(&self.cartridge, addr)
-    }
-
-    fn read_ppu(&self, addr: u16) -> u8 {
-        self.state.borrow().chr.read(&self.cartridge, addr)
-    }
-
-    fn write_cpu(&self, addr: u16, value: u8) {
-        let mut rom = self.state.borrow_mut();
-        match addr & 0xf000 {
-            0x5000 => match value & 0x81 {
-                0x00 => rom.reg_index = 0,
-                0x01 => rom.reg_index = 1,
-                0x80 => rom.reg_index = 2,
-                0x81 => rom.reg_index = 3,
-                _ => unreachable!(),
-            },
-            _ => {
-                let index = rom.reg_index & 3;
-                rom.regs[index] = value;
-                rom.sync();
-            }
-        }
-    }
-
-    fn write_ppu(&self, addr: u16, value: u8) {
-        self.state.borrow_mut().chr.write(addr, value);
-    }
-}
-
 impl Mapper for Action53 {
     fn register(&self, cpu: &mut AddressBus) {
         cpu.register_write(DeviceKind::Mapper, RangeAndMask(0x5000, 0x6000, 0xffff));
@@ -218,7 +206,6 @@ impl Mapper for Action53 {
     }
 
     fn ppu_fetch(&mut self, address: u16) -> super::Nametable {
-        let rom = self.state.borrow();
-        rom.mirroring.ppu_fetch(address)
+        self.mirroring.ppu_fetch(address)
     }
 }

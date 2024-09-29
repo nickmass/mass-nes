@@ -59,7 +59,7 @@ pub struct Fme7 {
 
     audio_enabled: bool,
     audio_protect: bool,
-    audio_regs: [u8; 0xf],
+    audio_regs: [u8; 0x10],
     audio_reg_select: u8,
     audio_counter: u64,
 
@@ -71,6 +71,7 @@ pub struct Fme7 {
     noise_seed: u32,
     envelope_volume: u8,
 
+    #[cfg_attr(feature = "save-states", save(skip))]
     audio_lookup: Vec<i16>,
     sample: i16,
 }
@@ -88,25 +89,21 @@ impl Fme7 {
         );
         let mirroring = SimpleMirroring::new(cartridge.mirroring.into());
 
-        let mut audio_lookup = vec![0i16; 32];
-        let mut audio_tmp = [0f32; 32];
-
         let inc = 10.0f32.powf(1.0 / 10.0);
-        let mut next = 1.0;
-
-        for i in audio_tmp.iter_mut().skip(2) {
-            *i = next;
-            next *= inc;
-        }
-
-        let max = audio_tmp[31];
+        let max = inc.powf(29.0);
         let sample_max = i16::MAX as f32;
         let channel_count = 3.0;
 
-        for (i, v) in audio_lookup.iter_mut().zip(audio_tmp) {
-            let ratio = v / max;
-            *i = (sample_max * ratio / channel_count) as i16;
-        }
+        let audio_lookup = (0..32)
+            .map(|i| {
+                if i < 2 {
+                    return 0;
+                }
+                let factor = inc.powf(i as f32 - 2.0);
+                let ratio = factor / max;
+                (sample_max * ratio / channel_count) as i16
+            })
+            .collect();
 
         let mut mapper = Fme7 {
             cartridge,
@@ -124,7 +121,7 @@ impl Fme7 {
 
             audio_enabled: false,
             audio_protect: false,
-            audio_regs: [0; 0xf],
+            audio_regs: [0; 0x10],
             audio_reg_select: 0,
             audio_counter: 0,
 

@@ -60,7 +60,6 @@ pub struct Apu {
     irq: bool,
     last_4017: u8,
     oam_req: Option<u8>,
-    ext_audio: bool,
 }
 
 impl Apu {
@@ -68,13 +67,13 @@ impl Apu {
         let mut pulse_table = Vec::new();
         for x in 0..32 {
             let f_val = 95.52 / (8128.0 / (x as f64) + 100.0);
-            pulse_table.push(((f_val - 0.5) * ::std::i16::MAX as f64) as i16);
+            pulse_table.push((f_val * ::std::i16::MAX as f64) as i16);
         }
 
         let mut tnd_table = Vec::new();
         for x in 0..204 {
             let f_val = 163.67 / (24329.0 / (x as f64) + 100.0);
-            tnd_table.push(((f_val - 0.5) * ::std::i16::MAX as f64) as i16);
+            tnd_table.push((f_val * ::std::i16::MAX as f64) as i16);
         }
 
         Apu {
@@ -97,7 +96,6 @@ impl Apu {
             irq: false,
             last_4017: 0,
             oam_req: None,
-            ext_audio: false,
         }
     }
 
@@ -271,18 +269,10 @@ impl Apu {
 
         let pulse_out = self.pulse_table[(pulse1 + pulse2) as usize];
         let tnd_out = self.tnd_table[((3 * triangle) + (2 * noise) + dmc) as usize];
-        self.ext_audio |= self.mapper.get_sample().is_some();
         let ext_out = self.mapper.get_sample().unwrap_or(0);
-
-        if self.ext_audio {
+        if let Some(v) = self.samples.get_mut(self.sample_index) {
             // laxy mixing
-            if let Some(v) = self.samples.get_mut(self.sample_index) {
-                *v = ((pulse_out + tnd_out) / 2) + (ext_out / 2);
-            }
-        } else {
-            if let Some(v) = self.samples.get_mut(self.sample_index) {
-                *v = pulse_out + tnd_out + ext_out;
-            }
+            *v = (pulse_out + tnd_out) - (ext_out);
         }
 
         self.sample_index += 1;

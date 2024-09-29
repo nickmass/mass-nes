@@ -113,7 +113,7 @@ impl Dma {
 
     // the specific orientation of Get/Put has major effects on test roms,
     // I think the issue is in my APU tick implmentation being 1:1 with the
-    // cpu ticks instead of 1:2
+    // cpu ticks instead of being split into even/odd halves
     fn alignment(&self) -> Alignment {
         if self.cycle & 1 == 0 {
             Alignment::Put

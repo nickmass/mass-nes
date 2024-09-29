@@ -8,6 +8,7 @@ mod pxrom;
 mod sxrom;
 mod txrom;
 mod uxrom;
+mod vrc6;
 
 #[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
@@ -19,10 +20,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 pub use traits::MapperState;
+
 #[cfg(feature = "save-states")]
 mod traits {
     use super::{Mapper, RcMapper};
     use nes_traits::{BinarySaveState, SaveState};
+
     pub trait MapperState: Mapper + BinarySaveState {}
     impl<T: Mapper + BinarySaveState> MapperState for T {}
 
@@ -41,9 +44,8 @@ mod traits {
 
 #[cfg(not(feature = "save-states"))]
 mod traits {
-    use super::Mapper;
-    pub trait MapperState: Mapper {}
-    impl<T: Mapper> MapperState for T {}
+    pub trait MapperState: super::Mapper {}
+    impl<T: super::Mapper> MapperState for T {}
 }
 
 pub trait Mapper {
@@ -124,6 +126,8 @@ pub fn ines(ines_number: u8, cart: Cartridge) -> RcMapper {
         4 => RcMapper::new(txrom::Txrom::new(cart)),
         7 => RcMapper::new(axrom::Axrom::new(cart)),
         9 => RcMapper::new(pxrom::Pxrom::new(cart)),
+        24 => RcMapper::new(vrc6::Vrc6::new(cart, vrc6::Vrc6Variant::A)),
+        26 => RcMapper::new(vrc6::Vrc6::new(cart, vrc6::Vrc6Variant::B)),
         28 => RcMapper::new(action53::Action53::new(cart)),
         69 => RcMapper::new(fme7::Fme7::new(cart)),
         71 | 232 => RcMapper::new(bf909x::Bf909x::new(cart)),

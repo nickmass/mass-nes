@@ -6,36 +6,27 @@ use crate::cartridge::Cartridge;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
 
-use std::cell::RefCell;
-
 use super::SimpleMirroring;
-
-#[cfg_attr(feature = "save-states", derive(SaveState))]
-pub struct UxromState {
-    mem: MappedMemory,
-}
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Uxrom {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: Cartridge,
     chr_ram: MemoryBlock,
-    #[cfg_attr(feature = "save-states", save(nested))]
-    state: RefCell<UxromState>,
+    mem: MappedMemory,
     mirroring: SimpleMirroring,
     prg_len: usize,
 }
 
 impl Uxrom {
     pub fn new(cartridge: Cartridge) -> Uxrom {
-        let mut rom_state = UxromState {
-            mem: MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg),
-        };
         let last = (cartridge.prg_rom.len() / 0x4000) - 1;
-        rom_state.mem.map(0xC000, 16, last, BankKind::Rom);
+        let mut mem = MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg);
+        mem.map(0xC000, 16, last, BankKind::Rom);
+
         Uxrom {
             chr_ram: MemoryBlock::new(cartridge.chr_ram_bytes >> 10),
-            state: RefCell::new(rom_state),
+            mem,
             mirroring: SimpleMirroring::new(cartridge.mirroring.into()),
             prg_len: cartridge.prg_rom.len(),
             cartridge,
@@ -43,7 +34,7 @@ impl Uxrom {
     }
 
     fn read_cpu(&self, addr: u16) -> u8 {
-        self.state.borrow().mem.read(&self.cartridge, addr)
+        self.mem.read(&self.cartridge, addr)
     }
 
     fn read_ppu(&self, addr: u16) -> u8 {
@@ -54,9 +45,8 @@ impl Uxrom {
         }
     }
 
-    fn write_cpu(&self, _addr: u16, value: u8) {
-        let mut state = self.state.borrow_mut();
-        state.mem.map(0x8000, 16, value as usize, BankKind::Rom);
+    fn write_cpu(&mut self, _addr: u16, value: u8) {
+        self.mem.map(0x8000, 16, value as usize, BankKind::Rom);
     }
 
     fn write_ppu(&self, addr: u16, value: u8) {

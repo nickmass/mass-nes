@@ -6,41 +6,33 @@ use crate::cartridge::Cartridge;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
 
-use std::cell::RefCell;
-
 use super::SimpleMirroring;
-
-#[cfg_attr(feature = "save-states", derive(SaveState))]
-pub struct AxromState {
-    prg: MappedMemory,
-}
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Axrom {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: Cartridge,
+    prg: MappedMemory,
     chr_ram: MemoryBlock,
-    #[cfg_attr(feature = "save-states", save(nested))]
-    state: RefCell<AxromState>,
     mirroring: SimpleMirroring,
 }
 
 impl Axrom {
     pub fn new(cartridge: Cartridge) -> Axrom {
-        let mut rom_state = AxromState {
-            prg: MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg),
-        };
-        rom_state.prg.map(0x8000, 32, 0, BankKind::Rom);
+        let mut prg = MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg);
+
+        prg.map(0x8000, 32, 0, BankKind::Rom);
+
         Axrom {
+            prg,
             chr_ram: MemoryBlock::new(cartridge.chr_ram_bytes >> 10),
-            state: RefCell::new(rom_state),
             mirroring: SimpleMirroring::new(cartridge.mirroring.into()),
             cartridge,
         }
     }
 
     fn read_cpu(&self, addr: u16) -> u8 {
-        self.state.borrow().prg.read(&self.cartridge, addr)
+        self.prg.read(&self.cartridge, addr)
     }
 
     fn read_ppu(&self, addr: u16) -> u8 {
@@ -51,9 +43,9 @@ impl Axrom {
         }
     }
 
-    fn write_cpu(&self, _addr: u16, value: u8) {
-        let mut rom = self.state.borrow_mut();
-        rom.prg.map(0x8000, 32, (value & 7) as usize, BankKind::Rom);
+    fn write_cpu(&mut self, _addr: u16, value: u8) {
+        self.prg
+            .map(0x8000, 32, (value & 7) as usize, BankKind::Rom);
         if value & 0x10 == 0 {
             self.mirroring.internal_a()
         } else {
