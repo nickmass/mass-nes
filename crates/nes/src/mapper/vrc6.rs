@@ -43,6 +43,22 @@ impl VrcIrq {
     }
 
     pub fn tick(&mut self) {
+        self.scanline_counter -= 3;
+        match self.mode {
+            VrcIrqMode::Cycle => {
+                self.scanline_counter += 341;
+                self.trigger();
+            }
+            VrcIrqMode::Scanline => {
+                if self.scanline_counter <= 0 {
+                    self.scanline_counter += 341;
+                    self.trigger();
+                }
+            }
+        }
+    }
+
+    fn trigger(&mut self) {
         if self.counter == 0xff {
             if self.enabled {
                 self.triggered = true;
@@ -50,18 +66,7 @@ impl VrcIrq {
             self.counter = self.latch;
             self.enabled = self.renable;
         } else {
-            match self.mode {
-                VrcIrqMode::Cycle => {
-                    self.counter += 1;
-                }
-                VrcIrqMode::Scanline => {
-                    self.scanline_counter -= 3;
-                    if self.scanline_counter <= 0 {
-                        self.scanline_counter += 341;
-                        self.counter += 1;
-                    }
-                }
-            }
+            self.counter += 1;
         }
     }
 
