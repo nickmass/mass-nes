@@ -63,8 +63,6 @@ pub trait Mapper {
 
     fn tick(&mut self) {}
 
-    fn update_ppu_addr(&mut self, _addr: u16) {}
-
     fn ppu_fetch(&mut self, address: u16) -> Nametable;
 
     fn get_sample(&self) -> Option<i16> {
@@ -106,10 +104,6 @@ impl RcMapper {
 
     pub fn tick(&self) {
         self.0.borrow_mut().tick()
-    }
-
-    pub fn update_ppu_addr(&self, addr: u16) {
-        self.0.borrow_mut().update_ppu_addr(addr)
     }
 
     pub fn get_sample(&self) -> Option<i16> {

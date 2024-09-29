@@ -307,14 +307,12 @@ impl Ppu {
                 } else {
                     self.data_read_buffer
                 };
-                self.data_read_buffer = self.ppu_read(addr);
+                self.data_read_buffer = self.ppu_read(self.vram_addr);
                 if !self.in_vblank() && self.is_rendering() {
                     self.horz_increment();
                     self.vert_increment();
                 } else {
                     self.vram_addr = self.vram_addr.wrapping_add(self.vram_inc()) & 0x7fff;
-                    let addr = self.vram_addr;
-                    self.mapper.update_ppu_addr(addr);
                 }
 
                 result
@@ -399,8 +397,6 @@ impl Ppu {
                     self.vram_addr_temp &= 0x7f00;
                     self.vram_addr_temp |= value as u16;
                     self.vram_addr = self.vram_addr_temp;
-                    let addr = self.vram_addr;
-                    self.mapper.update_ppu_addr(addr);
                 } else {
                     self.vram_addr_temp &= 0x00ff;
                     self.vram_addr_temp |= ((value & 0x3f) as u16) << 8;
@@ -418,15 +414,13 @@ impl Ppu {
                     };
                     self.palette_data[addr as usize] = value;
                 } else {
-                    self.ppu_write(addr & 0x3fff, value);
+                    self.ppu_write(self.vram_addr, value);
                 }
                 if !self.in_vblank() && self.is_rendering() {
                     self.horz_increment();
                     self.vert_increment();
                 } else {
                     self.vram_addr = self.vram_addr.wrapping_add(self.vram_inc()) & 0x7fff;
-                    let addr = self.vram_addr;
-                    self.mapper.update_ppu_addr(addr);
                 }
             }
             _ => {
@@ -568,6 +562,14 @@ impl Ppu {
                 }
                 None => (),
                 _ => unreachable!(),
+            }
+        }
+        // outside of rending vram_addr is on bus (needed for mmc3)
+        if !self.is_rendering() || self.in_vblank() {
+            // only setting bus on odd cycles to acount for PPU mem access being 2 cycles long,
+            // not sure on details when rendering disbaled / in vblank
+            if step.dot & 1 == 1 {
+                self.mapper.ppu_fetch(self.vram_addr & 0x3fff);
             }
         }
 

@@ -27,7 +27,6 @@ pub struct Txrom {
     irq_latch: u8,
     irq_counter: u8,
     irq_reload_pending: bool,
-    last_a12: bool,
     last: usize,
     ext_nt: Option<[MemoryBlock; 2]>,
 }
@@ -77,7 +76,6 @@ impl Txrom {
             irq_latch: 0,
             irq_counter: 0,
             irq_reload_pending: false,
-            last_a12: false,
             ext_nt,
             last,
         };
@@ -95,12 +93,7 @@ impl Txrom {
         }
     }
 
-    fn read_ppu(&mut self, addr: u16) -> u8 {
-        self.irq_tick(addr);
-        self.peek_ppu(addr)
-    }
-
-    fn peek_ppu(&self, addr: u16) -> u8 {
+    fn read_ppu(&self, addr: u16) -> u8 {
         if let Some([a, b]) = self.ext_nt.as_ref() {
             if addr & 0x2000 != 0 {
                 match addr & 0x400 {
@@ -185,14 +178,13 @@ impl Txrom {
 
     fn irq_tick(&mut self, addr: u16) {
         let a12 = addr & 0x1000 != 0;
-        let mut clock = !self.last_a12 && a12;
+        let mut clock = a12;
         if clock {
-            if self.current_tick - self.last_a12_tick < 5 {
+            if self.current_tick - self.last_a12_tick <= 3 {
                 clock = false
             }
             self.last_a12_tick = self.current_tick;
         }
-        self.last_a12 = a12;
         let mut is_zero = false;
         if clock {
             if self.irq_reload_pending {
@@ -308,7 +300,7 @@ impl Mapper for Txrom {
     fn peek(&self, bus: BusKind, addr: u16) -> u8 {
         match bus {
             BusKind::Cpu => self.read_cpu(addr),
-            BusKind::Ppu => self.peek_ppu(addr),
+            BusKind::Ppu => self.read_ppu(addr),
         }
     }
 
@@ -334,11 +326,9 @@ impl Mapper for Txrom {
         self.irq
     }
 
-    fn update_ppu_addr(&mut self, addr: u16) {
-        self.irq_tick(addr);
-    }
-
     fn ppu_fetch(&mut self, address: u16) -> super::Nametable {
+        self.irq_tick(address);
+
         if let Some(_) = self.ext_nt {
             if address & 0x2000 != 0 {
                 match address & 0xc00 {
