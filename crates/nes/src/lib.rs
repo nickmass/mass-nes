@@ -8,7 +8,6 @@ mod input;
 mod machine;
 mod mapper;
 mod memory;
-mod ops;
 mod ppu;
 mod ppu_step;
 mod region;

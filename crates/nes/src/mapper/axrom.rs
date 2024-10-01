@@ -25,7 +25,7 @@ impl Axrom {
 
         Axrom {
             prg,
-            chr_ram: MemoryBlock::new(cartridge.chr_ram_bytes >> 10),
+            chr_ram: MemoryBlock::new(8),
             mirroring: SimpleMirroring::new(cartridge.mirroring.into()),
             cartridge,
         }
@@ -36,11 +36,7 @@ impl Axrom {
     }
 
     fn read_ppu(&self, addr: u16) -> u8 {
-        if self.cartridge.chr_ram_bytes > 0 {
-            self.chr_ram.read(addr)
-        } else {
-            self.cartridge.chr_rom[addr as usize]
-        }
+        self.chr_ram.read(addr)
     }
 
     fn write_cpu(&mut self, _addr: u16, value: u8) {
@@ -54,9 +50,7 @@ impl Axrom {
     }
 
     fn write_ppu(&self, addr: u16, value: u8) {
-        if self.cartridge.chr_ram_bytes > 0 {
-            self.chr_ram.write(addr, value);
-        }
+        self.chr_ram.write(addr, value);
     }
 }
 

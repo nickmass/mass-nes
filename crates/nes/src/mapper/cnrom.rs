@@ -19,7 +19,8 @@ pub struct Cnrom {
 
 impl Cnrom {
     pub fn new(cartridge: Cartridge) -> Cnrom {
-        let chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
+        let mut chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
+        chr.map(0x0000, 8, 0, BankKind::Rom);
 
         Cnrom {
             chr,
@@ -38,7 +39,7 @@ impl Cnrom {
     }
 
     fn write_cpu(&mut self, _addr: u16, value: u8) {
-        self.chr.map(0x0000, 8, (value) as usize, BankKind::Rom);
+        self.chr.map(0x0000, 8, value as usize, BankKind::Rom);
     }
 }
 

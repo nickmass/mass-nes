@@ -10,8 +10,7 @@ pub use no_debugger::*;
 mod debugger {
     use std::cell::RefCell;
 
-    use crate::cpu::CpuDebugState;
-    use crate::ops::*;
+    use crate::cpu::{ops::*, CpuDebugState};
     use crate::ppu::PpuDebugState;
     use crate::Machine;
 

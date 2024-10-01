@@ -39,7 +39,7 @@ fn save_data(container_name: &Ident, data: &Data) -> TokenStream {
                 });
 
                 quote! {
-                    #[derive(Clone, serde::Serialize, serde::Deserialize)]
+                    #[derive(::std::clone::Clone, ::serde::Serialize, ::serde::Deserialize)]
                     pub struct #container_name {
                         #(#fields),*
                     }
@@ -57,14 +57,14 @@ fn save_data(container_name: &Ident, data: &Data) -> TokenStream {
                 });
 
                 quote! {
-                    #[derive(Clone, serde::Serialize, serde::Deserialize)]
+                    #[derive(::std::clone::Clone, ::serde::Serialize, ::serde::Deserialize)]
                     pub struct #container_name(
                         #(#fields),*
                     );
                 }
             }
             Fields::Unit => quote! {
-                #[derive(Clone, serde::Serialize, serde::Deserialize)]
+                #[derive(::std::clone::Clone, ::serde::Serialize, ::serde::Deserialize)]
                 pub struct #container_name;
             },
         },
@@ -133,7 +133,7 @@ fn save_impl(name: &Ident, container_name: &Ident, data: &Data) -> TokenStream {
         _ => return quote! {},
     };
     quote! {
-        impl nes_traits::SaveState for #name {
+        impl ::nes_traits::SaveState for #name {
             type Data = #container_name;
 
             fn save_state(&self) -> Self::Data {

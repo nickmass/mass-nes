@@ -142,7 +142,7 @@ impl Sxrom {
                 self.chr.map(
                     0x0000,
                     8,
-                    (self.regs[1] & 0x1f >> 1) as usize,
+                    ((self.regs[1] & 0x1f) >> 1) as usize,
                     self.chr_type,
                 );
             }

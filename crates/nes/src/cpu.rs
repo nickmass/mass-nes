@@ -3,9 +3,10 @@ use nes_traits::SaveState;
 #[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
 
-use crate::ops::*;
-
 pub mod dma;
+pub mod ops;
+
+use ops::*;
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Default, Debug, Copy, Clone)]
@@ -443,7 +444,7 @@ impl Cpu {
     }
 
     fn decode(&mut self) -> TickResult {
-        let op = super::ops::OPS[self.pin_in.data as usize];
+        let op = OPS[self.pin_in.data as usize];
         self.addressing(op.addressing, op.instruction)
     }
 
