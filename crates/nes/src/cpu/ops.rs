@@ -213,7 +213,7 @@ pub enum Break {
     WriteRegPcHigh,
     WriteRegPcLow,
     WriteRegP,
-    ReadHighJump(u16),
+    ReadHighJump,
     ReadLowJump(u16),
     UpdateRegPc(u16),
 }

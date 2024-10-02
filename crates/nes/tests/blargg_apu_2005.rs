@@ -66,7 +66,6 @@ fn irq_flag_timing() {
 }
 
 #[test]
-#[should_panic]
 fn irq_timing() {
     helper::run(
         format!("{}08.irq_timing.nes", DIR),
@@ -76,6 +75,7 @@ fn irq_timing() {
 }
 
 #[test]
+#[should_panic]
 fn reset_timing() {
     helper::run(
         format!("{}09.reset_timing.nes", DIR),

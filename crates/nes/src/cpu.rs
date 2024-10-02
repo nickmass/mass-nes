@@ -4,9 +4,14 @@ use nes_traits::SaveState;
 use serde::{Deserialize, Serialize};
 
 pub mod dma;
+mod interrupts;
 pub mod ops;
+mod registers;
 
+use dma::Dma;
+use interrupts::Interrupts;
 use ops::*;
+use registers::CpuRegs;
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Default, Debug, Copy, Clone)]
@@ -16,27 +21,6 @@ pub struct CpuPinIn {
     pub reset: bool,
     pub power: bool,
     pub nmi: bool,
-}
-
-#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
-#[derive(Debug, Copy, Clone)]
-enum Irq {
-    ReadPcOne(u16),
-    ReadPcTwo(u16),
-    WriteRegPcHigh(u16),
-    WriteRegPcLow(u16),
-    WriteRegP(u16),
-    ReadHighJump(u16),
-    ReadLowJump(u16),
-    UpdateRegPc,
-}
-
-#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
-#[derive(Debug, Copy, Clone)]
-enum Power {
-    ReadRegPcLow,
-    ReadRegPcHigh,
-    UpdateRegPc(u16),
 }
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
@@ -70,58 +54,6 @@ enum Stage {
     Decode,
     Address(Addressing, Instruction),
     Execute(u16, Instruction),
-    Reset(Power),
-    Power(Power),
-    Irq(Irq),
-}
-
-#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
-#[derive(Debug, Clone)]
-pub struct CpuNmiInterrupt {
-    was_nmi_set: bool,
-    pending_nmi: Option<u32>,
-}
-
-impl CpuNmiInterrupt {
-    fn new() -> Self {
-        Self {
-            was_nmi_set: false,
-            pending_nmi: None,
-        }
-    }
-
-    fn tick(&mut self, nmi: bool) {
-        const MAX_NMI_DELAY: u32 = 1;
-        match self.pending_nmi {
-            Some(0) => (),
-            Some(MAX_NMI_DELAY) if !nmi => self.clear(),
-            Some(n) => {
-                self.pending_nmi = Some(n - 1);
-            }
-            _ => {
-                if !self.was_nmi_set && nmi {
-                    self.pending_nmi = Some(MAX_NMI_DELAY);
-                }
-            }
-        }
-        self.was_nmi_set = nmi;
-    }
-
-    fn interrupt(&mut self) -> bool {
-        if let Some(0) = self.pending_nmi {
-            true
-        } else {
-            false
-        }
-    }
-
-    fn pending(&self) -> bool {
-        self.pending_nmi.is_some()
-    }
-
-    fn clear(&mut self) {
-        self.pending_nmi = None;
-    }
 }
 
 #[allow(dead_code)]
@@ -145,180 +77,59 @@ pub struct CpuDebugState;
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Cpu {
     current_tick: u64,
-    #[cfg_attr(feature = "save-states", save(skip))]
-    power_up_pc: Option<u16>,
     pin_in: CpuPinIn,
-    reg_a: u32,
-    reg_x: u32,
-    reg_y: u32,
-    reg_pc: u32,
-    reg_sp: u32,
-    flag_c: u32,
-    flag_z: u32,
-    flag_i: u32,
-    flag_d: u32,
-    flag_v: u32,
-    flag_s: u32,
+    regs: CpuRegs,
     stage: Stage,
     instruction_addr: Option<u16>,
-    pending_power: bool,
-    pending_reset: bool,
-    irq_delay: u32,
-    irq_set_delay: u32,
-    nmi: CpuNmiInterrupt,
-    pub dma: dma::Dma,
+    pub dma: Dma,
+    interrupts: Interrupts,
 }
 
 impl Cpu {
     pub fn new() -> Cpu {
         Cpu {
             current_tick: 0,
-            power_up_pc: None,
             pin_in: Default::default(),
-            reg_a: 0,
-            reg_x: 0,
-            reg_y: 0,
-            reg_pc: 0,
-            reg_sp: 0,
-            flag_c: 0,
-            flag_z: 0,
-            flag_i: 0,
-            flag_d: 0,
-            flag_v: 0,
-            flag_s: 0,
+            regs: CpuRegs::new(),
             instruction_addr: None,
             stage: Stage::Fetch,
-            pending_power: false,
-            pending_reset: false,
-            irq_delay: 0,
-            irq_set_delay: 0,
-            nmi: CpuNmiInterrupt::new(),
-            dma: dma::Dma::new(),
+            dma: Dma::new(),
+            interrupts: Interrupts::new(),
         }
     }
 
     pub fn power_up_pc(&mut self, pc: Option<u16>) {
-        self.power_up_pc = pc;
-    }
-
-    fn power(&mut self, step: Power) -> TickResult {
-        use Power::*;
-        use TickResult::*;
-        match step {
-            ReadRegPcLow => {
-                self.stage = Stage::Power(ReadRegPcHigh);
-                Read(0xfffc)
-            }
-            ReadRegPcHigh => {
-                self.stage = Stage::Power(UpdateRegPc(self.pin_in.data as u16));
-                Read(0xfffc + 1)
-            }
-            UpdateRegPc(low_addr) => {
-                let high_addr = (self.pin_in.data as u16) << 8;
-                self.reg_pc = (low_addr | high_addr) as u32;
-                self.set_reg_p(0x34);
-                self.reg_sp = 0xfd;
-                if let Some(addr) = self.power_up_pc {
-                    self.reg_pc = addr as u32;
-                }
-                self.fetch()
-            }
+        if let Some(pc) = pc {
+            self.interrupts.with_power_up_pc(pc);
         }
-    }
-
-    fn reset(&mut self, step: Power) -> TickResult {
-        use Power::*;
-        use TickResult::*;
-        match step {
-            ReadRegPcLow => {
-                self.stage = Stage::Reset(ReadRegPcHigh);
-                Read(0xfffc)
-            }
-            ReadRegPcHigh => {
-                self.stage = Stage::Reset(UpdateRegPc(self.pin_in.data as u16));
-                Read(0xfffc + 1)
-            }
-            UpdateRegPc(low_addr) => {
-                let high_addr = (self.pin_in.data as u16) << 8;
-                self.reg_pc = (low_addr | high_addr) as u32;
-                self.reg_sp = self.reg_sp.wrapping_sub(3);
-                self.flag_i = 1;
-                self.fetch()
-            }
-        }
-    }
-
-    fn reg_p(&self) -> u8 {
-        let mut val = 0;
-        if self.flag_c != 0 {
-            val |= 0x01;
-        }
-        if self.flag_z == 0 {
-            val |= 0x02;
-        }
-        if self.flag_i != 0 {
-            val |= 0x04;
-        }
-        if self.flag_d != 0 {
-            val |= 0x08;
-        }
-        if self.flag_v != 0 {
-            val |= 0x40;
-        }
-        if self.flag_s & 0x80 != 0 {
-            val |= 0x80;
-        }
-
-        val
-    }
-
-    fn set_reg_p(&mut self, val: u32) {
-        self.flag_c = val & 0x01;
-        self.flag_z = (val & 0x02) ^ 0x02;
-        self.flag_i = val & 0x04;
-        self.flag_d = val & 0x08;
-        self.flag_v = val & 0x40;
-        self.flag_s = val & 0x80;
     }
 
     pub fn tick(&mut self, pin_in: CpuPinIn) -> TickResult {
         self.pin_in = pin_in;
         self.current_tick += 1;
-        self.nmi.tick(self.pin_in.nmi);
         self.instruction_addr = None;
 
-        if self.pin_in.power {
-            self.pending_power = true;
-        }
-        if self.pin_in.reset {
-            self.pending_reset = true;
-        }
-
-        if self.irq_set_delay != 0 {
-            self.irq_set_delay -= 1;
-        }
-
-        if self.irq_delay != 0 {
-            self.irq_delay -= 1;
-        }
-
-        if let Some(result) = self.dma.tick(pin_in) {
+        let tick = if let Some(result) = self.dma.tick(pin_in) {
             result
         } else {
             let tick = self.step();
             self.dma.try_halt(tick).unwrap_or(tick)
-        }
+        };
+
+        self.interrupts.tick(&pin_in);
+
+        tick
     }
 
     #[cfg(feature = "debugger")]
     pub fn debug_state(&self) -> CpuDebugState {
         CpuDebugState {
-            reg_a: self.reg_a as u8,
-            reg_x: self.reg_x as u8,
-            reg_y: self.reg_y as u8,
-            reg_sp: self.reg_sp as u8,
-            reg_p: self.reg_p(),
-            reg_pc: self.reg_pc as u16,
+            reg_a: self.regs.reg_a,
+            reg_x: self.regs.reg_x,
+            reg_y: self.regs.reg_y,
+            reg_sp: self.regs.reg_sp,
+            reg_p: self.regs.reg_p(),
+            reg_pc: self.regs.reg_pc,
             instruction_addr: self.instruction_addr,
             cycle: self.current_tick,
         }
@@ -328,118 +139,22 @@ impl Cpu {
         CpuDebugState
     }
 
-    fn read_pc(&mut self) -> TickResult {
-        let pc = self.reg_pc as u16;
-        self.reg_pc = pc.wrapping_add(1) as u32;
-        TickResult::Read(pc)
-    }
-
-    fn pop_stack(&mut self) -> TickResult {
-        self.reg_sp = self.reg_sp.wrapping_add(1) & 0xff;
-        let addr = self.reg_sp as u16 | 0x100;
-        TickResult::Read(addr)
-    }
-
-    fn push_stack(&mut self, value: u8) -> TickResult {
-        let addr = self.reg_sp as u16 | 0x100;
-        self.reg_sp = self.reg_sp.wrapping_sub(1) & 0xff;
-        TickResult::Write(addr, value)
-    }
-
-    fn irq_nmi(&mut self, irq: Irq) -> TickResult {
-        use self::Irq::*;
-        match irq {
-            ReadPcOne(addr) => {
-                self.stage = Stage::Irq(Irq::ReadPcTwo(addr));
-                TickResult::Read(self.reg_pc as u16)
-            }
-            ReadPcTwo(addr) => {
-                self.stage = Stage::Irq(Irq::WriteRegPcHigh(addr));
-                TickResult::Read(self.reg_pc as u16)
-            }
-            WriteRegPcHigh(addr) => {
-                self.stage = Stage::Irq(Irq::WriteRegPcLow(addr));
-                let val = (self.reg_pc >> 8) & 0xff;
-                self.push_stack(val as u8)
-            }
-            WriteRegPcLow(addr) => {
-                self.stage = Stage::Irq(Irq::WriteRegP(addr));
-                let val = self.reg_pc & 0xff;
-                self.push_stack(val as u8)
-            }
-            WriteRegP(addr) => {
-                if self.nmi.pending() {
-                    self.nmi.clear();
-                    self.stage = Stage::Irq(Irq::ReadHighJump(0xfffa));
-                } else {
-                    self.stage = Stage::Irq(Irq::ReadHighJump(addr));
-                }
-                let val = self.reg_p() | 0x20;
-                self.push_stack(val)
-            }
-            ReadHighJump(addr) => {
-                self.stage = Stage::Irq(Irq::ReadLowJump(addr));
-                TickResult::Read(addr)
-            }
-            ReadLowJump(addr) => {
-                self.stage = Stage::Irq(Irq::UpdateRegPc);
-                self.reg_pc &= 0xff00;
-                self.reg_pc |= self.pin_in.data as u32;
-                self.flag_i = 1;
-                TickResult::Read(addr + 1)
-            }
-            UpdateRegPc => {
-                self.reg_pc &= 0x00ff;
-                self.reg_pc |= ((self.pin_in.data as u16) << 8) as u32;
-                self.fetch()
-            }
-        }
-    }
-
     fn step(&mut self) -> TickResult {
         match self.stage {
             Stage::Fetch => self.fetch(),
             Stage::Decode => self.decode(),
             Stage::Address(addressing, instruction) => self.addressing(addressing, instruction),
             Stage::Execute(address, instruction) => self.execute(address, instruction),
-            Stage::Irq(irq) => self.irq_nmi(irq),
-            Stage::Power(step) => self.power(step),
-            Stage::Reset(step) => self.reset(step),
         }
-    }
-
-    fn interrupt(&mut self) -> Option<Stage> {
-        let mut stage = None;
-        if self.pin_in.irq && (self.flag_i == 0 || self.irq_set_delay != 0) && self.irq_delay == 0 {
-            stage = Some(Stage::Irq(Irq::ReadPcOne(0xfffe)));
-        }
-
-        if self.nmi.interrupt() {
-            stage = Some(Stage::Irq(Irq::ReadPcOne(0xfffa)));
-        }
-
-        if self.pending_reset {
-            self.pending_reset = false;
-            stage = Some(Stage::Reset(Power::ReadRegPcLow));
-        }
-
-        if self.pin_in.power {
-            self.pin_in.power = false;
-            stage = Some(Stage::Power(Power::ReadRegPcLow));
-        }
-
-        stage
     }
 
     fn fetch(&mut self) -> TickResult {
-        if let Some(interrupt) = self.interrupt() {
-            self.stage = interrupt;
-            self.step()
+        if let Some(tick) = self.interrupts.interrupt(&self.pin_in, &mut self.regs) {
+            tick
         } else {
-            self.stage = self.interrupt().unwrap_or(Stage::Fetch);
-            self.instruction_addr = Some(self.reg_pc as u16);
+            self.instruction_addr = Some(self.regs.reg_pc);
             self.stage = Stage::Decode;
-            self.read_pc()
+            self.regs.read_pc()
         }
     }
 
@@ -478,16 +193,16 @@ impl Cpu {
     }
 
     fn addr_none(&mut self) -> AddressResult {
-        AddressResult::TickAddress(TickResult::Read(self.reg_pc as u16), 0x0000)
+        AddressResult::TickAddress(TickResult::Read(self.regs.reg_pc), 0x0000)
     }
 
     fn addr_accumulator(&mut self) -> AddressResult {
-        AddressResult::TickAddress(TickResult::Read(self.reg_pc as u16), self.reg_a as u16)
+        AddressResult::TickAddress(TickResult::Read(self.regs.reg_pc), self.regs.reg_a as u16)
     }
 
     fn addr_immediate(&mut self) -> AddressResult {
-        let addr = self.reg_pc as u16;
-        self.reg_pc = self.reg_pc.wrapping_add(1);
+        let addr = self.regs.reg_pc;
+        self.regs.reg_pc = self.regs.reg_pc.wrapping_add(1);
         AddressResult::Address(addr)
     }
 
@@ -495,7 +210,7 @@ impl Cpu {
         use AddressResult::*;
         use ZeroPage::*;
         match step {
-            Read => Next(self.read_pc(), Addressing::ZeroPage(Decode)),
+            Read => Next(self.regs.read_pc(), Addressing::ZeroPage(Decode)),
             Decode => Address(self.pin_in.data as u16),
         }
     }
@@ -506,14 +221,14 @@ impl Cpu {
         match step {
             ReadImmediate => {
                 let next = Addressing::ZeroPageOffset(reg, ApplyOffset);
-                Next(self.read_pc(), next)
+                Next(self.regs.read_pc(), next)
             }
             ApplyOffset => {
                 let reg = match reg {
-                    Reg::X => self.reg_x,
-                    Reg::Y => self.reg_y,
+                    Reg::X => self.regs.reg_x,
+                    Reg::Y => self.regs.reg_y,
                 };
-                let addr = self.pin_in.data.wrapping_add(reg as u8);
+                let addr = self.pin_in.data.wrapping_add(reg);
                 TickAddress(TickResult::Read(self.pin_in.data as u16), addr as u16)
             }
         }
@@ -525,12 +240,12 @@ impl Cpu {
         match step {
             ReadLow => {
                 let next = Addressing::Absolute(ReadHigh);
-                Next(self.read_pc(), next)
+                Next(self.regs.read_pc(), next)
             }
             ReadHigh => {
                 let low_addr = self.pin_in.data as u16;
                 let next = Addressing::Absolute(Decode(low_addr));
-                Next(self.read_pc(), next)
+                Next(self.regs.read_pc(), next)
             }
             Decode(low_addr) => {
                 let high_addr = (self.pin_in.data as u16) << 8;
@@ -551,18 +266,18 @@ impl Cpu {
         match step {
             ReadLow => {
                 let next = Addressing::AbsoluteOffset(reg, dummy, ReadHigh);
-                Next(self.read_pc(), next)
+                Next(self.regs.read_pc(), next)
             }
             ReadHigh => {
                 let next = Addressing::AbsoluteOffset(reg, dummy, Decode(self.pin_in.data as u16));
-                Next(self.read_pc(), next)
+                Next(self.regs.read_pc(), next)
             }
             Decode(low_addr) => {
                 let high_addr = (self.pin_in.data as u16) << 8;
                 let addr = high_addr | low_addr;
                 let reg = match reg {
-                    Reg::X => self.reg_x,
-                    Reg::Y => self.reg_y,
+                    Reg::X => self.regs.reg_x,
+                    Reg::Y => self.regs.reg_y,
                 };
                 let reg = (reg & 0xff) as u16;
                 let offset_addr = addr.wrapping_add(reg);
@@ -584,11 +299,11 @@ impl Cpu {
         match step {
             ReadLow => {
                 let next = Addressing::IndirectAbsolute(ReadHigh);
-                Next(self.read_pc(), next)
+                Next(self.regs.read_pc(), next)
             }
             ReadHigh => {
                 let next = Addressing::IndirectAbsolute(ReadIndirectLow(self.pin_in.data as u16));
-                Next(self.read_pc(), next)
+                Next(self.regs.read_pc(), next)
             }
             ReadIndirectLow(low_addr) => {
                 let high_addr = (self.pin_in.data as u16) << 8;
@@ -613,7 +328,7 @@ impl Cpu {
         use AddressResult::*;
         use Relative::*;
         match step {
-            ReadRegPc => Next(self.read_pc(), Addressing::Relative(Decode)),
+            ReadRegPc => Next(self.regs.read_pc(), Addressing::Relative(Decode)),
             Decode => Address(self.pin_in.data as u16),
         }
     }
@@ -624,10 +339,10 @@ impl Cpu {
         match step {
             ReadBase => {
                 let next = Addressing::IndirectX(ReadDummy);
-                Next(self.read_pc(), next)
+                Next(self.regs.read_pc(), next)
             }
             ReadDummy => {
-                let addr = self.pin_in.data.wrapping_add(self.reg_x as u8) as u16;
+                let addr = self.pin_in.data.wrapping_add(self.regs.reg_x) as u16;
                 let next = Addressing::IndirectX(ReadIndirectLow(addr));
                 Next(TickResult::Read(self.pin_in.data as u16), next)
             }
@@ -654,7 +369,7 @@ impl Cpu {
         match step {
             ReadBase => {
                 let next = Addressing::IndirectY(dummy, ReadZeroPageLow);
-                Next(self.read_pc(), next)
+                Next(self.regs.read_pc(), next)
             }
             ReadZeroPageLow => {
                 let zp_low_addr = self.pin_in.data as u16;
@@ -670,7 +385,7 @@ impl Cpu {
             Decode(low_addr) => {
                 let high_addr = (self.pin_in.data as u16) << 8;
                 let addr = low_addr | high_addr;
-                let reg_y = (self.reg_y & 0xff) as u16;
+                let reg_y = self.regs.reg_y as u16;
                 let offset_addr = addr.wrapping_add(reg_y);
                 let will_wrap = will_wrap(addr, reg_y);
                 match (will_wrap, dummy) {
@@ -691,40 +406,16 @@ impl Cpu {
             And(step) => self.inst_and(address, step),
             Asl(step) => self.inst_asl(address, step),
             Asla => self.inst_asla(),
-            Bcc(step) => {
-                let cond = self.flag_c == 0;
-                self.inst_branch(address, step, cond)
-            }
-            Bcs(step) => {
-                let cond = self.flag_c != 0;
-                self.inst_branch(address, step, cond)
-            }
-            Beq(step) => {
-                let cond = self.flag_z == 0;
-                self.inst_branch(address, step, cond)
-            }
+            Bcc(step) => self.inst_branch(address, step, !self.regs.flag_c),
+            Bcs(step) => self.inst_branch(address, step, self.regs.flag_c),
+            Beq(step) => self.inst_branch(address, step, self.regs.flag_z),
             Bit(step) => self.inst_bit(address, step),
-            Bmi(step) => {
-                let cond = self.flag_s & 0x80 != 0;
-                self.inst_branch(address, step, cond)
-            }
-            Bne(step) => {
-                let cond = self.flag_z != 0;
-                self.inst_branch(address, step, cond)
-            }
-            Bpl(step) => {
-                let cond = self.flag_s & 0x80 == 0;
-                self.inst_branch(address, step, cond)
-            }
+            Bmi(step) => self.inst_branch(address, step, self.regs.flag_s),
+            Bne(step) => self.inst_branch(address, step, !self.regs.flag_z),
+            Bpl(step) => self.inst_branch(address, step, !self.regs.flag_s),
             Brk(step) => self.inst_brk(address, step),
-            Bvc(step) => {
-                let cond = self.flag_v == 0;
-                self.inst_branch(address, step, cond)
-            }
-            Bvs(step) => {
-                let cond = self.flag_v != 0;
-                self.inst_branch(address, step, cond)
-            }
+            Bvc(step) => self.inst_branch(address, step, !self.regs.flag_v),
+            Bvs(step) => self.inst_branch(address, step, self.regs.flag_v),
             Clc => self.inst_clc(),
             Cld => self.inst_cld(),
             Cli => self.inst_cli(),
@@ -802,10 +493,14 @@ impl Cpu {
                 tick
             }
             ExecResult::Tick(tick) => {
-                self.stage = Stage::Fetch;
+                // setup no-op for final phase of last tick
+                self.stage = Stage::Execute(0x0000, Nop);
                 tick
             }
-            ExecResult::Done => self.fetch(),
+            ExecResult::Done => {
+                self.stage = Stage::Fetch;
+                self.fetch()
+            }
         }
     }
 
@@ -815,13 +510,15 @@ impl Cpu {
                 ExecResult::Next(TickResult::Read(addr), Instruction::Adc(ReadExec::Exec))
             }
             ReadExec::Exec => {
+                self.interrupts.poll(&self.regs);
                 let data = self.pin_in.data as u32;
-                let reg_a = self.reg_a.wrapping_add(data.wrapping_add(self.flag_c));
-                self.flag_v = ((!(self.reg_a ^ data) & (self.reg_a ^ reg_a)) >> 7) & 1;
-                self.flag_c = if reg_a > 0xff { 1 } else { 0 };
-                self.reg_a = reg_a & 0xff;
-                self.flag_s = self.reg_a;
-                self.flag_z = self.reg_a;
+                let reg_a = self.regs.reg_a as u32;
+                let tmp_reg_a = reg_a;
+                let reg_a = reg_a.wrapping_add(data.wrapping_add(self.regs.flag_c as u32));
+                self.regs.flag_v = ((!(tmp_reg_a ^ data) & (tmp_reg_a ^ reg_a)) & 0x80) != 0;
+                self.regs.flag_c = reg_a > 0xff;
+                self.regs.reg_a = (reg_a & 0xff) as u8;
+                self.regs.set_flags_zs(self.regs.reg_a);
 
                 ExecResult::Done
             }
@@ -834,10 +531,10 @@ impl Cpu {
                 ExecResult::Next(TickResult::Read(addr), Instruction::And(ReadExec::Exec))
             }
             ReadExec::Exec => {
-                let data = self.pin_in.data as u32;
-                self.reg_a &= data;
-                self.flag_s = self.reg_a;
-                self.flag_z = self.reg_a;
+                self.interrupts.poll(&self.regs);
+                let data = self.pin_in.data;
+                self.regs.reg_a &= data;
+                self.regs.set_flags_zs(self.regs.reg_a);
 
                 ExecResult::Done
             }
@@ -854,22 +551,22 @@ impl Cpu {
                 Next(TickResult::Write(addr, data), Instruction::Asl(Exec(data)))
             }
             Exec(data) => {
-                let value = self.asl(data as u32) as u8;
+                let value = self.asl(data);
                 Tick(TickResult::Write(addr, value))
             }
         }
     }
 
     fn inst_asla(&mut self) -> ExecResult {
-        self.reg_a = self.asl(self.reg_a);
+        self.interrupts.poll(&self.regs);
+        self.regs.reg_a = self.asl(self.regs.reg_a);
         ExecResult::Done
     }
 
-    fn asl(&mut self, mut value: u32) -> u32 {
-        self.flag_c = (value >> 7) & 1;
+    fn asl(&mut self, mut value: u8) -> u8 {
+        self.regs.flag_c = value & 0x80 != 0;
         value = (value << 1) & 0xff;
-        self.flag_z = value;
-        self.flag_s = value;
+        self.regs.set_flags_zs(value);
 
         value
     }
@@ -879,6 +576,7 @@ impl Cpu {
         use ExecResult::*;
         match step {
             Check => {
+                self.interrupts.poll(&self.regs);
                 if condition {
                     // TODO: Messy setting it to BCC
                     Next(TickResult::Read(addr), Instruction::Bcc(Branch))
@@ -887,10 +585,10 @@ impl Cpu {
                 }
             }
             Branch => {
-                let high_pc = self.reg_pc & 0xff00;
+                let high_pc = self.regs.reg_pc & 0xff00;
                 if addr < 0x080 {
-                    let offset_pc = self.reg_pc.wrapping_add(addr as u32);
-                    self.reg_pc = offset_pc;
+                    let offset_pc = self.regs.reg_pc.wrapping_add(addr);
+                    self.regs.reg_pc = offset_pc;
                     if high_pc != offset_pc & 0xff00 {
                         let dummy_pc = (high_pc | (offset_pc & 0xff)) as u16;
                         Tick(TickResult::Read(dummy_pc))
@@ -898,10 +596,10 @@ impl Cpu {
                         Done
                     }
                 } else {
-                    let offset_pc = self.reg_pc.wrapping_add(addr as u32).wrapping_sub(256);
-                    self.reg_pc = offset_pc;
+                    let offset_pc = self.regs.reg_pc.wrapping_add(addr).wrapping_sub(256);
+                    self.regs.reg_pc = offset_pc;
                     if high_pc != (offset_pc & 0xff00) {
-                        let dummy_pc = (high_pc | (offset_pc & 0xff)) as u16;
+                        let dummy_pc = high_pc | (offset_pc & 0xff);
                         Tick(TickResult::Read(dummy_pc))
                     } else {
                         Done
@@ -917,10 +615,11 @@ impl Cpu {
         match step {
             Read => Next(TickResult::Read(addr), Instruction::Bit(Exec)),
             Exec => {
-                let data = self.pin_in.data as u32;
-                self.flag_s = data & 0x80;
-                self.flag_v = (data >> 6) & 1;
-                self.flag_z = data & self.reg_a;
+                self.interrupts.poll(&self.regs);
+                let data = self.pin_in.data;
+                self.regs.flag_s = data & 0x80 != 0;
+                self.regs.flag_v = ((data >> 6) & 1) != 0;
+                self.regs.flag_z = (data & self.regs.reg_a) == 0;
 
                 Done
             }
@@ -933,25 +632,33 @@ impl Cpu {
         match step {
             ReadDummy => Next(TickResult::Read(addr), Instruction::Brk(WriteRegPcHigh)),
             WriteRegPcHigh => {
-                let pc_high = ((self.reg_pc >> 8) & 0xff) as u8;
-                Next(self.push_stack(pc_high), Instruction::Brk(WriteRegPcLow))
+                let pc_high = ((self.regs.reg_pc >> 8) & 0xff) as u8;
+                Next(
+                    self.regs.push_stack(pc_high),
+                    Instruction::Brk(WriteRegPcLow),
+                )
             }
             WriteRegPcLow => {
-                let pc_low = (self.reg_pc & 0xff) as u8;
-                Next(self.push_stack(pc_low), Instruction::Brk(WriteRegP))
+                let pc_low = (self.regs.reg_pc & 0xff) as u8;
+                Next(self.regs.push_stack(pc_low), Instruction::Brk(WriteRegP))
             }
             WriteRegP => {
-                let reg_p = self.reg_p() | 0x30;
-                self.flag_i = 1;
-                let jump = if self.nmi.pending() {
-                    self.nmi.clear();
-                    ReadHighJump(0xfffa)
-                } else {
-                    ReadHighJump(0xfffe)
-                };
-                Next(self.push_stack(reg_p), Instruction::Brk(jump))
+                let reg_p = self.regs.reg_p() | 0x30;
+                self.regs.flag_i = true;
+                Next(self.regs.push_stack(reg_p), Instruction::Brk(ReadHighJump))
             }
-            ReadHighJump(addr) => Next(TickResult::Read(addr), Instruction::Brk(ReadLowJump(addr))),
+            ReadHighJump => {
+                self.interrupts.poll(&self.regs);
+                let vector = if let Some(trigger) = self.interrupts.triggered() {
+                    trigger.vector()
+                } else {
+                    0xfffe
+                };
+                Next(
+                    TickResult::Read(vector),
+                    Instruction::Brk(ReadLowJump(vector)),
+                )
+            }
             ReadLowJump(addr) => {
                 let low_value = self.pin_in.data as u16;
                 Next(
@@ -961,32 +668,33 @@ impl Cpu {
             }
             UpdateRegPc(low_value) => {
                 let high_value = (self.pin_in.data as u16) << 8;
-                self.reg_pc = (low_value | high_value) as u32;
+                self.regs.reg_pc = low_value | high_value;
                 Done
             }
         }
     }
 
     fn inst_clc(&mut self) -> ExecResult {
-        self.flag_c = 0;
+        self.interrupts.poll(&self.regs);
+        self.regs.flag_c = false;
         ExecResult::Done
     }
 
     fn inst_cld(&mut self) -> ExecResult {
-        self.flag_d = 0;
+        self.interrupts.poll(&self.regs);
+        self.regs.flag_d = false;
         ExecResult::Done
     }
 
     fn inst_cli(&mut self) -> ExecResult {
-        if self.flag_i == 1 {
-            self.irq_delay = 1;
-        }
-        self.flag_i = 0;
+        self.interrupts.poll(&self.regs);
+        self.regs.flag_i = false;
         ExecResult::Done
     }
 
     fn inst_clv(&mut self) -> ExecResult {
-        self.flag_v = 0;
+        self.interrupts.poll(&self.regs);
+        self.regs.flag_v = false;
         ExecResult::Done
     }
 
@@ -996,10 +704,11 @@ impl Cpu {
         match step {
             Read => Next(TickResult::Read(addr), Instruction::Cmp(Exec)),
             Exec => {
-                let value = self.pin_in.data as u32;
-                self.flag_c = if self.reg_a >= value { 1 } else { 0 };
-                self.flag_z = if self.reg_a == value { 0 } else { 1 };
-                self.flag_s = self.reg_a.wrapping_sub(value) & 0xff;
+                self.interrupts.poll(&self.regs);
+                let value = self.pin_in.data;
+                self.regs.flag_c = self.regs.reg_a >= value;
+                let value = self.regs.reg_a.wrapping_sub(value);
+                self.regs.set_flags_zs(value);
                 Done
             }
         }
@@ -1011,10 +720,11 @@ impl Cpu {
         match step {
             Read => Next(TickResult::Read(addr), Instruction::Cpx(Exec)),
             Exec => {
-                let value = self.pin_in.data as u32;
-                self.flag_c = if self.reg_x >= value { 1 } else { 0 };
-                self.flag_z = if self.reg_x == value { 0 } else { 1 };
-                self.flag_s = self.reg_x.wrapping_sub(value) & 0xff;
+                self.interrupts.poll(&self.regs);
+                let value = self.pin_in.data;
+                self.regs.flag_c = self.regs.reg_x >= value;
+                let value = self.regs.reg_x.wrapping_sub(value);
+                self.regs.set_flags_zs(value);
                 Done
             }
         }
@@ -1026,10 +736,11 @@ impl Cpu {
         match step {
             Read => Next(TickResult::Read(addr), Instruction::Cpy(Exec)),
             Exec => {
-                let value = self.pin_in.data as u32;
-                self.flag_c = if self.reg_y >= value { 1 } else { 0 };
-                self.flag_z = if self.reg_y == value { 0 } else { 1 };
-                self.flag_s = self.reg_y.wrapping_sub(value) & 0xff;
+                self.interrupts.poll(&self.regs);
+                let value = self.pin_in.data;
+                self.regs.flag_c = self.regs.reg_y >= value;
+                let value = self.regs.reg_y.wrapping_sub(value);
+                self.regs.set_flags_zs(value);
                 Done
             }
         }
@@ -1048,25 +759,24 @@ impl Cpu {
                 )
             }
             Exec(value) => {
-                let value = value.wrapping_sub(1) as u32;
-                self.flag_s = value;
-                self.flag_z = value;
-                Tick(TickResult::Write(addr, value as u8))
+                let value = value.wrapping_sub(1);
+                self.regs.set_flags_zs(value);
+                Tick(TickResult::Write(addr, value))
             }
         }
     }
 
     fn inst_dex(&mut self) -> ExecResult {
-        self.reg_x = self.reg_x.wrapping_sub(1) & 0xff;
-        self.flag_s = self.reg_x;
-        self.flag_z = self.reg_x;
+        self.interrupts.poll(&self.regs);
+        self.regs.reg_x = self.regs.reg_x.wrapping_sub(1);
+        self.regs.set_flags_zs(self.regs.reg_x);
         ExecResult::Done
     }
 
     fn inst_dey(&mut self) -> ExecResult {
-        self.reg_y = self.reg_y.wrapping_sub(1) & 0xff;
-        self.flag_s = self.reg_y;
-        self.flag_z = self.reg_y;
+        self.interrupts.poll(&self.regs);
+        self.regs.reg_y = self.regs.reg_y.wrapping_sub(1);
+        self.regs.set_flags_zs(self.regs.reg_y);
         ExecResult::Done
     }
 
@@ -1076,11 +786,10 @@ impl Cpu {
         match step {
             Read => Next(TickResult::Read(addr), Instruction::Eor(Exec)),
             Exec => {
-                let value = self.pin_in.data as u32;
-                self.reg_a ^= value;
-                self.reg_a &= 0xff;
-                self.flag_s = self.reg_a;
-                self.flag_z = self.reg_a;
+                self.interrupts.poll(&self.regs);
+                let value = self.pin_in.data;
+                self.regs.reg_a ^= value;
+                self.regs.set_flags_zs(self.regs.reg_a);
                 Done
             }
         }
@@ -1099,30 +808,30 @@ impl Cpu {
                 )
             }
             Exec(value) => {
-                let value = value.wrapping_add(1) as u32;
-                self.flag_s = value;
-                self.flag_z = value;
-                Tick(TickResult::Write(addr, value as u8))
+                let value = value.wrapping_add(1);
+                self.regs.set_flags_zs(value);
+                Tick(TickResult::Write(addr, value))
             }
         }
     }
 
     fn inst_inx(&mut self) -> ExecResult {
-        self.reg_x = self.reg_x.wrapping_add(1) & 0xff;
-        self.flag_s = self.reg_x;
-        self.flag_z = self.reg_x;
+        self.interrupts.poll(&self.regs);
+        self.regs.reg_x = self.regs.reg_x.wrapping_add(1);
+        self.regs.set_flags_zs(self.regs.reg_x);
         ExecResult::Done
     }
 
     fn inst_iny(&mut self) -> ExecResult {
-        self.reg_y = self.reg_y.wrapping_add(1) & 0xff;
-        self.flag_s = self.reg_y;
-        self.flag_z = self.reg_y;
+        self.interrupts.poll(&self.regs);
+        self.regs.reg_y = self.regs.reg_y.wrapping_add(1);
+        self.regs.set_flags_zs(self.regs.reg_y);
         ExecResult::Done
     }
 
     fn inst_jmp(&mut self, addr: u16) -> ExecResult {
-        self.reg_pc = addr as u32;
+        self.interrupts.poll(&self.regs);
+        self.regs.reg_pc = addr;
         ExecResult::Done
     }
 
@@ -1131,23 +840,23 @@ impl Cpu {
         use Jsr::*;
         match step {
             ReadDummy => {
-                let dummy_addr = self.reg_sp | 0x100;
+                let dummy_addr = self.regs.reg_sp as u16 | 0x100;
                 Next(
-                    TickResult::Read(dummy_addr as u16),
+                    TickResult::Read(dummy_addr),
                     Instruction::Jsr(WriteRegPcHigh),
                 )
             }
             WriteRegPcHigh => {
-                let value = (self.reg_pc.wrapping_sub(1) >> 8) & 0xff;
+                let value = (self.regs.reg_pc.wrapping_sub(1) >> 8) & 0xff;
                 Next(
-                    self.push_stack(value as u8),
+                    self.regs.push_stack(value as u8),
                     Instruction::Jsr(WriteRegPcLow),
                 )
             }
             WriteRegPcLow => {
-                let value = self.reg_pc.wrapping_sub(1) & 0xff;
-                self.reg_pc = addr as u32;
-                Tick(self.push_stack(value as u8))
+                let value = self.regs.reg_pc.wrapping_sub(1) & 0xff;
+                self.regs.reg_pc = addr;
+                Tick(self.regs.push_stack(value as u8))
             }
         }
     }
@@ -1158,9 +867,9 @@ impl Cpu {
         match step {
             Read => Next(TickResult::Read(addr), Instruction::Lda(Exec)),
             Exec => {
-                self.reg_a = self.pin_in.data as u32;
-                self.flag_s = self.reg_a;
-                self.flag_z = self.reg_a;
+                self.interrupts.poll(&self.regs);
+                self.regs.reg_a = self.pin_in.data;
+                self.regs.set_flags_zs(self.regs.reg_a);
                 Done
             }
         }
@@ -1172,9 +881,9 @@ impl Cpu {
         match step {
             Read => Next(TickResult::Read(addr), Instruction::Ldx(Exec)),
             Exec => {
-                self.reg_x = self.pin_in.data as u32;
-                self.flag_s = self.reg_x;
-                self.flag_z = self.reg_x;
+                self.interrupts.poll(&self.regs);
+                self.regs.reg_x = self.pin_in.data;
+                self.regs.set_flags_zs(self.regs.reg_x);
                 Done
             }
         }
@@ -1186,9 +895,9 @@ impl Cpu {
         match step {
             Read => Next(TickResult::Read(addr), Instruction::Ldy(Exec)),
             Exec => {
-                self.reg_y = self.pin_in.data as u32;
-                self.flag_s = self.reg_y;
-                self.flag_z = self.reg_y;
+                self.interrupts.poll(&self.regs);
+                self.regs.reg_y = self.pin_in.data;
+                self.regs.set_flags_zs(self.regs.reg_y);
                 Done
             }
         }
@@ -1211,21 +920,22 @@ impl Cpu {
     }
 
     fn inst_lsra(&mut self) -> ExecResult {
-        self.reg_a = self.lsr(self.reg_a as u8) as u32;
+        self.interrupts.poll(&self.regs);
+        self.regs.reg_a = self.lsr(self.regs.reg_a);
 
         ExecResult::Done
     }
 
     fn lsr(&mut self, value: u8) -> u8 {
-        self.flag_c = (value as u32) & 1;
+        self.regs.flag_c = (value & 1) != 0;
         let value = value >> 1;
-        self.flag_s = value as u32;
-        self.flag_z = value as u32;
+        self.regs.set_flags_zs(value);
 
         value
     }
 
     fn inst_nop(&mut self) -> ExecResult {
+        self.interrupts.poll(&self.regs);
         ExecResult::Done
     }
 
@@ -1235,21 +945,21 @@ impl Cpu {
         match step {
             Read => Next(TickResult::Read(addr), Instruction::Ora(Exec)),
             Exec => {
-                self.reg_a = (self.reg_a | self.pin_in.data as u32) & 0xff;
-                self.flag_s = self.reg_a;
-                self.flag_z = self.reg_a;
+                self.interrupts.poll(&self.regs);
+                self.regs.reg_a = self.regs.reg_a | self.pin_in.data;
+                self.regs.set_flags_zs(self.regs.reg_a);
                 Done
             }
         }
     }
 
     fn inst_pha(&mut self) -> ExecResult {
-        ExecResult::Tick(self.push_stack(self.reg_a as u8))
+        ExecResult::Tick(self.regs.push_stack(self.regs.reg_a))
     }
 
     fn inst_php(&mut self) -> ExecResult {
-        let value = self.reg_p() as u8 | 0x30;
-        ExecResult::Tick(self.push_stack(value))
+        let value = self.regs.reg_p() | 0x30;
+        ExecResult::Tick(self.regs.push_stack(value))
     }
 
     fn inst_pla(&mut self, step: DummyReadExec) -> ExecResult {
@@ -1257,14 +967,14 @@ impl Cpu {
         use ExecResult::*;
         match step {
             Dummy => {
-                let dummy_addr = self.reg_sp | 0x100;
-                Next(TickResult::Read(dummy_addr as u16), Instruction::Pla(Read))
+                let dummy_addr = self.regs.reg_sp as u16 | 0x100;
+                Next(TickResult::Read(dummy_addr), Instruction::Pla(Read))
             }
-            Read => Next(self.pop_stack(), Instruction::Pla(Exec)),
+            Read => Next(self.regs.pop_stack(), Instruction::Pla(Exec)),
             Exec => {
-                self.reg_a = self.pin_in.data as u32;
-                self.flag_s = self.reg_a;
-                self.flag_z = self.reg_a;
+                self.interrupts.poll(&self.regs);
+                self.regs.reg_a = self.pin_in.data;
+                self.regs.set_flags_zs(self.regs.reg_a);
                 Done
             }
         }
@@ -1275,19 +985,14 @@ impl Cpu {
         use ExecResult::*;
         match step {
             Dummy => {
-                let dummy_addr = self.reg_sp | 0x100;
-                Next(TickResult::Read(dummy_addr as u16), Instruction::Plp(Read))
+                let dummy_addr = self.regs.reg_sp as u16 | 0x100;
+                Next(TickResult::Read(dummy_addr), Instruction::Plp(Read))
             }
-            Read => Next(self.pop_stack(), Instruction::Plp(Exec)),
+            Read => Next(self.regs.pop_stack(), Instruction::Plp(Exec)),
             Exec => {
-                let value = self.pin_in.data as u32;
-                if self.flag_i == 1 && value & 0x04 == 0 {
-                    self.irq_delay = 1;
-                }
-                if self.flag_i == 0 && value & 0x04 != 0 {
-                    self.irq_set_delay = 1;
-                }
-                self.set_reg_p(value);
+                self.interrupts.poll(&self.regs);
+                let value = self.pin_in.data;
+                self.regs.set_reg_p(value);
                 Done
             }
         }
@@ -1313,20 +1018,19 @@ impl Cpu {
     }
 
     fn inst_rola(&mut self) -> ExecResult {
-        self.reg_a = self.rol(self.reg_a as u8) as u32;
+        self.interrupts.poll(&self.regs);
+        self.regs.reg_a = self.rol(self.regs.reg_a);
 
         ExecResult::Done
     }
 
     fn rol(&mut self, value: u8) -> u8 {
-        let value = value as u32;
-        let c = if self.flag_c != 0 { 1 } else { 0 };
-        self.flag_c = value >> 7 & 1;
-        let value = (value << 1 | c) & 0xff;
-        self.flag_s = value;
-        self.flag_z = value;
+        let c = if self.regs.flag_c { 1 } else { 0 };
+        self.regs.flag_c = value & 0x80 != 0;
+        let value = value << 1 | c;
+        self.regs.set_flags_zs(value);
 
-        value as u8
+        value
     }
 
     fn inst_ror(&mut self, addr: u16, step: ReadDummyExec) -> ExecResult {
@@ -1349,20 +1053,19 @@ impl Cpu {
     }
 
     fn inst_rora(&mut self) -> ExecResult {
-        self.reg_a = self.ror(self.reg_a as u8) as u32;
+        self.interrupts.poll(&self.regs);
+        self.regs.reg_a = self.ror(self.regs.reg_a);
 
         ExecResult::Done
     }
 
     fn ror(&mut self, value: u8) -> u8 {
-        let value = value as u32;
-        let c = if self.flag_c != 0 { 0x80 } else { 0 };
-        self.flag_c = value & 1;
-        let value = (value >> 1 | c) & 0xff;
-        self.flag_s = value;
-        self.flag_z = value;
+        let c = if self.regs.flag_c { 0x80 } else { 0 };
+        self.regs.flag_c = value & 1 != 0;
+        let value = value >> 1 | c;
+        self.regs.set_flags_zs(value);
 
-        value as u8
+        value
     }
 
     fn inst_rti(&mut self, step: Rti) -> ExecResult {
@@ -1370,25 +1073,26 @@ impl Cpu {
         use Rti::*;
         match step {
             Dummy => {
-                let dummy_addr = self.reg_sp | 0x100;
-                Next(
-                    TickResult::Read(dummy_addr as u16),
-                    Instruction::Rti(ReadRegP),
-                )
+                let dummy_addr = self.regs.reg_sp as u16 | 0x100;
+                Next(TickResult::Read(dummy_addr), Instruction::Rti(ReadRegP))
             }
-            ReadRegP => Next(self.pop_stack(), Instruction::Rti(ReadRegPcLow)),
+            ReadRegP => Next(self.regs.pop_stack(), Instruction::Rti(ReadRegPcLow)),
             ReadRegPcLow => {
                 let reg_p = self.pin_in.data;
-                self.set_reg_p(reg_p as u32);
-                Next(self.pop_stack(), Instruction::Rti(ReadRegPcHigh))
+                self.regs.set_reg_p(reg_p);
+                Next(self.regs.pop_stack(), Instruction::Rti(ReadRegPcHigh))
             }
             ReadRegPcHigh => {
                 let low_value = self.pin_in.data;
-                Next(self.pop_stack(), Instruction::Rti(Exec(low_value as u16)))
+                Next(
+                    self.regs.pop_stack(),
+                    Instruction::Rti(Exec(low_value as u16)),
+                )
             }
             Exec(low_addr) => {
+                self.interrupts.poll(&self.regs);
                 let high_addr = (self.pin_in.data as u16) << 8;
-                self.reg_pc = (high_addr | low_addr) as u32;
+                self.regs.reg_pc = high_addr | low_addr;
                 Done
             }
         }
@@ -1399,21 +1103,18 @@ impl Cpu {
         use Rts::*;
         match step {
             Dummy => {
-                let dummy_addr = self.reg_sp | 0x100;
-                Next(
-                    TickResult::Read(dummy_addr as u16),
-                    Instruction::Rts(ReadRegPcLow),
-                )
+                let dummy_addr = self.regs.reg_sp as u16 | 0x100;
+                Next(TickResult::Read(dummy_addr), Instruction::Rts(ReadRegPcLow))
             }
-            ReadRegPcLow => Next(self.pop_stack(), Instruction::Rts(ReadRegPcHigh)),
+            ReadRegPcLow => Next(self.regs.pop_stack(), Instruction::Rts(ReadRegPcHigh)),
             ReadRegPcHigh => {
                 let low_value = self.pin_in.data as u16;
-                Next(self.pop_stack(), Instruction::Rts(Exec(low_value)))
+                Next(self.regs.pop_stack(), Instruction::Rts(Exec(low_value)))
             }
             Exec(low_addr) => {
                 let high_addr = (self.pin_in.data as u16) << 8;
-                self.reg_pc = (high_addr | low_addr).wrapping_add(1) as u32;
-                Tick(TickResult::Read(self.reg_pc as u16))
+                self.regs.reg_pc = (high_addr | low_addr).wrapping_add(1);
+                Tick(TickResult::Read(self.regs.reg_pc))
             }
         }
     }
@@ -1424,86 +1125,87 @@ impl Cpu {
         match step {
             Read => Next(TickResult::Read(addr), Instruction::Sbc(Exec)),
             Exec => {
+                self.interrupts.poll(&self.regs);
                 let value = self.pin_in.data as i32;
-                let temp_a = self.reg_a as i32;
-                let temp = temp_a.wrapping_sub(value.wrapping_sub(self.flag_c as i32 - 1));
-                self.flag_v = (((temp_a ^ value) & (temp_a ^ temp)) >> 7) as u32 & 1;
-                self.flag_c = if temp < 0 { 0 } else { 1 };
-                self.reg_a = (temp as u32) & 0xff;
-                self.flag_s = self.reg_a;
-                self.flag_z = self.reg_a;
+                let temp_a = self.regs.reg_a as i32;
+                let temp = temp_a.wrapping_sub(value.wrapping_sub(self.regs.flag_c as i32 - 1));
+                self.regs.flag_v = ((temp_a ^ value) & (temp_a ^ temp)) & 0x80 != 0;
+                self.regs.flag_c = temp >= 0;
+                self.regs.reg_a = temp as u8;
+                self.regs.set_flags_zs(self.regs.reg_a);
                 Done
             }
         }
     }
 
     fn inst_sec(&mut self) -> ExecResult {
-        self.flag_c = 1;
+        self.interrupts.poll(&self.regs);
+        self.regs.flag_c = true;
         ExecResult::Done
     }
 
     fn inst_sed(&mut self) -> ExecResult {
-        self.flag_d = 1;
+        self.interrupts.poll(&self.regs);
+        self.regs.flag_d = true;
         ExecResult::Done
     }
 
     fn inst_sei(&mut self) -> ExecResult {
-        if self.flag_i == 0 {
-            self.irq_set_delay = 1;
-        }
-        self.flag_i = 1;
+        self.interrupts.poll(&self.regs);
+        self.regs.flag_i = true;
         ExecResult::Done
     }
 
     fn inst_sta(&mut self, addr: u16) -> ExecResult {
-        ExecResult::Tick(TickResult::Write(addr, self.reg_a as u8))
+        ExecResult::Tick(TickResult::Write(addr, self.regs.reg_a))
     }
 
     fn inst_stx(&mut self, addr: u16) -> ExecResult {
-        ExecResult::Tick(TickResult::Write(addr, self.reg_x as u8))
+        ExecResult::Tick(TickResult::Write(addr, self.regs.reg_x))
     }
 
     fn inst_sty(&mut self, addr: u16) -> ExecResult {
-        ExecResult::Tick(TickResult::Write(addr, self.reg_y as u8))
+        ExecResult::Tick(TickResult::Write(addr, self.regs.reg_y))
     }
 
     fn inst_tax(&mut self) -> ExecResult {
-        self.reg_x = self.reg_a;
-        self.flag_s = self.reg_x;
-        self.flag_z = self.reg_x;
+        self.interrupts.poll(&self.regs);
+        self.regs.reg_x = self.regs.reg_a;
+        self.regs.set_flags_zs(self.regs.reg_x);
         ExecResult::Done
     }
 
     fn inst_tay(&mut self) -> ExecResult {
-        self.reg_y = self.reg_a;
-        self.flag_s = self.reg_y;
-        self.flag_z = self.reg_y;
+        self.interrupts.poll(&self.regs);
+        self.regs.reg_y = self.regs.reg_a;
+        self.regs.set_flags_zs(self.regs.reg_y);
         ExecResult::Done
     }
 
     fn inst_tsx(&mut self) -> ExecResult {
-        self.reg_x = self.reg_sp;
-        self.flag_s = self.reg_x;
-        self.flag_z = self.reg_x;
+        self.interrupts.poll(&self.regs);
+        self.regs.reg_x = self.regs.reg_sp;
+        self.regs.set_flags_zs(self.regs.reg_x);
         ExecResult::Done
     }
 
     fn inst_txa(&mut self) -> ExecResult {
-        self.reg_a = self.reg_x;
-        self.flag_s = self.reg_a;
-        self.flag_z = self.reg_a;
+        self.interrupts.poll(&self.regs);
+        self.regs.reg_a = self.regs.reg_x;
+        self.regs.set_flags_zs(self.regs.reg_a);
         ExecResult::Done
     }
 
     fn inst_txs(&mut self) -> ExecResult {
-        self.reg_sp = self.reg_x;
+        self.interrupts.poll(&self.regs);
+        self.regs.reg_sp = self.regs.reg_x;
         ExecResult::Done
     }
 
     fn inst_tya(&mut self) -> ExecResult {
-        self.reg_a = self.reg_y;
-        self.flag_s = self.reg_a;
-        self.flag_z = self.reg_a;
+        self.interrupts.poll(&self.regs);
+        self.regs.reg_a = self.regs.reg_y;
+        self.regs.set_flags_zs(self.regs.reg_a);
         ExecResult::Done
     }
 
@@ -1517,12 +1219,11 @@ impl Cpu {
         match step {
             Read => Next(TickResult::Read(addr), Instruction::IllAlr(Exec)),
             Exec => {
-                let value = self.pin_in.data as u32;
-                self.reg_a &= value;
-                self.flag_c = self.reg_a & 1;
-                self.reg_a >>= 1;
-                self.flag_s = self.reg_a;
-                self.flag_z = self.reg_a;
+                self.interrupts.poll(&self.regs);
+                self.regs.reg_a &= self.pin_in.data;
+                self.regs.flag_c = self.regs.reg_a & 1 != 0;
+                self.regs.reg_a >>= 1;
+                self.regs.set_flags_zs(self.regs.reg_a);
                 Done
             }
         }
@@ -1534,11 +1235,10 @@ impl Cpu {
         match step {
             Read => Next(TickResult::Read(addr), Instruction::IllAnc(Exec)),
             Exec => {
-                let value = self.pin_in.data as u32;
-                self.reg_a &= value;
-                self.flag_c = (self.reg_a >> 7) & 1;
-                self.flag_s = self.reg_a;
-                self.flag_z = self.reg_a;
+                self.interrupts.poll(&self.regs);
+                self.regs.reg_a &= self.pin_in.data;
+                self.regs.flag_c = self.regs.reg_a & 0x80 != 0;
+                self.regs.set_flags_zs(self.regs.reg_a);
                 Done
             }
         }
@@ -1550,35 +1250,30 @@ impl Cpu {
         match step {
             Read => Next(TickResult::Read(addr), Instruction::IllArr(Exec)),
             Exec => {
-                let value = self.pin_in.data as u32;
-                self.reg_a &= value;
-                if self.flag_c != 0 {
-                    self.flag_c = self.reg_a & 1;
-                    self.reg_a = ((self.reg_a >> 1) | 0x80) & 0xff;
-                    self.flag_s = self.reg_a;
-                    self.flag_z = self.reg_a;
-                } else {
-                    self.flag_c = self.reg_a & 1;
-                    self.reg_a = (self.reg_a >> 1) & 0xff;
-                    self.flag_s = self.reg_a;
-                    self.flag_z = self.reg_a;
-                }
-                match ((self.reg_a & 0x40), (self.reg_a & 0x20)) {
+                self.interrupts.poll(&self.regs);
+                self.regs.reg_a &= self.pin_in.data;
+
+                let c = if self.regs.flag_c { 0x80 } else { 0x00 };
+                self.regs.flag_c = self.regs.reg_a & 1 != 0;
+                self.regs.reg_a = (self.regs.reg_a >> 1) | c;
+                self.regs.set_flags_zs(self.regs.reg_a);
+
+                match ((self.regs.reg_a & 0x40), (self.regs.reg_a & 0x20)) {
                     (0, 0) => {
-                        self.flag_c = 0;
-                        self.flag_v = 0;
+                        self.regs.flag_c = false;
+                        self.regs.flag_v = false;
                     }
                     (_, 0) => {
-                        self.flag_c = 1;
-                        self.flag_v = 1;
+                        self.regs.flag_c = true;
+                        self.regs.flag_v = true;
                     }
                     (0, _) => {
-                        self.flag_c = 0;
-                        self.flag_v = 1;
+                        self.regs.flag_c = false;
+                        self.regs.flag_v = true;
                     }
                     (_, _) => {
-                        self.flag_c = 1;
-                        self.flag_v = 0;
+                        self.regs.flag_c = true;
+                        self.regs.flag_v = false;
                     }
                 }
                 Done
@@ -1592,13 +1287,12 @@ impl Cpu {
         match step {
             Read => Next(TickResult::Read(addr), Instruction::IllAxs(Exec)),
             Exec => {
-                let value = self.pin_in.data as u32;
-                self.reg_x &= self.reg_a;
-                let temp = self.reg_x.wrapping_sub(value);
-                self.flag_c = if temp > self.reg_x { 0 } else { 1 };
-                self.reg_x = temp & 0xff;
-                self.flag_s = self.reg_x;
-                self.flag_z = self.reg_x;
+                self.interrupts.poll(&self.regs);
+                self.regs.reg_x &= self.regs.reg_a;
+                let temp = self.regs.reg_x.wrapping_sub(self.pin_in.data);
+                self.regs.flag_c = temp <= self.regs.reg_x;
+                self.regs.reg_x = temp;
+                self.regs.set_flags_zs(self.regs.reg_x);
                 Done
             }
         }
@@ -1617,11 +1311,11 @@ impl Cpu {
                 )
             }
             Exec(data) => {
-                let value = data.wrapping_sub(1) as u32;
-                self.flag_c = if self.reg_a >= value { 1 } else { 0 };
-                self.flag_z = if self.reg_a == value { 0 } else { 1 };
-                self.flag_s = self.reg_a.wrapping_sub(value) & 0xff;
-                Tick(TickResult::Write(addr, value as u8))
+                let value = data.wrapping_sub(1);
+                self.regs.flag_c = self.regs.reg_a >= value;
+                let tmp = self.regs.reg_a.wrapping_sub(value);
+                self.regs.set_flags_zs(tmp);
+                Tick(TickResult::Write(addr, value))
             }
         }
     }
@@ -1640,19 +1334,19 @@ impl Cpu {
             }
             Exec(data) => {
                 let value = data.wrapping_add(1) as i32;
-                let temp_a = self.reg_a as i32;
-                let temp = temp_a.wrapping_sub(value.wrapping_sub(self.flag_c as i32 - 1));
-                self.flag_v = (((temp_a ^ value) & (temp_a ^ temp)) >> 7) as u32 & 1;
-                self.flag_c = if temp < 0 { 0 } else { 1 };
-                self.reg_a = (temp as u32) & 0xff;
-                self.flag_s = self.reg_a;
-                self.flag_z = self.reg_a;
+                let temp_a = self.regs.reg_a as i32;
+                let temp = temp_a.wrapping_sub(value.wrapping_sub(self.regs.flag_c as i32 - 1));
+                self.regs.flag_v = ((temp_a ^ value) & (temp_a ^ temp)) & 0x80 != 0;
+                self.regs.flag_c = temp >= 0;
+                self.regs.reg_a = temp as u8;
+                self.regs.set_flags_zs(self.regs.reg_a);
                 Tick(TickResult::Write(addr, value as u8))
             }
         }
     }
 
     fn ill_inst_kil(&mut self) -> ExecResult {
+        self.interrupts.poll(&self.regs);
         tracing::error!("KIL encountered");
         ExecResult::Done
     }
@@ -1667,16 +1361,17 @@ impl Cpu {
         match step {
             Read => Next(TickResult::Read(addr), Instruction::IllLax(Exec)),
             Exec => {
-                self.reg_a = self.pin_in.data as u32;
-                self.reg_x = self.reg_a;
-                self.flag_s = self.reg_a;
-                self.flag_z = self.reg_a;
+                self.interrupts.poll(&self.regs);
+                self.regs.reg_a = self.pin_in.data;
+                self.regs.reg_x = self.regs.reg_a;
+                self.regs.set_flags_zs(self.regs.reg_a);
                 Done
             }
         }
     }
 
     fn ill_inst_nop(&mut self) -> ExecResult {
+        self.interrupts.poll(&self.regs);
         ExecResult::Done
     }
 
@@ -1697,13 +1392,12 @@ impl Cpu {
                 )
             }
             Exec(data) => {
-                let c = if self.flag_c != 0 { 1 } else { 0 };
-                self.flag_c = (data as u32) >> 7 & 1;
-                let value = ((data as u32) << 1 | c) & 0xff;
-                self.reg_a &= value;
-                self.flag_s = self.reg_a;
-                self.flag_z = self.reg_a;
-                Tick(TickResult::Write(addr, value as u8))
+                let c = self.regs.flag_c as u8;
+                self.regs.flag_c = data & 0x80 != 0;
+                let value = (data << 1) | c;
+                self.regs.reg_a &= value;
+                self.regs.set_flags_zs(self.regs.reg_a);
+                Tick(TickResult::Write(addr, value))
             }
         }
     }
@@ -1722,15 +1416,15 @@ impl Cpu {
             }
             Exec(data) => {
                 let data = data as u32;
-                let c = if self.flag_c != 0 { 0x80 } else { 0 };
-                self.flag_c = data & 1;
+                let c = if self.regs.flag_c { 0x80 } else { 0 };
+                self.regs.flag_c = data & 1 != 0;
                 let data = (data >> 1 | c) & 0xff;
-                let value = self.reg_a.wrapping_add(data.wrapping_add(self.flag_c));
-                self.flag_v = ((!(self.reg_a ^ data) & (self.reg_a ^ value)) >> 7) & 1;
-                self.flag_c = if value > 0xff { 1 } else { 0 };
-                self.reg_a = value & 0xff;
-                self.flag_s = value & 0xff;
-                self.flag_z = value & 0xff;
+                let a = self.regs.reg_a as u32;
+                let value = a.wrapping_add(data.wrapping_add(self.regs.flag_c as u32));
+                self.regs.flag_v = (!(a ^ data) & (a ^ value)) & 0x80 != 0;
+                self.regs.flag_c = value > 0xff;
+                self.regs.reg_a = value as u8;
+                self.regs.set_flags_zs(self.regs.reg_a);
 
                 Tick(TickResult::Write(addr, data as u8))
             }
@@ -1738,7 +1432,7 @@ impl Cpu {
     }
 
     fn ill_inst_sax(&mut self, addr: u16) -> ExecResult {
-        let value = (self.reg_a & self.reg_x) & 0xff;
+        let value = self.regs.reg_a & self.regs.reg_x;
         ExecResult::Tick(TickResult::Write(addr, value as u8))
     }
 
@@ -1748,29 +1442,29 @@ impl Cpu {
         match step {
             Read => Next(TickResult::Read(addr), Instruction::IllSbc(Exec)),
             Exec => {
+                self.interrupts.poll(&self.regs);
                 let value = self.pin_in.data as i32;
-                let temp_a = self.reg_a as i32;
-                let temp = temp_a.wrapping_sub(value.wrapping_sub(self.flag_c as i32 - 1));
-                self.flag_v = (((temp_a ^ value) & (temp_a ^ temp)) >> 7) as u32 & 1;
-                self.flag_c = if temp < 0 { 0 } else { 1 };
-                self.reg_a = (temp as u32) & 0xff;
-                self.flag_s = self.reg_a;
-                self.flag_z = self.reg_a;
+                let temp_a = self.regs.reg_a as i32;
+                let temp = temp_a.wrapping_sub(value.wrapping_sub(self.regs.flag_c as i32 - 1));
+                self.regs.flag_v = ((temp_a ^ value) & (temp_a ^ temp)) & 0x80 != 0;
+                self.regs.flag_c = temp >= 0;
+                self.regs.reg_a = temp as u8;
+                self.regs.set_flags_zs(self.regs.reg_a);
                 Done
             }
         }
     }
 
     fn ill_inst_shx(&mut self, addr: u16) -> ExecResult {
-        let temp_addr = addr as u32;
-        let value = (self.reg_x & ((temp_addr >> 8).wrapping_add(1))) & 0xff;
-        ExecResult::Tick(TickResult::Write(addr, value as u8))
+        let temp = (addr >> 8).wrapping_add(1) as u8;
+        let value = self.regs.reg_x & temp;
+        ExecResult::Tick(TickResult::Write(addr, value))
     }
 
     fn ill_inst_shy(&mut self, addr: u16) -> ExecResult {
-        let temp_addr = addr as u32;
-        let value = (self.reg_y & ((temp_addr >> 8).wrapping_add(1))) & 0xff;
-        ExecResult::Tick(TickResult::Write(addr, value as u8))
+        let temp = (addr >> 8).wrapping_add(1) as u8;
+        let value = self.regs.reg_y & temp;
+        ExecResult::Tick(TickResult::Write(addr, value))
     }
 
     fn ill_inst_slo(&mut self, addr: u16, step: ReadDummyExec) -> ExecResult {
@@ -1786,13 +1480,11 @@ impl Cpu {
                 )
             }
             Exec(data) => {
-                let value = data as u32;
-                self.flag_c = (value >> 7) & 1;
-                let value = (value << 1) & 0xff;
-                self.reg_a |= value;
-                self.flag_s = self.reg_a;
-                self.flag_z = self.reg_a;
-                Tick(TickResult::Write(addr, value as u8))
+                self.regs.flag_c = data & 0x80 != 0;
+                let value = data << 1;
+                self.regs.reg_a |= value;
+                self.regs.set_flags_zs(self.regs.reg_a);
+                Tick(TickResult::Write(addr, value))
             }
         }
     }
@@ -1810,22 +1502,19 @@ impl Cpu {
                 )
             }
             Exec(data) => {
-                let value = data as u32;
-                self.flag_c = value & 1;
-                let value = value >> 1;
-                self.reg_a ^= value;
-                self.reg_a &= 0xff;
-                self.flag_s = self.reg_a;
-                self.flag_z = self.reg_a;
-                Tick(TickResult::Write(addr, value as u8))
+                self.regs.flag_c = data & 1 != 0;
+                let value = data >> 1;
+                self.regs.reg_a ^= value;
+                self.regs.set_flags_zs(self.regs.reg_a);
+                Tick(TickResult::Write(addr, value))
             }
         }
     }
 
     fn ill_inst_tas(&mut self, addr: u16) -> ExecResult {
-        self.reg_sp = self.reg_x & self.reg_a;
-        let value = self.reg_sp & ((addr as u32) >> 8);
-        ExecResult::Tick(TickResult::Write(addr, value as u8))
+        self.regs.reg_sp = self.regs.reg_x & self.regs.reg_a;
+        let value = self.regs.reg_sp & ((addr >> 8) as u8);
+        ExecResult::Tick(TickResult::Write(addr, value))
     }
 
     fn ill_inst_xaa(&mut self, addr: u16, step: ReadExec) -> ExecResult {
@@ -1834,10 +1523,9 @@ impl Cpu {
         match step {
             Read => Next(TickResult::Read(addr), Instruction::IllXaa(Exec)),
             Exec => {
-                let value = self.pin_in.data as u32;
-                self.reg_a = self.reg_x & value;
-                self.flag_s = self.reg_a;
-                self.flag_z = self.reg_a;
+                self.interrupts.poll(&self.regs);
+                self.regs.reg_a = self.regs.reg_x & self.pin_in.data;
+                self.regs.set_flags_zs(self.regs.reg_a);
                 Done
             }
         }

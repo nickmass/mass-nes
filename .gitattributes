@@ -1,2 +1,2 @@
-crates/nes/tests/data linguist-vendored
-crates/nes_ntsc-sys/nes_ntsc linguist-vendored
+crates/nes/tests/data/** linguist-vendored
+crates/nes_ntsc-sys/nes_ntsc/** linguist-vendored

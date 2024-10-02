@@ -108,20 +108,11 @@ impl Apu {
         }
         self.write(0x4015, 0);
         self.write(0x4017, 0);
-
-        // Apu appears to run for some ticks before the CPU boots
-        for _ in 0..9 {
-            self.tick();
-        }
     }
 
     pub fn reset(&mut self) {
         self.write(0x4015, 0);
         self.write(0x4017, 0);
-
-        for _ in 0..9 {
-            self.tick();
-        }
     }
 
     #[cfg(feature = "debugger")]
