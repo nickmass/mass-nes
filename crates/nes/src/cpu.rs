@@ -617,9 +617,9 @@ impl Cpu {
             Exec => {
                 self.interrupts.poll(&self.regs);
                 let data = self.pin_in.data;
-                self.regs.flag_s = data & 0x80 != 0;
                 self.regs.flag_v = ((data >> 6) & 1) != 0;
                 self.regs.flag_z = (data & self.regs.reg_a) == 0;
+                self.regs.flag_s = data & 0x80 != 0;
 
                 Done
             }
@@ -1458,12 +1458,14 @@ impl Cpu {
     fn ill_inst_shx(&mut self, addr: u16) -> ExecResult {
         let temp = (addr >> 8).wrapping_add(1) as u8;
         let value = self.regs.reg_x & temp;
+        let addr = (addr & 0x00ff) | ((value as u16) << 8);
         ExecResult::Tick(TickResult::Write(addr, value))
     }
 
     fn ill_inst_shy(&mut self, addr: u16) -> ExecResult {
         let temp = (addr >> 8).wrapping_add(1) as u8;
         let value = self.regs.reg_y & temp;
+        let addr = (addr & 0x00ff) | ((value as u16) << 8);
         ExecResult::Tick(TickResult::Write(addr, value))
     }
 

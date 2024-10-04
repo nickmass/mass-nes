@@ -6,6 +6,7 @@ mod cpu_dummy_reads;
 mod cpu_interrupts_v2;
 mod cpu_timing_test6;
 mod instr_misc;
+mod instr_test_v5;
 mod mmc3_test_2;
 mod nestest;
 mod oam_read;
