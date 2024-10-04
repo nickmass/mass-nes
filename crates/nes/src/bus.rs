@@ -16,6 +16,7 @@ pub enum DeviceKind {
     Noise,
     Triangle,
     Dmc,
+    Debug,
 }
 
 struct DeviceMapping {

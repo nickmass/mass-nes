@@ -92,6 +92,11 @@ impl Machine {
         self
     }
 
+    #[cfg(feature = "debugger")]
+    pub fn with_debug_mem(&mut self, addr: u16, size_kb: u16) {
+        self.debug.register(&mut self.cpu_bus, addr, size_kb);
+    }
+
     pub fn force_power_up_pc(&mut self, addr: u16) {
         self.cpu.power_up_pc(Some(addr));
     }
@@ -175,6 +180,7 @@ impl Machine {
             Some((addr, DeviceKind::Mapper)) => self.mapper.read(BusKind::Cpu, addr),
             Some((addr, DeviceKind::Input)) => self.input.read(addr, self.cpu_bus.open_bus.get()),
             Some((addr, DeviceKind::Apu)) => self.apu.read(addr),
+            Some((addr, DeviceKind::Debug)) => self.debug.read(addr),
             None => self.cpu_bus.open_bus.get(),
             _ => unimplemented!(),
         };
@@ -196,6 +202,7 @@ impl Machine {
             Some((addr, DeviceKind::Noise)) => self.apu.noise.write(addr, value),
             Some((addr, DeviceKind::Triangle)) => self.apu.triangle.write(addr, value),
             Some((addr, DeviceKind::Dmc)) => self.apu.dmc.write(addr, value),
+            Some((addr, DeviceKind::Debug)) => self.debug.write(addr, value),
             None => (),
         }
     }
@@ -208,6 +215,7 @@ impl Machine {
             Some((addr, DeviceKind::Mapper)) => self.mapper.peek(BusKind::Cpu, addr),
             Some((addr, DeviceKind::Input)) => self.input.peek(addr, self.cpu_bus.open_bus.get()),
             Some((addr, DeviceKind::Apu)) => self.apu.peek(addr),
+            Some((addr, DeviceKind::Debug)) => self.debug.read(addr),
             None => self.cpu_bus.open_bus.get(),
             _ => unimplemented!(),
         }

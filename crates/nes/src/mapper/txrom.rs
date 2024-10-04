@@ -70,7 +70,7 @@ impl Txrom {
             bank_data: [0; 8],
             bank_select: 0,
             ram_protect: false,
-            ram_enabled: false,
+            ram_enabled: true,
             irq: false,
             irq_enabled: false,
             irq_latch: 0,

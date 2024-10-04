@@ -67,6 +67,7 @@ pub struct Ppu {
     sprite_zero_hit: bool,
     sprite_overflow: bool,
     last_write: u8,
+    last_write_decay: u64,
 
     write_latch: bool,
 
@@ -137,6 +138,7 @@ impl Ppu {
             sprite_zero_hit: false,
             sprite_overflow: false,
             last_write: 0,
+            last_write_decay: 0,
 
             write_latch: false,
 
@@ -273,6 +275,7 @@ impl Ppu {
             0x2001 => self.last_write,
             0x2002 => {
                 //PPUSTATUS
+                self.last_write_decay = self.current_tick;
                 let status = self.ppu_status();
                 self.write_latch = false;
                 self.vblank = false;
@@ -282,6 +285,7 @@ impl Ppu {
             0x2003 => self.last_write, //OAMADDR
             0x2004 => {
                 //OAMDATA
+                self.last_write_decay = self.current_tick;
                 if self.is_rendering() && !self.in_vblank() {
                     self.next_sprite_byte
                 } else {
@@ -292,6 +296,7 @@ impl Ppu {
             0x2006 => self.last_write,
             0x2007 => {
                 //PPUDATA
+                self.last_write_decay = self.current_tick;
                 let addr = self.vram_addr;
                 let result = if addr & 0x3f00 == 0x3f00 {
                     let addr = if addr & 0x03 != 0 {
@@ -325,6 +330,7 @@ impl Ppu {
 
     pub fn write(&mut self, address: u16, value: u8) {
         self.last_write = value;
+        self.last_write_decay = self.current_tick;
         match address {
             0x2000 => {
                 //PPUCTRL
@@ -457,6 +463,13 @@ impl Ppu {
                 self.sprite_overflow = false;
                 self.vblank = false;
                 self.frame += 1;
+
+                // open bus should decay by 600 ms
+                // this is only a rough time estimate, and it should decay per bit
+                // instead of all 8 bits decaying at once
+                if self.current_tick - self.last_write_decay > 262 * 341 * 40 {
+                    self.last_write = 0;
+                }
             }
             None => (),
         }

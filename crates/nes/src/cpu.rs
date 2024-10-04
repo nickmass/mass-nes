@@ -104,23 +104,6 @@ impl Cpu {
         }
     }
 
-    pub fn tick(&mut self, pin_in: CpuPinIn) -> TickResult {
-        self.pin_in = pin_in;
-        self.current_tick += 1;
-        self.instruction_addr = None;
-
-        let tick = if let Some(result) = self.dma.tick(pin_in) {
-            result
-        } else {
-            let tick = self.step();
-            self.dma.try_halt(tick).unwrap_or(tick)
-        };
-
-        self.interrupts.tick(&pin_in);
-
-        tick
-    }
-
     #[cfg(feature = "debugger")]
     pub fn debug_state(&self) -> CpuDebugState {
         CpuDebugState {
@@ -137,6 +120,23 @@ impl Cpu {
     #[cfg(not(feature = "debugger"))]
     pub fn debug_state(&self) -> CpuDebugState {
         CpuDebugState
+    }
+
+    pub fn tick(&mut self, pin_in: CpuPinIn) -> TickResult {
+        self.pin_in = pin_in;
+        self.current_tick += 1;
+        self.instruction_addr = None;
+
+        let tick = if let Some(result) = self.dma.tick(pin_in) {
+            result
+        } else {
+            let tick = self.step();
+            self.dma.try_halt(tick).unwrap_or(tick)
+        };
+
+        self.interrupts.tick(&pin_in);
+
+        tick
     }
 
     fn step(&mut self) -> TickResult {

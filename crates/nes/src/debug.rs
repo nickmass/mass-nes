@@ -10,7 +10,9 @@ pub use no_debugger::*;
 mod debugger {
     use std::cell::RefCell;
 
+    use crate::bus::{AddressBus, DeviceKind, RangeAndMask};
     use crate::cpu::{ops::*, CpuDebugState};
+    use crate::memory::MemoryBlock;
     use crate::ppu::PpuDebugState;
     use crate::Machine;
 
@@ -138,12 +140,36 @@ mod debugger {
 
     pub struct Debug {
         state: RefCell<DebugState>,
+        mem: Option<MemoryBlock>,
     }
 
     impl Debug {
         pub fn new() -> Self {
             Self {
                 state: RefCell::new(DebugState::default()),
+                mem: None,
+            }
+        }
+
+        pub fn register(&mut self, bus: &mut AddressBus, addr: u16, size_kb: u16) {
+            let end = addr + (size_kb * 0x400);
+            let mask = size_kb * 0x400 - 1;
+            self.mem = Some(MemoryBlock::new(size_kb as usize));
+            bus.register_read(DeviceKind::Debug, RangeAndMask(addr, addr + end, mask));
+            bus.register_write(DeviceKind::Debug, RangeAndMask(addr, addr + end, mask));
+        }
+
+        pub fn read(&self, addr: u16) -> u8 {
+            if let Some(mem) = &self.mem {
+                mem.read(addr)
+            } else {
+                0x00
+            }
+        }
+
+        pub fn write(&self, addr: u16, value: u8) {
+            if let Some(mem) = &self.mem {
+                mem.write(addr, value);
             }
         }
 
@@ -409,6 +435,12 @@ pub mod no_debugger {
             Debug
         }
 
+        pub fn read(&self, _addr: u16) -> u8 {
+            0
+        }
+
+        pub fn write(&self, _addr: u16, _value: u8) {}
+
         pub fn frame(&self, _system: &Machine) -> u32 {
             0
         }
@@ -420,6 +452,7 @@ pub mod no_debugger {
         }
 
         pub fn log_once_for(&self, _count: u32) {}
+
         pub fn log_for(&self, _count: u32) {}
 
         pub fn log_range(&self, _start_addr: u16, _end_addr: u16) {}
