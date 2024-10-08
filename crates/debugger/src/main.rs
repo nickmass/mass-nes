@@ -88,7 +88,6 @@ struct UiState {
     volume: f32,
     mute: bool,
     show_screen: bool,
-    focus_screen: bool,
     show_nametables: bool,
     show_cpu_mem: bool,
     show_ppu_mem: bool,
@@ -106,7 +105,6 @@ impl Default for UiState {
             volume: 1.0,
             mute: false,
             show_screen: true,
-            focus_screen: false,
             show_nametables: false,
             show_cpu_mem: false,
             show_ppu_mem: false,
@@ -132,6 +130,7 @@ struct DebuggerApp {
     state: UiState,
     chr_tiles: ChrTiles,
     nt_viewer: NametableViewer,
+    first_update: bool,
 }
 
 impl DebuggerApp {
@@ -177,11 +176,12 @@ impl DebuggerApp {
         } else {
             None
         };
-        let state: UiState = state.unwrap_or_default();
 
+        let state: UiState = state.unwrap_or_default();
         let app_events = AppEvents::new();
 
         let mut app = DebuggerApp {
+            first_update: true,
             app_events,
             input,
             emu_control,
@@ -255,19 +255,22 @@ impl DebuggerApp {
         self.last_input = input_state;
     }
 
-    fn process_app_events(&mut self) {
+    fn process_app_events(&mut self, ctx: &egui::Context) {
         while let Some(ev) = self.app_events.poll_event() {
-            self.handle_app_event(ev);
+            self.handle_app_event(ev, ctx);
         }
     }
 
-    fn handle_app_event(&mut self, event: AppEvent) {
+    fn handle_app_event(&mut self, event: AppEvent, ctx: &egui::Context) {
         match event {
             AppEvent::RomLoaded(path) => {
                 self.recents.add(path);
                 self.state.recent_files = self.recents.iter().map(|p| p.to_path_buf()).collect();
                 self.audio.play();
                 self.emu_control.sync();
+            }
+            AppEvent::FocusScreen => {
+                self.nes_screen.focus(ctx);
             }
         }
     }
@@ -301,7 +304,7 @@ impl DebuggerApp {
 impl eframe::App for DebuggerApp {
     #[instrument(skip_all)]
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.process_app_events();
+        self.process_app_events(ctx);
 
         egui::TopBottomPanel::top("Menu Area").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
@@ -376,11 +379,7 @@ impl eframe::App for DebuggerApp {
 
         self.debug.swap();
         if self.state.show_screen {
-            if let Some(res) = self.nes_screen.show(&ctx) {
-                self.state.focus_screen = res.has_focus();
-            } else {
-                self.state.focus_screen = false;
-            }
+            self.nes_screen.show(&ctx);
         }
 
         if self.state.show_cpu_mem {
@@ -404,6 +403,11 @@ impl eframe::App for DebuggerApp {
             self.nt_viewer
                 .show(&self.debug, self.state.debug_interval, ctx);
         }
+
+        if self.first_update {
+            self.first_update = false;
+            self.app_events.send(AppEvent::FocusScreen);
+        }
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
@@ -426,19 +430,6 @@ impl eframe::App for DebuggerApp {
         self.input.update(input_iter);
         let state = self.input.state();
         self.handle_input(state);
-
-        // capture tabs to prevent focus changing during rewind while screen is focused
-        if self.state.focus_screen {
-            raw_input.events.retain(|e| {
-                !matches!(
-                    e,
-                    Event::Key {
-                        key: egui::Key::Tab,
-                        ..
-                    }
-                )
-            });
-        }
     }
 }
 
@@ -465,12 +456,19 @@ fn spawn_sync_thread(input: SharedInput, emu_control: EmulatorControl, mut sync:
         if input.rewind {
             emu_control.rewind();
         }
+        if input.power {
+            emu_control.power();
+        }
+        if input.reset {
+            emu_control.reset();
+        }
     });
 }
 
 #[derive(Debug, Clone)]
 pub enum AppEvent {
     RomLoaded(std::path::PathBuf),
+    FocusScreen,
 }
 
 pub struct AppEvents {
@@ -537,6 +535,14 @@ impl EmulatorControl {
 
     pub fn rewind(&self) {
         let _ = self.tx.send(EmulatorInput::Rewind);
+    }
+
+    pub fn power(&self) {
+        let _ = self.tx.send(EmulatorInput::Nes(UserInput::Power));
+    }
+
+    pub fn reset(&self) {
+        let _ = self.tx.send(EmulatorInput::Nes(UserInput::Reset));
     }
 
     pub fn debug_request(&self, debug: DebugRequest) {

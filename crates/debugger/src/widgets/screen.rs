@@ -5,6 +5,8 @@ use egui::Vec2;
 
 use ui::filters::Filter;
 
+const SCREEN_INTERACT: &'static str = "screen_interact";
+
 pub struct NesScreen<F: Filter> {
     default_size: Vec2,
     gfx: Arc<Mutex<Gfx<F>>>,
@@ -45,22 +47,35 @@ impl<F: Filter + Send + Sync + 'static> NesScreen<F> {
         ui.painter().add(callback);
     }
 
+    pub fn focus(&self, ctx: &egui::Context) {
+        ctx.memory_mut(|m| m.request_focus(SCREEN_INTERACT.into()))
+    }
+
     pub fn show(&mut self, ctx: &egui::Context) -> Option<egui::Response> {
+        let focus_filter = egui::EventFilter {
+            tab: true,
+            horizontal_arrows: true,
+            vertical_arrows: true,
+            escape: false,
+        };
+
         let res = egui::Window::new("Screen")
             .min_size(self.default_size)
             .default_size(self.default_size * 2.0)
             .show(ctx, |ui| {
                 egui::Frame::none().show(ui, |ui| {
                     self.paint(ui);
-                    let res = ui.interact(
-                        ui.min_rect(),
-                        egui::Id::new("screen_interact"),
-                        egui::Sense::click(),
-                    );
+
+                    let res =
+                        ui.interact(ui.min_rect(), SCREEN_INTERACT.into(), egui::Sense::click());
 
                     if res.clicked() {
-                        ctx.memory_mut(|m| m.request_focus(egui::Id::new("screen_interact")))
+                        self.focus(ctx);
                     }
+
+                    ui.memory_mut(|m| {
+                        m.set_focus_lock_filter(SCREEN_INTERACT.into(), focus_filter)
+                    });
 
                     res
                 })

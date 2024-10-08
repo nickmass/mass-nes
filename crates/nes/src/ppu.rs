@@ -926,30 +926,21 @@ impl Ppu {
         let at_addr = 0x23c0 | (v & 0x0c00) | ((v >> 4) & 0x38) | ((v >> 2) & 0x07);
         let attr = self.ppu_read(at_addr);
 
-        let tile_num = self.vram_addr & 0x3ff;
-        let tile_x = tile_num % 32;
-        let tile_y = tile_num / 32;
+        let tile_idx = self.vram_addr & 0x3ff;
 
-        let attr_quad = ((tile_y >> 1) & 1, (tile_x >> 1) & 1);
-        match attr_quad {
-            (0, 0) => {
-                self.attribute_low = (attr >> 0) & 1;
-                self.attribute_high = (attr >> 1) & 1;
-            }
-            (0, 1) => {
-                self.attribute_low = (attr >> 2) & 1;
-                self.attribute_high = (attr >> 3) & 1;
-            }
-            (1, 0) => {
-                self.attribute_low = (attr >> 4) & 1;
-                self.attribute_high = (attr >> 5) & 1;
-            }
-            (1, 1) => {
-                self.attribute_low = (attr >> 6) & 1;
-                self.attribute_high = (attr >> 7) & 1;
-            }
+        let attr_row = tile_idx >> 5;
+        let attr_col = tile_idx & 0x1f;
+        let attr_bits = (attr_row & 0x2) | (attr_col >> 1 & 0x1);
+        let palette = match attr_bits {
+            0 => (attr >> 0) & 0x3,
+            1 => (attr >> 2) & 0x3,
+            2 => (attr >> 4) & 0x3,
+            3 => (attr >> 6) & 0x3,
             _ => unreachable!(),
-        }
+        };
+
+        self.attribute_low = palette & 0x1;
+        self.attribute_high = palette >> 1;
     }
 
     fn fetch_low_bg_pattern(&mut self) {

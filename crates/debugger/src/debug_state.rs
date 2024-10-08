@@ -182,7 +182,7 @@ pub struct PpuView<'a>(&'a DebugUiState);
 
 impl<'a> PpuView<'a> {
     pub fn pal_entry(&self, idx: u8) -> (u8, u8, u8) {
-        let idx = if idx % 4 == 0 { 0 } else { idx };
+        let idx = if idx & 3 == 0 { 0 } else { idx };
         let idx = self.pal_ram()[idx as usize];
         self.palette().lookup(idx)
     }
@@ -209,16 +209,16 @@ impl<'a> PpuView<'a> {
 
         std::iter::from_fn(move || {
             if col == 8 {
+                col = 0;
                 row += 1;
+                if row == 8 {
+                    return None;
+                }
                 let lo_plane_idx = base_addr | row;
                 let hi_plane_idx = base_addr | row | 8;
 
                 lo_plane = ppu_mem[lo_plane_idx];
                 hi_plane = ppu_mem[hi_plane_idx];
-                if row == 8 {
-                    return None;
-                }
-                col = 0;
             }
 
             let pixel = ((lo_plane >> 7) & 0x1) | ((hi_plane >> 6) & 0x2);
