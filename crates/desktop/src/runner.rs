@@ -8,7 +8,6 @@ use ui::audio::SamplesProducer;
 use crate::{
     app::{EmulatorInput, NesInputs},
     gfx::GfxBackBuffer,
-    TracyExt,
 };
 
 pub struct Runner {
@@ -33,7 +32,7 @@ impl Runner {
         samples_producer: Option<SamplesProducer>,
         sample_rate: u32,
     ) -> Self {
-        let machine = instrument_machine(Machine::new(region, cart));
+        let machine = Machine::new(region, cart);
         let mut blip = blip_buf_rs::Blip::new(sample_rate / 30);
         blip.set_rates(
             region.frame_ticks() * region.refresh_rate(),
@@ -119,33 +118,6 @@ impl Runner {
             frame.copy_from_slice(self.machine.get_screen());
         });
     }
-}
-
-fn instrument_machine(machine: Machine) -> Machine {
-    if let Some(client) = tracy_client::Client::running() {
-        client.plot_config(c"scanline", true, true, None);
-        client.plot_config(c"vblank", true, true, None);
-        client.plot_config(c"nmi", true, true, None);
-    }
-    let mut scanline = 0;
-    let mut vblank = false;
-    let mut nmi = false;
-    machine.with_trace_fn(move |_cpu, ppu| {
-        if let Some(client) = tracy_client::Client::running() {
-            if scanline != ppu.scanline {
-                client.plot_int(c"scanline", ppu.scanline as i64);
-                scanline = ppu.scanline;
-            }
-            if vblank != ppu.vblank {
-                client.plot_int(c"vblank", ppu.vblank as i64);
-                vblank = ppu.vblank;
-            }
-            if nmi != ppu.nmi {
-                client.plot_int(c"nmi", ppu.nmi as i64);
-                nmi = ppu.nmi;
-            }
-        }
-    })
 }
 
 struct SaveStore {

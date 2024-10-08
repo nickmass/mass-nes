@@ -146,7 +146,7 @@ impl Mapper for Pxrom {
         }
     }
 
-    fn ppu_fetch(&mut self, address: u16) -> super::Nametable {
+    fn peek_ppu_fetch(&self, address: u16) -> super::Nametable {
         self.mirroring.ppu_fetch(address)
     }
 }

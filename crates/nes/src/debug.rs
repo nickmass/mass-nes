@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 #[cfg(feature = "debugger")]
 pub use debugger::*;
 
@@ -245,7 +243,6 @@ mod debugger {
                 let inst = OPS[system.peek(inst_addr) as usize];
                 if let Instruction::IllKil = inst.instruction {
                     self.do_log_history(system, &*state);
-                    panic!("KIL");
                 }
             }
 
@@ -420,6 +417,14 @@ mod debugger {
             let mut state = self.state.borrow_mut();
             state.trace_fn = Some(Box::new(trace_fn));
         }
+
+        pub fn pallete_ram<'m>(&self, machine: &'m Machine) -> &'m [u8] {
+            machine.ppu.palette_data.as_slice()
+        }
+
+        pub fn sprite_ram<'m>(&self, machine: &'m Machine) -> &'m [u8] {
+            machine.ppu.oam_data.as_slice()
+        }
     }
 }
 
@@ -440,24 +445,6 @@ pub mod no_debugger {
         }
 
         pub fn write(&self, _addr: u16, _value: u8) {}
-
-        pub fn frame(&self, _system: &Machine) -> u32 {
-            0
-        }
-
-        pub fn color_for(&self, _count: u32) {}
-
-        pub fn color(&self) -> bool {
-            false
-        }
-
-        pub fn log_once_for(&self, _count: u32) {}
-
-        pub fn log_for(&self, _count: u32) {}
-
-        pub fn log_range(&self, _start_addr: u16, _end_addr: u16) {}
-
-        pub fn log_history(&self, _system: &Machine) {}
 
         pub fn trace(
             &self,

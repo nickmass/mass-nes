@@ -78,10 +78,10 @@ pub struct Ppu {
     vram_fine_x: u16,
 
     oam_addr: u8,
-    oam_data: Vec<u8>,
+    pub(crate) oam_data: Vec<u8>,
     line_oam_data: [u8; 32],
 
-    palette_data: [u8; 32],
+    pub(crate) palette_data: [u8; 32],
 
     nametable_tile: u8,
 
@@ -239,14 +239,17 @@ impl Ppu {
 
     #[cfg(feature = "debugger")]
     pub fn peek(&self, address: u16) -> u8 {
+        // These write-only regs should return open bus but...
+        // peeking at the PPU registers is just so much more
+        // informative
         match address {
-            0x2000 => self.last_write,
-            0x2001 => self.last_write,
+            0x2000 => self.regs[0],
+            0x2001 => self.regs[1],
             0x2002 => self.ppu_status(),
-            0x2003 => self.last_write,                       //OAMADDR
+            0x2003 => self.regs[3],                          //OAMADDR
             0x2004 => self.oam_data[self.oam_addr as usize], //OAMDATA
-            0x2005 => self.last_write,
-            0x2006 => self.last_write,
+            0x2005 => self.regs[5],
+            0x2006 => self.regs[6],
             0x2007 => {
                 //PPUDATA
                 let addr = self.vram_addr;
@@ -964,6 +967,16 @@ impl Ppu {
             | self.background_pattern_table()
             | 0x08;
         self.pattern_high = self.ppu_read(tile_addr);
+    }
+
+    #[cfg(feature = "debugger")]
+    pub fn ppu_peek(&self, address: u16) -> u8 {
+        let bank = self.mapper.peek_ppu_fetch(address & 0x3fff);
+        match bank {
+            Nametable::InternalA => self.nt_internal_a.read(address & 0x3ff),
+            Nametable::InternalB => self.nt_internal_b.read(address & 0x3ff),
+            Nametable::External => self.mapper.peek(BusKind::Ppu, address & 0x3fff),
+        }
     }
 
     fn ppu_read(&self, address: u16) -> u8 {

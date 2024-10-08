@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use ui::filters::{Filter, FilterContext, FilterUniforms, NesNtscSetup, TextureFormat};
 
 use crate::app::UserEvent;
-use crate::TracyExt;
+use tracy_ext::TracyExt;
 
 #[derive(Copy, Clone)]
 struct Vertex {

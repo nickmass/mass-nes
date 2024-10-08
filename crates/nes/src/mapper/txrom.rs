@@ -326,9 +326,7 @@ impl Mapper for Txrom {
         self.irq
     }
 
-    fn ppu_fetch(&mut self, address: u16) -> super::Nametable {
-        self.irq_tick(address);
-
+    fn peek_ppu_fetch(&self, address: u16) -> Nametable {
         if let Some(_) = self.ext_nt {
             if address & 0x2000 != 0 {
                 match address & 0xc00 {
@@ -343,5 +341,10 @@ impl Mapper for Txrom {
         } else {
             self.mirroring.ppu_fetch(address)
         }
+    }
+
+    fn ppu_fetch(&mut self, address: u16) -> super::Nametable {
+        self.irq_tick(address);
+        self.peek_ppu_fetch(address)
     }
 }

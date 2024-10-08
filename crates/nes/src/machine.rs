@@ -221,6 +221,11 @@ impl Machine {
         }
     }
 
+    #[cfg(feature = "debugger")]
+    pub fn peek_ppu(&self, addr: u16) -> u8 {
+        self.ppu.ppu_peek(addr)
+    }
+
     pub fn get_debug(&self) -> &Debug {
         &self.debug
     }
@@ -261,11 +266,13 @@ impl Machine {
     }
 
     #[cfg(feature = "save-states")]
+    #[tracing::instrument(skip_all)]
     pub fn save_state(&self) -> crate::SaveData {
         crate::SaveData(<Self as SaveState>::save_state(self))
     }
 
     #[cfg(feature = "save-states")]
+    #[tracing::instrument(skip_all)]
     pub fn restore_state(&mut self, state: &crate::SaveData) {
         <Self as SaveState>::restore_state(self, &state.0)
     }

@@ -63,7 +63,11 @@ pub trait Mapper {
 
     fn tick(&mut self) {}
 
-    fn ppu_fetch(&mut self, address: u16) -> Nametable;
+    fn peek_ppu_fetch(&self, address: u16) -> Nametable;
+
+    fn ppu_fetch(&mut self, address: u16) -> Nametable {
+        self.peek_ppu_fetch(address)
+    }
 
     fn get_sample(&self) -> Option<i16> {
         None
@@ -92,6 +96,10 @@ impl RcMapper {
 
     pub fn write(&self, bus: BusKind, addr: u16, value: u8) {
         self.0.borrow_mut().write(bus, addr, value)
+    }
+
+    pub fn peek_ppu_fetch(&self, address: u16) -> Nametable {
+        self.0.borrow_mut().peek_ppu_fetch(address)
     }
 
     pub fn ppu_fetch(&self, address: u16) -> Nametable {

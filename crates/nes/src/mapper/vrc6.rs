@@ -315,7 +315,7 @@ impl Mapper for Vrc6 {
         }
     }
 
-    fn ppu_fetch(&mut self, address: u16) -> Nametable {
+    fn peek_ppu_fetch(&self, address: u16) -> Nametable {
         self.mirroring.ppu_fetch(address)
     }
 
