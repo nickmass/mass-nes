@@ -258,6 +258,76 @@ impl<'a> PpuView<'a> {
 
         self.chr_tile(palette, chr_table, tile_idx)
     }
+
+    pub fn sprite(&self, sprite_idx: u8) -> Sprite {
+        assert!(sprite_idx < 64);
+        let oam_base = sprite_idx as usize * 4;
+        let oam: [_; 4] = self.sprite_ram()[oam_base..oam_base + 4]
+            .try_into()
+            .unwrap();
+        let tall = self.cpu_mem()[0x2000] & 0x20 != 0;
+        let chr_table = if tall {
+            if oam[1] & 1 != 0 {
+                ChrTable::High
+            } else {
+                ChrTable::Low
+            }
+        } else {
+            if self.cpu_mem()[0x2000] & 0x08 != 0 {
+                ChrTable::High
+            } else {
+                ChrTable::Low
+            }
+        };
+
+        let chr_idxs = if tall {
+            &[oam[1] & 0xfe, oam[1] | 0x01][..]
+        } else {
+            &[oam[1]][..]
+        };
+
+        let palette = oam[2] & 0x3 | 0x4;
+        let horz_flip = oam[2] & 0x40 != 0;
+        let vert_flip = oam[2] & 0x80 != 0;
+
+        let chr = chr_idxs
+            .into_iter()
+            .flat_map(|idx| self.chr_tile(palette, chr_table, *idx));
+
+        let mut pixels = if tall {
+            vec![(0, 0, 0); 8 * 16]
+        } else {
+            vec![(0, 0, 0); 8 * 8]
+        };
+
+        let (x_start, x_adj) = if horz_flip { (7, -1) } else { (0, 1) };
+        let (y_start, y_adj) = match (tall, vert_flip) {
+            (true, true) => (15, -1),
+            (false, true) => (7, -1),
+            _ => (0, 1),
+        };
+
+        let mut pixel_off_x = x_start;
+        let mut pixel_off_y = y_start;
+
+        let mut x_count = 0;
+
+        for p in chr {
+            if x_count == 8 {
+                x_count = 0;
+                pixel_off_y += y_adj;
+                pixel_off_x = x_start;
+            }
+
+            let pixel_off = (pixel_off_y * 8 + pixel_off_x) as usize;
+            pixels[pixel_off] = p;
+
+            pixel_off_x += x_adj;
+            x_count += 1;
+        }
+
+        Sprite { oam, tall, pixels }
+    }
 }
 
 impl<'a> Deref for PpuView<'a> {
@@ -265,5 +335,29 @@ impl<'a> Deref for PpuView<'a> {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+pub struct Sprite {
+    pub oam: [u8; 4],
+    pub tall: bool,
+    pub pixels: Vec<(u8, u8, u8)>,
+}
+
+impl Sprite {
+    pub fn y(&self) -> u8 {
+        self.oam[0]
+    }
+
+    pub fn x(&self) -> u8 {
+        self.oam[3]
+    }
+
+    pub fn hidden(&self) -> bool {
+        self.y() >= 0xef
+    }
+
+    pub fn behind_bg(&self) -> bool {
+        self.oam[2] & 0x20 != 0
     }
 }

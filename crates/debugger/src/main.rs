@@ -92,6 +92,8 @@ struct UiState {
     show_cpu_mem: bool,
     show_ppu_mem: bool,
     show_chr_tiles: bool,
+    show_sprites: bool,
+    show_all_sprites: bool,
     auto_open_most_recent: bool,
     recent_files: Vec<PathBuf>,
     debug_interval: u64,
@@ -109,6 +111,8 @@ impl Default for UiState {
             show_cpu_mem: false,
             show_ppu_mem: false,
             show_chr_tiles: false,
+            show_sprites: false,
+            show_all_sprites: false,
             auto_open_most_recent: true,
             recent_files: Vec::new(),
             debug_interval: 10,
@@ -130,6 +134,7 @@ struct DebuggerApp {
     state: UiState,
     chr_tiles: ChrTiles,
     nt_viewer: NametableViewer,
+    sprite_viewer: SpriteViewer,
     first_update: bool,
 }
 
@@ -154,6 +159,7 @@ impl DebuggerApp {
         let debug = DebugUiState::new(debug_swap.clone(), palette);
         let chr_tiles = ChrTiles::new();
         let nt_viewer = NametableViewer::new();
+        let sprite_viewer = SpriteViewer::new();
 
         let (mut audio, sync, samples) =
             CpalAudio::new(CpalSync::new(), nes::Region::Ntsc.refresh_rate(), 64).unwrap();
@@ -193,6 +199,7 @@ impl DebuggerApp {
             debug,
             chr_tiles,
             nt_viewer,
+            sprite_viewer,
             recents: Recents::new(&[], 10),
         };
 
@@ -285,12 +292,15 @@ impl DebuggerApp {
     fn update_debug_req(&self) {
         let mut debug = DebugRequest {
             interval: self.state.debug_interval,
-            cpu_mem: self.state.show_cpu_mem | self.state.show_nametables,
+            cpu_mem: self.state.show_cpu_mem | self.state.show_nametables | self.state.show_sprites,
             ppu_mem: self.state.show_ppu_mem
                 | self.state.show_chr_tiles
-                | self.state.show_nametables,
-            pal_ram: self.state.show_chr_tiles | self.state.show_nametables,
-            sprite_ram: false,
+                | self.state.show_nametables
+                | self.state.show_sprites,
+            pal_ram: self.state.show_chr_tiles
+                | self.state.show_nametables
+                | self.state.show_sprites,
+            sprite_ram: self.state.show_sprites,
         };
 
         if !debug.cpu_mem && !debug.ppu_mem && !debug.pal_ram && !debug.sprite_ram {
@@ -355,6 +365,12 @@ impl eframe::App for DebuggerApp {
                     {
                         self.update_debug_req();
                     }
+                    if ui
+                        .checkbox(&mut self.state.show_sprites, "Sprites")
+                        .changed()
+                    {
+                        self.update_debug_req();
+                    }
                 });
                 ui.separator();
 
@@ -402,6 +418,15 @@ impl eframe::App for DebuggerApp {
         if self.state.show_nametables {
             self.nt_viewer
                 .show(&self.debug, self.state.debug_interval, ctx);
+        }
+
+        if self.state.show_sprites {
+            self.sprite_viewer.show(
+                &mut self.state.show_all_sprites,
+                &self.debug,
+                self.state.debug_interval,
+                ctx,
+            );
         }
 
         if self.first_update {
