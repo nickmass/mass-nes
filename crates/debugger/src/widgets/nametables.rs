@@ -89,12 +89,14 @@ impl NametableViewer {
         if self.is_expired(now, debug_interval) {
             self.render_nts(ppu, now, ctx);
         }
-        egui::Window::new("Nametables").show(ctx, |ui| {
-            if let Some(tex) = &self.texture {
-                egui::Image::new(tex)
-                    .fit_to_exact_size(Vec2::new(2.0 * 32.0 * 8.0, 2.0 * 30.0 * 8.0) * 2.0)
-                    .ui(ui);
-            }
-        });
+        egui::Window::new("Nametables")
+            .resizable(false)
+            .show(ctx, |ui| {
+                if let Some(tex) = &self.texture {
+                    egui::Image::new(tex)
+                        .fit_to_exact_size(Vec2::new(2.0 * 32.0 * 8.0, 2.0 * 30.0 * 8.0) * 2.0)
+                        .ui(ui);
+                }
+            });
     }
 }

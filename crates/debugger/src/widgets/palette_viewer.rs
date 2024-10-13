@@ -34,11 +34,10 @@ impl<'a> PaletteViewer<'a> {
 
                             let color = self.ppu.pal_entry_color(idx);
 
-                            egui::Frame::none()
-                                .fill(color)
-                                .show(&mut frame.content_ui, |ui| {
-                                    ui.allocate_space(Vec2::splat(30.0));
-                                });
+                            let (rect, _) = frame
+                                .content_ui
+                                .allocate_exact_size(Vec2::splat(30.0), egui::Sense::hover());
+                            frame.content_ui.painter().rect_filled(rect, 0.0, color);
                         }
 
                         let res = frame.allocate_space(ui);

@@ -109,21 +109,23 @@ impl ChrTiles {
         let now = debug.now();
         self.update_images(&ppu, *selected_palette, now, debug_interval, ctx);
 
-        egui::Window::new("CHR Tiles").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if let Some(img) = &self.lo_chr {
-                    egui::Image::new(&img.texture)
-                        .fit_to_exact_size(Vec2::splat(256.0))
-                        .ui(ui);
-                }
+        egui::Window::new("CHR Tiles")
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    if let Some(img) = &self.lo_chr {
+                        egui::Image::new(&img.texture)
+                            .fit_to_exact_size(Vec2::splat(256.0))
+                            .ui(ui);
+                    }
 
-                if let Some(img) = &self.hi_chr {
-                    egui::Image::new(&img.texture)
-                        .fit_to_exact_size(Vec2::splat(256.0))
-                        .ui(ui);
-                }
+                    if let Some(img) = &self.hi_chr {
+                        egui::Image::new(&img.texture)
+                            .fit_to_exact_size(Vec2::splat(256.0))
+                            .ui(ui);
+                    }
+                });
+                PaletteViewer::new(debug.ppu()).ui(selected_palette, ui);
             });
-            PaletteViewer::new(debug.ppu()).ui(selected_palette, ui);
-        });
     }
 }

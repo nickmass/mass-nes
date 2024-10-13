@@ -1,5 +1,6 @@
 use crate::egui;
 use egui::{Rect, TextureHandle, Vec2, Widget};
+use tracing::instrument;
 
 use crate::debug_state::{DebugUiState, PpuView, Sprite};
 
@@ -11,18 +12,10 @@ struct SpriteImage {
 
 impl SpriteImage {
     fn ui(&self, texture: &TextureHandle, ui: &mut egui::Ui) {
-        let size = if self.sprite.tall {
-            Vec2::new(8.0, 16.0)
-        } else {
-            Vec2::new(8.0, 8.0)
-        };
-
-        let frame = egui::Frame::none().begin(ui);
-
-        ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
         ui.horizontal(|ui| {
+            ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
             ui.vertical(|ui| {
-                ui.label(format!("#{:03}", self.idx));
+                ui.label(format!("#{:02}", self.idx));
                 ui.label(format!("x: {:03}", self.sprite.x()));
                 ui.label(format!("y: {:03}", self.sprite.y()));
                 if self.sprite.behind_bg() {
@@ -33,11 +26,17 @@ impl SpriteImage {
             egui::Image::new(texture)
                 .uv(self.uv)
                 .maintain_aspect_ratio(false)
-                .fit_to_exact_size(size * 4.0)
+                .fit_to_exact_size(self.size() * 4.0)
                 .ui(ui);
         });
+    }
 
-        frame.paint(ui);
+    fn size(&self) -> Vec2 {
+        if self.sprite.tall {
+            Vec2::new(8.0, 16.0)
+        } else {
+            Vec2::new(8.0, 8.0)
+        }
     }
 
     fn hidden(&self) -> bool {
@@ -62,6 +61,7 @@ impl SpriteViewer {
         }
     }
 
+    #[instrument(skip_all)]
     fn render_sprites(&mut self, ppu: &PpuView, now: u64, ctx: &egui::Context) {
         self.sprites.clear();
 
@@ -137,32 +137,34 @@ impl SpriteViewer {
             self.render_sprites(ppu, now, ctx);
         }
 
-        egui::Window::new("Sprites").show(ctx, |ui| {
-            if let Some(tex) = &self.texture {
-                ui.checkbox(show_all_sprites, "Show hidden sprites");
-                let mut any_sprites = false;
-                egui::Grid::new("sprite_viewer_grid")
-                    .num_columns(8)
-                    .min_row_height(100.0)
-                    .show(ui, |ui| {
-                        for (idx, sprite) in self
-                            .sprites
-                            .iter()
-                            .filter(|s| !s.hidden() || *show_all_sprites)
-                            .enumerate()
-                        {
-                            if idx != 0 && idx % 8 == 0 {
-                                ui.end_row();
+        egui::Window::new("Sprites")
+            .resizable(false)
+            .show(ctx, |ui| {
+                if let Some(tex) = &self.texture {
+                    ui.checkbox(show_all_sprites, "Show hidden sprites");
+                    ui.separator();
+                    let mut any_sprites = false;
+                    egui::Grid::new("sprite_viewer_grid")
+                        .num_columns(8)
+                        .min_row_height(16.0 * 4.0)
+                        .show(ui, |ui| {
+                            for (idx, sprite) in self
+                                .sprites
+                                .iter()
+                                .filter(|s| !s.hidden() || *show_all_sprites)
+                                .enumerate()
+                            {
+                                sprite.ui(tex, ui);
+                                any_sprites = true;
+                                if (idx + 1) % 8 == 0 {
+                                    ui.end_row();
+                                }
                             }
-                            sprite.ui(tex, ui);
-                            any_sprites = true;
-                        }
-                        if !any_sprites {
-                            ui.label("No visible sprites");
-                        }
-                        ui.end_row();
-                    });
-            }
-        });
+                            if !any_sprites {
+                                ui.label("No visible sprites");
+                            }
+                        });
+                }
+            });
     }
 }
