@@ -25,6 +25,7 @@ use std::{
 };
 
 mod audio;
+mod cpu_6502;
 mod debug_state;
 mod gfx;
 mod gl;
@@ -94,6 +95,7 @@ struct UiState {
     show_chr_tiles: bool,
     show_sprites: bool,
     show_all_sprites: bool,
+    show_code: bool,
     auto_open_most_recent: bool,
     recent_files: Vec<PathBuf>,
     debug_interval: u64,
@@ -113,6 +115,7 @@ impl Default for UiState {
             show_chr_tiles: false,
             show_sprites: false,
             show_all_sprites: false,
+            show_code: false,
             auto_open_most_recent: true,
             recent_files: Vec::new(),
             debug_interval: 10,
@@ -292,7 +295,10 @@ impl DebuggerApp {
     fn update_debug_req(&self) {
         let mut debug = DebugRequest {
             interval: self.state.debug_interval,
-            cpu_mem: self.state.show_cpu_mem | self.state.show_nametables | self.state.show_sprites,
+            cpu_mem: self.state.show_cpu_mem
+                | self.state.show_nametables
+                | self.state.show_sprites
+                | self.state.show_code,
             ppu_mem: self.state.show_ppu_mem
                 | self.state.show_chr_tiles
                 | self.state.show_nametables
@@ -353,6 +359,9 @@ impl eframe::App for DebuggerApp {
                     {
                         self.update_debug_req();
                     }
+                    if ui.checkbox(&mut self.state.show_code, "Code").changed() {
+                        self.update_debug_req();
+                    }
                     if ui
                         .checkbox(&mut self.state.show_cpu_mem, "CPU Memory")
                         .changed()
@@ -396,6 +405,10 @@ impl eframe::App for DebuggerApp {
         self.debug.swap();
         if self.state.show_screen {
             self.nes_screen.show(&ctx);
+        }
+
+        if self.state.show_code {
+            CodeViewer::new(self.debug.cpu_mem()).show(ctx);
         }
 
         if self.state.show_cpu_mem {

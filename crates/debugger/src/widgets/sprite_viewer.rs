@@ -111,7 +111,7 @@ impl SpriteViewer {
 
         let image = egui::ColorImage::from_rgb([8 * 8, 16 * 8], &self.pixel_buf);
 
-        self.texture = Some(ctx.load_texture("nametables", image, egui::TextureOptions::NEAREST));
+        self.texture = Some(ctx.load_texture("sprite_sheet", image, egui::TextureOptions::NEAREST));
         self.age = now;
     }
 
