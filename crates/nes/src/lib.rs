@@ -13,7 +13,8 @@ mod ppu_step;
 mod region;
 
 pub use cartridge::Cartridge;
-pub use machine::{Controller, Machine, UserInput};
+pub use debug::MachineState;
+pub use machine::{Controller, Machine, RunResult, UserInput};
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 pub use region::Region;

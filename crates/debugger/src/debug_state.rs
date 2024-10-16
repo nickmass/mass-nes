@@ -7,6 +7,25 @@ use std::{
     },
 };
 
+use nes::MachineState;
+
+#[derive(Debug, Clone, Default)]
+pub struct State(MachineState);
+
+impl Deref for State {
+    type Target = MachineState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for State {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 #[derive(Clone)]
 pub struct SwapBuffer<T> {
     updated: Arc<AtomicBool>,
@@ -45,6 +64,8 @@ pub struct DebugSwapState {
     pub ppu_mem: SwapBuffer<Vec<u8>>,
     pub pal_ram: SwapBuffer<Vec<u8>>,
     pub sprite_ram: SwapBuffer<Vec<u8>>,
+    pub state: SwapBuffer<State>,
+    pub breakpoint: Arc<AtomicBool>,
 }
 
 impl DebugSwapState {
@@ -55,11 +76,17 @@ impl DebugSwapState {
             ppu_mem: SwapBuffer::new(vec![0; 0x4000]),
             pal_ram: SwapBuffer::new(vec![0; 32]),
             sprite_ram: SwapBuffer::new(vec![0; 256]),
+            state: SwapBuffer::new(State::default()),
+            breakpoint: Arc::new(false.into()),
         }
     }
 
     pub fn update_at(&self, time: u64) {
         self.now.store(time, Ordering::Relaxed);
+    }
+
+    pub fn set_breakpoint(&self) {
+        self.breakpoint.store(true, Ordering::Relaxed)
     }
 }
 
@@ -69,6 +96,7 @@ pub struct DebugUiState {
     ppu_mem: Vec<u8>,
     pal_ram: Vec<u8>,
     sprite_ram: Vec<u8>,
+    state: State,
     palette: Palette,
 }
 
@@ -80,12 +108,17 @@ impl DebugUiState {
             ppu_mem: vec![0; 0x4000],
             pal_ram: vec![0; 32],
             sprite_ram: vec![0; 256],
+            state: State::default(),
             palette,
         }
     }
 
     pub fn now(&self) -> u64 {
         self.swap.now.load(Ordering::Relaxed)
+    }
+
+    pub fn breakpoint(&self) -> bool {
+        self.swap.breakpoint.swap(false, Ordering::Relaxed)
     }
 
     pub fn cpu_mem(&self) -> &[u8] {
@@ -108,6 +141,10 @@ impl DebugUiState {
         &self.palette
     }
 
+    pub fn state(&self) -> &State {
+        &self.state
+    }
+
     pub fn ppu(&self) -> PpuView {
         PpuView(self)
     }
@@ -117,6 +154,7 @@ impl DebugUiState {
         self.swap.ppu_mem.attempt_swap(&mut self.ppu_mem);
         self.swap.pal_ram.attempt_swap(&mut self.pal_ram);
         self.swap.sprite_ram.attempt_swap(&mut self.sprite_ram);
+        self.swap.state.attempt_swap(&mut self.state);
     }
 }
 
@@ -181,6 +219,10 @@ impl Nametable {
 pub struct PpuView<'a>(&'a DebugUiState);
 
 impl<'a> PpuView<'a> {
+    pub fn regs(&self) -> &[u8] {
+        &self.state.ppu.registers
+    }
+
     pub fn pal_entry(&self, idx: u8) -> (u8, u8, u8) {
         let idx = if idx & 3 == 0 { 0 } else { idx };
         let idx = self.pal_ram()[idx as usize];
@@ -250,7 +292,7 @@ impl<'a> PpuView<'a> {
             _ => unreachable!(),
         };
 
-        let chr_table = if self.cpu_mem()[0x2000] & 0x10 != 0 {
+        let chr_table = if self.regs()[0] & 0x10 != 0 {
             ChrTable::High
         } else {
             ChrTable::Low
@@ -265,7 +307,7 @@ impl<'a> PpuView<'a> {
         let oam: [_; 4] = self.sprite_ram()[oam_base..oam_base + 4]
             .try_into()
             .unwrap();
-        let tall = self.cpu_mem()[0x2000] & 0x20 != 0;
+        let tall = self.regs()[0] & 0x20 != 0;
         let chr_table = if tall {
             if oam[1] & 1 != 0 {
                 ChrTable::High
@@ -273,7 +315,7 @@ impl<'a> PpuView<'a> {
                 ChrTable::Low
             }
         } else {
-            if self.cpu_mem()[0x2000] & 0x08 != 0 {
+            if self.regs()[0] & 0x08 != 0 {
                 ChrTable::High
             } else {
                 ChrTable::Low

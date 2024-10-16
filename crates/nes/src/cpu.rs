@@ -58,7 +58,7 @@ enum Stage {
 
 #[allow(dead_code)]
 #[cfg(feature = "debugger")]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct CpuDebugState {
     pub reg_a: u8,
     pub reg_x: u8,
@@ -71,7 +71,7 @@ pub struct CpuDebugState {
 }
 
 #[cfg(not(feature = "debugger"))]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct CpuDebugState;
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]

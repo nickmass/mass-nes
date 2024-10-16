@@ -10,11 +10,18 @@ mod debugger {
 
     use crate::bus::{AddressBus, DeviceKind, RangeAndMask};
     use crate::cpu::{ops::*, CpuDebugState};
+    use crate::machine::BreakpointHandler;
     use crate::memory::MemoryBlock;
     use crate::ppu::PpuDebugState;
     use crate::Machine;
 
     const INST_HISTORY_BUF_SIZE: usize = 100;
+
+    #[derive(Debug, Clone, Default)]
+    pub struct MachineState {
+        pub cpu: CpuDebugState,
+        pub ppu: PpuDebugState,
+    }
 
     pub struct DebugState {
         trace_instrs: u32,
@@ -24,6 +31,7 @@ mod debugger {
         logging_range: bool,
         inst_ring: RingBuffer<(CpuDebugState, PpuDebugState)>,
         trace_fn: Option<Box<dyn FnMut(CpuDebugState, PpuDebugState)>>,
+        machine_state: MachineState,
     }
 
     impl Default for DebugState {
@@ -36,6 +44,7 @@ mod debugger {
                 logging_range: false,
                 inst_ring: RingBuffer::new(INST_HISTORY_BUF_SIZE),
                 trace_fn: None,
+                machine_state: MachineState::default(),
             }
         }
     }
@@ -218,9 +227,11 @@ mod debugger {
             }
         }
 
-        pub fn trace(&self, system: &Machine, cpu_state: CpuDebugState, ppu_state: PpuDebugState) {
+        pub fn trace(&self, system: &Machine, cpu: CpuDebugState) {
             let mut state = self.state.borrow_mut();
-            if let Some(inst_addr) = cpu_state.instruction_addr {
+            state.machine_state.cpu = cpu;
+            let ppu = state.machine_state.ppu;
+            if let Some(inst_addr) = cpu.instruction_addr {
                 state.logging_range = if let Some(&(start, end)) = state.log_range.as_ref() {
                     if inst_addr >= start && inst_addr <= end {
                         true
@@ -231,14 +242,14 @@ mod debugger {
                     false
                 };
                 if state.trace_instrs != 0 || state.logging_range {
-                    let log = self.trace_instruction(system, &cpu_state, &ppu_state);
+                    let log = self.trace_instruction(system, &cpu, &ppu);
                     tracing::info!("{}", log);
                     if state.trace_instrs != 0 {
                         state.trace_instrs -= 1;
                     }
                 }
 
-                state.log_inst((cpu_state, ppu_state));
+                state.log_inst((cpu, ppu));
 
                 let inst = OPS[system.peek(inst_addr) as usize];
                 if let Instruction::IllKil = inst.instruction {
@@ -247,20 +258,17 @@ mod debugger {
             }
 
             if let Some(trace_fn) = state.trace_fn.as_mut() {
-                trace_fn(cpu_state, ppu_state);
+                trace_fn(cpu, ppu);
             }
         }
 
-        pub fn trace_ppu(
-            &self,
-            _system: &Machine,
-            cpu_state: CpuDebugState,
-            ppu_state: PpuDebugState,
-        ) {
+        pub fn trace_ppu(&self, _system: &Machine, ppu: PpuDebugState) {
             let mut state = self.state.borrow_mut();
+            state.machine_state.ppu = ppu;
+            let cpu = state.machine_state.cpu;
 
             if let Some(trace_fn) = state.trace_fn.as_mut() {
-                trace_fn(cpu_state, ppu_state);
+                trace_fn(cpu, ppu);
             }
         }
 
@@ -425,15 +433,29 @@ mod debugger {
         pub fn sprite_ram<'m>(&self, machine: &'m Machine) -> &'m [u8] {
             machine.ppu.oam_data.as_slice()
         }
+
+        pub fn machine_state(&self) -> MachineState {
+            let state = self.state.borrow();
+            state.machine_state.clone()
+        }
+
+        pub fn breakpoint<H: BreakpointHandler>(&self, handler: &H) -> bool {
+            let state = self.state.borrow();
+            handler.breakpoint(&state.machine_state)
+        }
     }
 }
 
 #[cfg(not(feature = "debugger"))]
 pub mod no_debugger {
     use crate::cpu::CpuDebugState;
+    use crate::machine::BreakpointHandler;
     use crate::ppu::PpuDebugState;
     use crate::Machine;
     pub struct Debug;
+
+    #[derive(Debug, Clone, Default)]
+    pub struct MachineState;
 
     impl Debug {
         pub fn new() -> Self {
@@ -446,20 +468,12 @@ pub mod no_debugger {
 
         pub fn write(&self, _addr: u16, _value: u8) {}
 
-        pub fn trace(
-            &self,
-            _system: &Machine,
-            _cpu_state: CpuDebugState,
-            _ppu_state: PpuDebugState,
-        ) {
-        }
+        pub fn trace(&self, _system: &Machine, _cpu_state: CpuDebugState) {}
 
-        pub fn trace_ppu(
-            &self,
-            _system: &Machine,
-            _cpu_state: CpuDebugState,
-            _ppu_state: PpuDebugState,
-        ) {
+        pub fn trace_ppu(&self, _system: &Machine, _ppu_state: PpuDebugState) {}
+
+        pub fn breakpoint<H: BreakpointHandler>(&self, _handler: &H) -> bool {
+            false
         }
     }
 }

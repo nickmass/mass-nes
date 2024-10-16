@@ -4,7 +4,7 @@ use nes_traits::SaveState;
 use crate::apu::Apu;
 use crate::bus::{AddressBus, BusKind, DeviceKind, RangeAndMask};
 use crate::cartridge::Cartridge;
-use crate::cpu::{Cpu, CpuDebugState, CpuPinIn, TickResult};
+use crate::cpu::{Cpu, CpuPinIn, TickResult};
 use crate::debug::Debug;
 use crate::input::Input;
 use crate::mapper::RcMapper;
@@ -12,7 +12,30 @@ use crate::memory::MemoryBlock;
 use crate::ppu::Ppu;
 use crate::region::Region;
 
+use crate::debug::MachineState;
 pub use crate::input::{Controller, InputDevice};
+
+pub trait BreakpointHandler {
+    fn breakpoint(&self, state: &MachineState) -> bool;
+}
+
+impl BreakpointHandler for () {
+    fn breakpoint(&self, _state: &MachineState) -> bool {
+        false
+    }
+}
+
+impl<T: Fn(&MachineState) -> bool> BreakpointHandler for T {
+    fn breakpoint(&self, state: &MachineState) -> bool {
+        self(state)
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum RunResult {
+    Breakpoint,
+    Frame,
+}
 
 #[derive(Debug, Copy, Clone)]
 pub enum UserInput {
@@ -105,15 +128,22 @@ impl Machine {
         self.region
     }
 
-    #[tracing::instrument(skip_all)]
+    pub fn run_with_breakpoints<H: BreakpointHandler>(&mut self, break_handler: H) -> RunResult {
+        self.do_run(break_handler)
+    }
+
     pub fn run(&mut self) {
+        self.do_run(());
+    }
+
+    #[tracing::instrument(skip_all)]
+    fn do_run<H: BreakpointHandler>(&mut self, break_handler: H) -> RunResult {
         let last_frame = self.ppu.frame();
         while self.ppu.frame() == last_frame {
             let tick_result = self.cpu.tick(self.cpu_pin_in);
 
             let cpu_state = self.cpu.debug_state();
-            let ppu_state = self.ppu.debug_state();
-            self.debug.trace(&self, cpu_state, ppu_state);
+            self.debug.trace(&self, cpu_state);
 
             if let Some(sample) = self.cpu.dma.dmc_sample() {
                 self.apu.dmc.dmc_read(sample);
@@ -122,8 +152,8 @@ impl Machine {
             self.apu.tick();
             self.mapper.tick();
 
-            self.tick_ppu(cpu_state);
-            self.tick_ppu(cpu_state);
+            self.tick_ppu();
+            self.tick_ppu();
 
             match tick_result {
                 TickResult::Read(addr) => {
@@ -141,10 +171,10 @@ impl Machine {
                 TickResult::Idle(_) => (),
             }
 
-            self.tick_ppu(cpu_state);
+            self.tick_ppu();
 
             if self.region.extra_ppu_tick() && self.cycle % 5 == 0 {
-                self.tick_ppu(cpu_state);
+                self.tick_ppu();
             }
 
             if let Some(addr) = self.apu.get_dmc_req() {
@@ -164,13 +194,19 @@ impl Machine {
             self.cpu_pin_in.power = false;
             self.cpu_pin_in.reset = false;
             self.cycle += 1;
+
+            if self.debug.breakpoint(&break_handler) {
+                return RunResult::Breakpoint;
+            }
         }
+
+        RunResult::Frame
     }
 
-    fn tick_ppu(&mut self, cpu_state: CpuDebugState) {
+    fn tick_ppu(&mut self) {
         self.ppu.tick();
         let ppu_state = self.ppu.debug_state();
-        self.debug.trace_ppu(&self, cpu_state, ppu_state);
+        self.debug.trace_ppu(&self, ppu_state);
     }
 
     fn read(&mut self, addr: u16) -> u8 {

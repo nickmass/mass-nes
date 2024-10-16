@@ -33,7 +33,7 @@ impl Default for SpriteData {
 
 #[allow(dead_code)]
 #[cfg(feature = "debugger")]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct PpuDebugState {
     pub tick: u64,
     pub scanline: u32,
@@ -41,10 +41,11 @@ pub struct PpuDebugState {
     pub vblank: bool,
     pub nmi: bool,
     pub sprite_zero_hit: bool,
+    pub registers: [u8; 8],
 }
 
 #[cfg(not(feature = "debugger"))]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct PpuDebugState;
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
@@ -223,6 +224,9 @@ impl Ppu {
     #[cfg(feature = "debugger")]
     pub fn debug_state(&self) -> PpuDebugState {
         let tick = self.current_tick;
+        let mut registers = self.regs;
+        registers[2] = self.ppu_status();
+        registers[3] = self.oam_addr;
         PpuDebugState {
             tick,
             scanline: self.step.scanline,
@@ -230,6 +234,7 @@ impl Ppu {
             vblank: self.vblank,
             nmi: self.nmi(),
             sprite_zero_hit: self.sprite_zero_hit,
+            registers,
         }
     }
     #[cfg(not(feature = "debugger"))]
@@ -239,17 +244,14 @@ impl Ppu {
 
     #[cfg(feature = "debugger")]
     pub fn peek(&self, address: u16) -> u8 {
-        // These write-only regs should return open bus but...
-        // peeking at the PPU registers is just so much more
-        // informative
         match address {
-            0x2000 => self.regs[0],
-            0x2001 => self.regs[1],
+            0x2000 => self.last_write,
+            0x2001 => self.last_write,
             0x2002 => self.ppu_status(),
-            0x2003 => self.regs[3],                          //OAMADDR
+            0x2003 => self.last_write,                       //OAMADDR
             0x2004 => self.oam_data[self.oam_addr as usize], //OAMDATA
-            0x2005 => self.regs[5],
-            0x2006 => self.regs[6],
+            0x2005 => self.last_write,
+            0x2006 => self.last_write,
             0x2007 => {
                 //PPUDATA
                 let addr = self.vram_addr;

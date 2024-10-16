@@ -138,6 +138,8 @@ struct DebuggerApp {
     chr_tiles: ChrTiles,
     nt_viewer: NametableViewer,
     sprite_viewer: SpriteViewer,
+    code_viewer: CodeViewer,
+    breakpoints: Breakpoints,
     first_update: bool,
 }
 
@@ -203,6 +205,8 @@ impl DebuggerApp {
             chr_tiles,
             nt_viewer,
             sprite_viewer,
+            code_viewer: CodeViewer::new(),
+            breakpoints: Breakpoints::new(),
             recents: Recents::new(&[], 10),
         };
 
@@ -255,14 +259,19 @@ impl DebuggerApp {
     fn handle_input(&mut self, input_state: InputState) {
         if !self.last_input.pause && input_state.pause {
             self.pause = !self.pause;
-            if self.pause {
-                self.audio.pause();
-            } else {
-                self.audio.play();
-            }
+            self.handle_pause();
         }
 
         self.last_input = input_state;
+    }
+
+    fn handle_pause(&mut self) {
+        if self.pause {
+            self.audio.pause();
+        } else {
+            self.audio.play();
+            self.emu_control.sync();
+        }
     }
 
     fn process_app_events(&mut self, ctx: &egui::Context) {
@@ -282,6 +291,10 @@ impl DebuggerApp {
             AppEvent::FocusScreen => {
                 self.nes_screen.focus(ctx);
             }
+            AppEvent::Breakpoint => {
+                self.pause = true;
+                self.handle_pause();
+            }
         }
     }
 
@@ -295,10 +308,7 @@ impl DebuggerApp {
     fn update_debug_req(&self) {
         let mut debug = DebugRequest {
             interval: self.state.debug_interval,
-            cpu_mem: self.state.show_cpu_mem
-                | self.state.show_nametables
-                | self.state.show_sprites
-                | self.state.show_code,
+            cpu_mem: self.state.show_cpu_mem | self.state.show_code,
             ppu_mem: self.state.show_ppu_mem
                 | self.state.show_chr_tiles
                 | self.state.show_nametables
@@ -307,9 +317,11 @@ impl DebuggerApp {
                 | self.state.show_nametables
                 | self.state.show_sprites,
             sprite_ram: self.state.show_sprites,
+            state: self.state.show_code | self.state.show_nametables | self.state.show_sprites,
+            breakpoints: self.breakpoints.clone(),
         };
 
-        if !debug.cpu_mem && !debug.ppu_mem && !debug.pal_ram && !debug.sprite_ram {
+        if !debug.cpu_mem && !debug.ppu_mem && !debug.pal_ram && !debug.sprite_ram && !debug.state {
             debug.interval = 0;
         }
 
@@ -320,6 +332,10 @@ impl DebuggerApp {
 impl eframe::App for DebuggerApp {
     #[instrument(skip_all)]
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.debug.breakpoint() {
+            self.app_events.send(AppEvent::Breakpoint);
+        }
+
         self.process_app_events(ctx);
 
         egui::TopBottomPanel::top("Menu Area").show(ctx, |ui| {
@@ -408,7 +424,18 @@ impl eframe::App for DebuggerApp {
         }
 
         if self.state.show_code {
-            CodeViewer::new(self.debug.cpu_mem()).show(ctx);
+            let mut paused = self.pause;
+            if self
+                .code_viewer
+                .show(&mut paused, &self.debug, &mut self.breakpoints, ctx)
+            {
+                self.update_debug_req();
+            }
+
+            if paused != self.pause {
+                self.pause = paused;
+                self.handle_pause();
+            }
         }
 
         if self.state.show_cpu_mem {
@@ -507,6 +534,7 @@ fn spawn_sync_thread(input: SharedInput, emu_control: EmulatorControl, mut sync:
 pub enum AppEvent {
     RomLoaded(std::path::PathBuf),
     FocusScreen,
+    Breakpoint,
 }
 
 pub struct AppEvents {

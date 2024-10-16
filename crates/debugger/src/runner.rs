@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use blip_buf_rs::Blip;
-use nes::{Cartridge, Machine, Region, UserInput};
+use nes::{Cartridge, Machine, MachineState, Region, RunResult, UserInput};
 use tracing::instrument;
 use ui::audio::SamplesProducer;
 
@@ -21,9 +21,11 @@ pub struct DebugRequest {
     pub ppu_mem: bool,
     pub pal_ram: bool,
     pub sprite_ram: bool,
+    pub state: bool,
+    pub breakpoints: Breakpoints,
 }
 
-use crate::{gfx::GfxBackBuffer, DebugSwapState, EmulatorCommands};
+use crate::{gfx::GfxBackBuffer, Breakpoints, DebugSwapState, EmulatorCommands};
 
 pub struct Runner {
     machine: Option<Machine>,
@@ -72,6 +74,8 @@ impl Runner {
                 ppu_mem: false,
                 pal_ram: false,
                 sprite_ram: false,
+                state: false,
+                breakpoints: Breakpoints::new(),
             },
         }
     }
@@ -136,15 +140,29 @@ impl Runner {
     #[instrument(skip_all)]
     fn step(&mut self) {
         if let Some(machine) = self.machine.as_mut() {
-            machine.run();
+            match machine.run_with_breakpoints(|s: &MachineState| {
+                if let Some(addr) = s.cpu.instruction_addr {
+                    self.debug_request.breakpoints.is_set(addr)
+                } else {
+                    false
+                }
+            }) {
+                RunResult::Frame => {
+                    self.frame += 1;
+                    self.total_frames += 1;
+                    self.save_store.push(self.frame, || machine.save_state());
 
-            self.frame += 1;
-            self.total_frames += 1;
-            self.save_store.push(self.frame, || machine.save_state());
-
-            self.update_audio();
-            self.update_frame();
-            self.update_debug();
+                    self.update_audio();
+                    self.update_frame();
+                    self.update_debug(false);
+                }
+                RunResult::Breakpoint => {
+                    let _ = machine.get_audio();
+                    self.debug.set_breakpoint();
+                    self.update_frame();
+                    self.update_debug(true);
+                }
+            }
         }
     }
 
@@ -178,8 +196,10 @@ impl Runner {
     }
 
     #[instrument(skip_all)]
-    fn update_debug(&mut self) {
-        if self.debug_request.interval == 0 || self.total_frames % self.debug_request.interval != 0
+    fn update_debug(&mut self, force_update: bool) {
+        if !force_update
+            && (self.debug_request.interval == 0
+                || self.total_frames % self.debug_request.interval != 0)
         {
             return;
         }
@@ -211,6 +231,12 @@ impl Runner {
                 self.debug.sprite_ram.update(|data| {
                     data.copy_from_slice(debug.sprite_ram(machine));
                 })
+            }
+
+            if self.debug_request.state {
+                self.debug.state.update(|data| {
+                    *data = debug.machine_state();
+                });
             }
 
             self.debug.update_at(self.total_frames);

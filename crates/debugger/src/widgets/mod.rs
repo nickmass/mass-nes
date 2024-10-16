@@ -9,7 +9,7 @@ mod sprite_viewer;
 mod volume;
 
 pub use chr_tiles::ChrTiles;
-pub use code_viewer::CodeViewer;
+pub use code_viewer::{Breakpoints, CodeViewer};
 pub use memory::MemoryViewer;
 pub use nametables::NametableViewer;
 pub use palette_viewer::PaletteViewer;

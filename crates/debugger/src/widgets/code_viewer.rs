@@ -1,15 +1,72 @@
 use crate::egui;
-use egui::RichText;
 use tracing::instrument;
 
-use crate::cpu_6502::{Instruction, InstructionIter};
+use crate::{
+    cpu_6502::{Instruction, InstructionIter},
+    debug_state::DebugUiState,
+};
+
+#[derive(Debug, Clone)]
+pub struct Breakpoints {
+    breakpoints: Vec<u16>,
+}
+
+impl Breakpoints {
+    pub fn new() -> Self {
+        Self {
+            breakpoints: Vec::new(),
+        }
+    }
+
+    pub fn toggle(&mut self, addr: u16) {
+        if let Some(idx) = self.breakpoints.iter().position(|a| *a == addr) {
+            self.breakpoints.remove(idx);
+        } else {
+            self.breakpoints.push(addr);
+        }
+    }
+
+    pub fn is_set(&self, addr: u16) -> bool {
+        self.breakpoints.iter().any(|a| *a == addr)
+    }
+}
 
 struct InstructionUi(Instruction);
 
 impl InstructionUi {
-    fn ui(&self, ui: &mut egui::Ui) {
+    fn pc(&self) -> u16 {
+        self.0.pc()
+    }
+
+    fn inst_tooltip(&self, ui: &mut egui::Ui) {
         let op_code = &self.0.op_code;
-        ui.horizontal(|ui| {
+        ui.style_mut().override_text_style = None;
+        if op_code.illegal {
+            ui.label(format!("{}\tUnofficial", op_code.instruction.mnemonic()));
+        } else {
+            ui.label(op_code.instruction.mnemonic());
+        }
+        ui.label(op_code.instruction.description());
+        if op_code.dummy_cycles {
+            ui.label(format!("Cycles: {}+", op_code.cycles));
+        } else {
+            ui.label(format!("Cycles: {}", op_code.cycles));
+        }
+    }
+
+    fn ui(&self, reg_pc: u16, breakpoints: &mut Breakpoints, ui: &mut egui::Ui) -> bool {
+        let mut changed = false;
+        let op_code = &self.0.op_code;
+        ui.horizontal(|row_ui| {
+            changed = BreakpointToggle::ui(&self.0, breakpoints, row_ui);
+            let bg_color = if self.pc() == reg_pc {
+                egui::Color32::DARK_RED
+            } else {
+                egui::Color32::TRANSPARENT
+            };
+
+            let mut frame = egui::Frame::none().fill(bg_color).begin(row_ui);
+            let ui = &mut frame.content_ui;
             ui.label(format!(
                 "0x{:04X}: {:02X} {}",
                 self.0.pc(),
@@ -23,55 +80,126 @@ impl InstructionUi {
                 ui.visuals().text_color()
             };
 
-            let name = RichText::new(op_code.instruction.mnemonic())
+            let name = egui::RichText::new(op_code.instruction.mnemonic())
                 .color(color)
                 .strong();
 
-            ui.label(name).on_hover_ui(|ui| {
-                ui.style_mut().override_text_style = None;
-                if op_code.illegal {
-                    ui.label(format!("{}\tUnofficial", op_code.instruction.mnemonic()));
-                } else {
-                    ui.label(op_code.instruction.mnemonic());
-                }
-                ui.label(op_code.instruction.description());
-                if op_code.dummy_cycles {
-                    ui.label(format!("Cycles: {}+", op_code.cycles));
-                } else {
-                    ui.label(format!("Cycles: {}", op_code.cycles));
-                }
-            });
+            ui.label(name).on_hover_ui(|ui| self.inst_tooltip(ui));
             let addressing = format!("{}", self.0.addressing);
             ui.label(format!("{:40}", addressing));
+
+            frame.end(row_ui);
         });
+
+        changed
     }
 }
 
-pub struct CodeViewer<'a> {
-    mem: &'a [u8],
+struct BreakpointToggle;
+
+impl BreakpointToggle {
+    fn ui(inst: &Instruction, breakpoints: &mut Breakpoints, ui: &mut egui::Ui) -> bool {
+        let mut changed = false;
+        let mut frame = egui::Frame::none().begin(ui);
+        let height = ui.text_style_height(&egui::TextStyle::Monospace);
+        let size = egui::Vec2::splat(height);
+
+        let (rect, res) = frame
+            .content_ui
+            .allocate_exact_size(size, egui::Sense::click());
+
+        if breakpoints.is_set(inst.pc()) {
+            let origin = rect.min + (size / 2.0);
+            frame
+                .content_ui
+                .painter()
+                .circle_filled(origin, height / 2.0, egui::Color32::DARK_RED);
+        }
+
+        if res.clicked() {
+            breakpoints.toggle(inst.pc());
+            changed = true;
+        }
+        if res.hovered() {
+            ui.output_mut(|platform| platform.cursor_icon = egui::CursorIcon::PointingHand);
+        }
+
+        frame.end(ui);
+        changed
+    }
 }
 
-impl<'a> CodeViewer<'a> {
-    pub fn new(mem: &'a [u8]) -> Self {
-        Self { mem }
+pub struct CodeViewer {
+    offset: f32,
+    jump_addr: String,
+}
+
+impl CodeViewer {
+    pub fn new() -> Self {
+        Self {
+            offset: 0.0,
+            jump_addr: String::new(),
+        }
     }
 
     #[instrument(skip_all)]
-    pub fn show(self, ctx: &egui::Context) {
+    pub fn show(
+        &mut self,
+        pause: &mut bool,
+        debug: &DebugUiState,
+        breakpoints: &mut Breakpoints,
+        ctx: &egui::Context,
+    ) -> bool {
+        let mut changed = false;
+        let mem = debug.cpu_mem();
+        let state = debug.state();
+        let reg_pc = state.cpu.instruction_addr.unwrap_or(state.cpu.reg_pc);
         egui::Window::new("Code").show(ctx, |ui| {
             let style = egui::TextStyle::Monospace;
             let line_height = ui.text_style_height(&style);
-            ui.style_mut().override_text_style = Some(style);
-            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-            egui::ScrollArea::vertical().show_rows(ui, line_height, 0x10000, |ui, range| {
-                let pc = range.start as u16;
-                for (_, inst) in range.zip(InstructionIter::new(|addr| self.mem[addr as usize], pc))
-                {
-                    if inst.pc() >= pc {
-                        InstructionUi(inst).ui(ui);
-                    }
+            let mut v_offset = None;
+
+            ui.horizontal(|ui| {
+                let play_pause = if *pause { "▶" } else { "⏸" };
+                if ui.button(play_pause).clicked() {
+                    *pause = !*pause;
+                }
+                self.jump_addr.retain(|c| c.is_ascii_hexdigit());
+                let mut jump_addr = None;
+                if ui.button("Jump to PC").clicked() {
+                    jump_addr = Some(reg_pc);
+                }
+                if ui.button("Jump to...").clicked() {
+                    jump_addr = Some(u16::from_str_radix(&self.jump_addr, 16).unwrap_or(0));
+                }
+                egui::TextEdit::singleline(&mut self.jump_addr)
+                    .hint_text("0000")
+                    .char_limit(4)
+                    .show(ui);
+
+                if let Some(jump_addr) = jump_addr {
+                    let offset = jump_addr as f32 * (line_height + ui.spacing().item_spacing.y);
+                    v_offset = Some(offset)
                 }
             });
+            ui.separator();
+            ui.style_mut().override_text_style = Some(style);
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+
+            let scroll = egui::ScrollArea::vertical()
+                .vertical_scroll_offset(v_offset.unwrap_or(self.offset))
+                .show_rows(ui, line_height, 0x10000, |ui, range| {
+                    let pc = range.start as u16;
+                    for (_, inst) in range.zip(InstructionIter::new(|addr| mem[addr as usize], pc))
+                    {
+                        if inst.pc() >= pc {
+                            changed |= InstructionUi(inst).ui(reg_pc, breakpoints, ui);
+                        }
+                    }
+                });
+
+            self.offset = scroll.state.offset.y;
         });
+        changed
     }
 }
