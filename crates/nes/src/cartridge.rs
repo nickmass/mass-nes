@@ -156,7 +156,7 @@ impl Cartridge {
         };
 
         tracing::debug!(
-            "{} PRGROM: {}, CHRROM: {}, PRGRAM: {}, CHRRAM:{}, Mapper: {}",
+            "{} PRGROM: {}, CHRROM: {}, PRGRAM: {}, CHRRAM: {}, Mapper: {}",
             format,
             prg_rom_bytes,
             chr_rom_bytes,

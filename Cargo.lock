@@ -2777,6 +2777,7 @@ version = "0.1.0"
 dependencies = [
  "nes-traits",
  "serde",
+ "serde_arrays",
  "tracing",
 ]
 
@@ -3683,6 +3684,15 @@ dependencies = [
  "js-sys",
  "serde",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "serde_arrays"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38636132857f68ec3d5f3eb121166d2af33cb55174c4d5ff645db6165cbef0fd"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

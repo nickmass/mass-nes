@@ -1,7 +1,7 @@
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 #[cfg(feature = "save-states")]
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::bus::{AddressBus, BusKind, DeviceKind, RangeAndMask};
 use crate::mapper::{Nametable, RcMapper};
@@ -116,6 +116,8 @@ pub struct Ppu {
 
     reset_delay: u32,
 
+    ppu_mask: DelayReg<4, u8>,
+
     #[cfg_attr(feature = "save-states", save(skip))]
     ppu_steps: PpuSteps,
     step: PpuStep,
@@ -186,6 +188,8 @@ impl Ppu {
             sprite_render_index: 0,
 
             reset_delay: 0,
+
+            ppu_mask: DelayReg::new(0),
 
             ppu_steps: generate_steps(region),
             step: PpuStep::default(),
@@ -356,6 +360,8 @@ impl Ppu {
                 if self.reset_delay != 0 {
                     return;
                 }
+
+                self.ppu_mask.update(value);
                 self.regs[1] = value;
             }
             0x2002 => {
@@ -449,6 +455,8 @@ impl Ppu {
         if self.reset_delay != 0 {
             self.reset_delay -= 1;
         }
+
+        self.ppu_mask.tick();
 
         let mut step = self.ppu_steps.step();
 
@@ -1071,10 +1079,10 @@ impl Ppu {
         self.regs[1] & 0x20 != 0
     }
     fn is_sprites_enabled(&self) -> bool {
-        self.regs[1] & 0x10 != 0
+        self.ppu_mask.value() & 0x10 != 0
     }
     fn is_background_enabled(&self) -> bool {
-        self.regs[1] & 0x08 != 0
+        self.ppu_mask.value() & 0x08 != 0
     }
     fn is_left_sprites(&self) -> bool {
         self.regs[1] & 0x04 != 0
@@ -1086,7 +1094,7 @@ impl Ppu {
         self.regs[1] & 0x01 != 0
     }
     fn is_rendering(&self) -> bool {
-        self.is_sprites_enabled() || self.is_background_enabled()
+        self.ppu_mask.value() & 0x18 != 0
     }
 
     fn ppu_status(&self) -> u8 {
@@ -1106,5 +1114,62 @@ impl Ppu {
     fn in_vblank(&self) -> bool {
         self.step.scanline >= self.region.vblank_line()
             && self.step.scanline < self.region.prerender_line()
+    }
+}
+
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone)]
+struct DelayReg<
+    const DELAY: usize,
+    #[cfg(feature = "save-states")] T: Copy + Default + Serialize + DeserializeOwned,
+    #[cfg(not(feature = "save-states"))] T: Copy + Default,
+> {
+    #[cfg_attr(feature = "save-states", serde(with = "serde_arrays"))]
+    values: [T; DELAY],
+}
+
+impl<
+        const DELAY: usize,
+        #[cfg(feature = "save-states")] T: Copy + Default + Serialize + DeserializeOwned,
+        #[cfg(not(feature = "save-states"))] T: Copy + Default,
+    > Default for DelayReg<DELAY, T>
+{
+    fn default() -> Self {
+        Self {
+            values: [T::default(); DELAY],
+        }
+    }
+}
+
+impl<
+        const DELAY: usize,
+        #[cfg(feature = "save-states")] T: Copy + Default + Serialize + DeserializeOwned,
+        #[cfg(not(feature = "save-states"))] T: Copy + Default,
+    > DelayReg<DELAY, T>
+{
+    fn new(value: T) -> Self {
+        const {
+            if DELAY == 0 {
+                panic!("DelayReg DELAY must be greater than 0")
+            }
+        }
+
+        Self {
+            values: [value; DELAY],
+        }
+    }
+
+    fn tick(&mut self) {
+        for i in 1..self.values.len() {
+            self.values[i - 1] = self.values[i]
+        }
+    }
+
+    fn value(&self) -> T {
+        self.values[0]
+    }
+
+    fn update(&mut self, value: T) {
+        self.values[DELAY - 1] = value;
     }
 }
