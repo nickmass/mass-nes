@@ -1,8 +1,10 @@
 mod action53;
 mod axrom;
 mod bf909x;
+mod bxrom;
 mod cnrom;
 mod fme7;
+mod nina001;
 mod nrom;
 mod pxrom;
 mod sxrom;
@@ -119,8 +121,8 @@ impl RcMapper {
     }
 }
 
-pub fn ines(ines_number: u8, cart: Cartridge) -> RcMapper {
-    match ines_number {
+pub fn ines(cart: Cartridge) -> RcMapper {
+    match cart.mapper {
         0 => RcMapper::new(nrom::Nrom::new(cart)),
         1 | 65 => RcMapper::new(sxrom::Sxrom::new(cart)),
         2 => RcMapper::new(uxrom::Uxrom::new(cart)),
@@ -131,6 +133,17 @@ pub fn ines(ines_number: u8, cart: Cartridge) -> RcMapper {
         24 => RcMapper::new(vrc6::Vrc6::new(cart, vrc6::Vrc6Variant::A)),
         26 => RcMapper::new(vrc6::Vrc6::new(cart, vrc6::Vrc6Variant::B)),
         28 => RcMapper::new(action53::Action53::new(cart)),
+        34 => match cart.submapper.unwrap_or_default() {
+            1 => RcMapper::new(nina001::Nina001::new(cart)),
+            2 => RcMapper::new(bxrom::Bxrom::new(cart)),
+            0 | _ => {
+                if cart.chr_rom.len() > 8 * 1024 || cart.chr_ram_bytes == 0 {
+                    RcMapper::new(nina001::Nina001::new(cart))
+                } else {
+                    RcMapper::new(bxrom::Bxrom::new(cart))
+                }
+            }
+        },
         69 => RcMapper::new(fme7::Fme7::new(cart)),
         71 | 232 => RcMapper::new(bf909x::Bf909x::new(cart)),
         _ => {

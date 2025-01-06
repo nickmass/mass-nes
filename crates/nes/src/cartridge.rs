@@ -55,7 +55,8 @@ pub struct Cartridge {
     pub prg_rom: Vec<u8>,
     pub chr_rom: Vec<u8>,
     pub mirroring: CartMirroring,
-    mapper_number: u8,
+    pub mapper: u32,
+    pub submapper: Option<u32>,
 }
 
 impl Cartridge {
@@ -101,7 +102,17 @@ impl Cartridge {
             }
         };
 
-        let mapper_number = (header[6] >> 4) | (header[7] & 0xF0);
+        let mapper = ((header[6] >> 4) | (header[7] & 0xF0)) as u32;
+
+        let (mapper, submapper) = if nes_2 {
+            let mapper_hi = (header[8] & 0xf) as u32;
+            let mapper = (mapper_hi << 8) | mapper;
+            let submapper = (header[8] >> 4) as u32;
+
+            (mapper, Some(submapper))
+        } else {
+            (mapper, None)
+        };
 
         if header[6] & 0x04 != 0 {
             // skip trainer
@@ -133,10 +144,16 @@ impl Cartridge {
             prg_rom,
             chr_rom,
             mirroring,
-            mapper_number,
+            mapper,
+            submapper,
         };
 
         let format = if nes_2 { "NES 2.0" } else { "iNES" };
+        let mapper = if nes_2 {
+            format!("{}:{}", mapper, submapper.unwrap_or(0))
+        } else {
+            format!("{}", mapper)
+        };
 
         tracing::debug!(
             "{} PRGROM: {}, CHRROM: {}, PRGRAM: {}, CHRRAM:{}, Mapper: {}",
@@ -145,7 +162,7 @@ impl Cartridge {
             chr_rom_bytes,
             prg_ram_bytes,
             chr_ram_bytes,
-            mapper_number
+            mapper
         );
         Ok(cartridge)
     }
@@ -161,18 +178,18 @@ impl Cartridge {
     }
 
     fn get_rom_type(rom: &[u8]) -> Option<RomType> {
-        let ines_header = [0x4E, 0x45, 0x53, 0x1A];
-        if rom.starts_with(&ines_header) {
+        let ines_header = b"NES\x1a";
+        if rom.starts_with(ines_header) {
             return Some(RomType::Ines);
         }
 
-        let fds_header = [0x46, 0x44, 0x53, 0x1A];
-        if rom.starts_with(&fds_header) {
+        let fds_header = b"FDS\x1a";
+        if rom.starts_with(fds_header) {
             return Some(RomType::Fds);
         }
 
-        let unif_header = [0x55, 0x4E, 0x49, 0x46];
-        if rom.starts_with(&unif_header) {
+        let unif_header = b"UNIF";
+        if rom.starts_with(unif_header) {
             return Some(RomType::Unif);
         }
 
@@ -180,6 +197,6 @@ impl Cartridge {
     }
 
     pub fn build_mapper(self) -> mapper::RcMapper {
-        mapper::ines(self.mapper_number, self)
+        mapper::ines(self)
     }
 }

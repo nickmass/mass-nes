@@ -99,9 +99,9 @@ impl Dma {
     pub fn try_halt(&mut self, tick: TickResult) -> Option<TickResult> {
         match (self.halt_addr, self.want_dmc.or(self.want_oam)) {
             (None, Some(_)) => match tick {
-                TickResult::Read(addr) => {
+                tick @ (TickResult::Fetch(addr) | TickResult::Read(addr)) => {
                     self.halt_addr = Some(addr);
-                    self.halt_addr.map(TickResult::Read)
+                    Some(tick)
                 }
                 TickResult::Write(_, _) | TickResult::Idle(_) => None,
             },

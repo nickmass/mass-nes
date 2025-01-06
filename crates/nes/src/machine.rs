@@ -156,6 +156,11 @@ impl Machine {
             self.tick_ppu();
 
             match tick_result {
+                TickResult::Fetch(addr) => {
+                    let value = self.read(addr);
+                    self.debug.fetch(addr);
+                    self.cpu_pin_in.data = value;
+                }
                 TickResult::Read(addr) => {
                     let value = self.read(addr);
                     self.cpu_pin_in.data = value;

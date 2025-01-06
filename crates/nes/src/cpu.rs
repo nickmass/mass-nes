@@ -26,6 +26,7 @@ pub struct CpuPinIn {
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Copy, Clone)]
 pub enum TickResult {
+    Fetch(u16),
     Read(u16),
     Write(u16, u8),
     Idle(u16),
@@ -80,7 +81,6 @@ pub struct Cpu {
     pin_in: CpuPinIn,
     regs: CpuRegs,
     stage: Stage,
-    instruction_addr: Option<u16>,
     pub dma: Dma,
     interrupts: Interrupts,
 }
@@ -91,7 +91,6 @@ impl Cpu {
             current_tick: 0,
             pin_in: Default::default(),
             regs: CpuRegs::new(),
-            instruction_addr: None,
             stage: Stage::Fetch,
             dma: Dma::new(),
             interrupts: Interrupts::new(),
@@ -113,7 +112,7 @@ impl Cpu {
             reg_sp: self.regs.reg_sp,
             reg_p: self.regs.reg_p(),
             reg_pc: self.regs.reg_pc,
-            instruction_addr: self.instruction_addr,
+            instruction_addr: None,
             cycle: self.current_tick,
         }
     }
@@ -125,7 +124,6 @@ impl Cpu {
     pub fn tick(&mut self, pin_in: CpuPinIn) -> TickResult {
         self.pin_in = pin_in;
         self.current_tick += 1;
-        self.instruction_addr = None;
 
         let tick = if let Some(result) = self.dma.tick(pin_in) {
             result
@@ -152,9 +150,8 @@ impl Cpu {
         if let Some(tick) = self.interrupts.interrupt(&self.pin_in, &mut self.regs) {
             tick
         } else {
-            self.instruction_addr = Some(self.regs.reg_pc);
             self.stage = Stage::Decode;
-            self.regs.read_pc()
+            self.regs.fetch_pc()
         }
     }
 

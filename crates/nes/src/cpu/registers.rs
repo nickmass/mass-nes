@@ -63,6 +63,12 @@ impl CpuRegs {
         TickResult::Read(pc)
     }
 
+    pub fn fetch_pc(&mut self) -> TickResult {
+        let pc = self.reg_pc;
+        self.reg_pc = pc.wrapping_add(1);
+        TickResult::Fetch(pc)
+    }
+
     pub fn pop_stack(&mut self) -> TickResult {
         self.reg_sp = self.reg_sp.wrapping_add(1);
         let addr = self.reg_sp as u16 | 0x100;

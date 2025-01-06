@@ -227,6 +227,11 @@ mod debugger {
             }
         }
 
+        pub fn fetch(&self, addr: u16) {
+            let mut state = self.state.borrow_mut();
+            state.machine_state.cpu.instruction_addr = Some(addr);
+        }
+
         pub fn trace(&self, system: &Machine, cpu: CpuDebugState) {
             let mut state = self.state.borrow_mut();
             state.machine_state.cpu = cpu;
@@ -467,6 +472,8 @@ pub mod no_debugger {
         }
 
         pub fn write(&self, _addr: u16, _value: u8) {}
+
+        pub fn fetch(&self, addr: u16) {}
 
         pub fn trace(&self, _system: &Machine, _cpu_state: CpuDebugState) {}
 
