@@ -35,7 +35,7 @@ impl Sxrom {
             BankKind::Ram => MappedMemory::new(&cartridge, 0x0000, 8, 8, MemKind::Chr),
         };
 
-        let prg = MappedMemory::new(&cartridge, 0x6000, 16, 48, MemKind::Prg);
+        let prg = MappedMemory::new(&cartridge, 0x6000, 8, 40, MemKind::Prg);
 
         let mirroring = SimpleMirroring::new(cartridge.mirroring.into());
         let last = (cartridge.prg_rom.len() / 0x4000) - 1;
@@ -103,7 +103,7 @@ impl Sxrom {
     }
 
     fn sync(&mut self) {
-        self.prg.map(0x6000, 16, 0, BankKind::Ram);
+        self.prg.map(0x6000, 8, 0, BankKind::Ram);
 
         match self.regs[0] & 3 {
             0 => self.mirroring.internal_a(),
@@ -118,7 +118,7 @@ impl Sxrom {
                 self.prg.map(
                     0x8000,
                     32,
-                    (self.regs[3] & 0xf >> 1) as usize,
+                    ((self.regs[3] & 0xf) >> 1) as usize,
                     BankKind::Rom,
                 );
             }
