@@ -552,7 +552,7 @@ impl Ppu {
                     self.init_line_oam(step.dot / 2);
                 }
                 Some(SpriteStep::Eval) => {
-                    self.sprite_eval(step.scanline);
+                    self.sprite_eval(step.scanline, step.dot);
                 }
                 Some(SpriteStep::Read) => {
                     self.in_sprite_render = false;
@@ -560,7 +560,7 @@ impl Ppu {
                 }
                 Some(SpriteStep::Hblank) => {
                     self.sprite_n = 0;
-                    self.sprite_eval(step.scanline);
+                    self.sprite_eval(step.scanline, step.dot);
                     self.sprite_any_on_line = false;
                 }
                 Some(SpriteStep::Fetch(0)) => self.sprite_oam_read(0),
@@ -792,7 +792,7 @@ impl Ppu {
         }
     }
 
-    fn sprite_eval(&mut self, scanline: u32) {
+    fn sprite_eval(&mut self, scanline: u32, dot: u32) {
         if self.sprite_read_loop {
             return;
         }
@@ -829,6 +829,10 @@ impl Ppu {
             }
         } else {
             //Less then 8 sprites found
+            if dot == 66 {
+                self.sprite_zero_on_next_line = false;
+            }
+
             if self.sprite_reads != 0 {
                 self.sprite_m += 1;
                 self.sprite_m &= 3;
@@ -838,7 +842,7 @@ impl Ppu {
                     self.found_sprites += 1;
                 }
             } else if self.sprite_on_line(self.next_sprite_byte, scanline) {
-                if self.sprite_n == 0 {
+                if dot == 66 {
                     self.sprite_zero_on_next_line = true;
                 }
                 self.sprite_m += 1;

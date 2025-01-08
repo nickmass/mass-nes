@@ -23,6 +23,7 @@ impl From<GamepadEvent> for UserEvent {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum EmulatorInput {
     Nes(UserInput),
     SaveState(u8),

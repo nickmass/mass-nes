@@ -444,7 +444,7 @@ mod debugger {
             state.machine_state.clone()
         }
 
-        pub fn breakpoint<H: BreakpointHandler>(&self, handler: &H) -> bool {
+        pub fn breakpoint<H: BreakpointHandler>(&self, handler: &mut H) -> bool {
             let state = self.state.borrow();
             handler.breakpoint(&state.machine_state)
         }

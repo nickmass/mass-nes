@@ -13,6 +13,7 @@ pub struct Axrom {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: Cartridge,
     prg: MappedMemory,
+    prg_count: usize,
     chr_ram: MemoryBlock,
     mirroring: SimpleMirroring,
 }
@@ -20,11 +21,13 @@ pub struct Axrom {
 impl Axrom {
     pub fn new(cartridge: Cartridge) -> Axrom {
         let mut prg = MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg);
+        let prg_count = cartridge.prg_rom.len() / 32 * 1024;
 
         prg.map(0x8000, 32, 0, BankKind::Rom);
 
         Axrom {
             prg,
+            prg_count,
             chr_ram: MemoryBlock::new(8),
             mirroring: SimpleMirroring::new(cartridge.mirroring.into()),
             cartridge,
@@ -40,8 +43,8 @@ impl Axrom {
     }
 
     fn write_cpu(&mut self, _addr: u16, value: u8) {
-        self.prg
-            .map(0x8000, 32, (value & 7) as usize, BankKind::Rom);
+        let bank = value as usize % self.prg_count;
+        self.prg.map(0x8000, 32, bank, BankKind::Rom);
         if value & 0x10 == 0 {
             self.mirroring.internal_a()
         } else {

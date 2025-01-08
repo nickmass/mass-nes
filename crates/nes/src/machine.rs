@@ -16,17 +16,17 @@ use crate::debug::MachineState;
 pub use crate::input::{Controller, InputDevice};
 
 pub trait BreakpointHandler {
-    fn breakpoint(&self, state: &MachineState) -> bool;
+    fn breakpoint(&mut self, state: &MachineState) -> bool;
 }
 
 impl BreakpointHandler for () {
-    fn breakpoint(&self, _state: &MachineState) -> bool {
+    fn breakpoint(&mut self, _state: &MachineState) -> bool {
         false
     }
 }
 
-impl<T: Fn(&MachineState) -> bool> BreakpointHandler for T {
-    fn breakpoint(&self, state: &MachineState) -> bool {
+impl<T: FnMut(&MachineState) -> bool> BreakpointHandler for T {
+    fn breakpoint(&mut self, state: &MachineState) -> bool {
         self(state)
     }
 }
@@ -137,7 +137,7 @@ impl Machine {
     }
 
     #[tracing::instrument(skip_all)]
-    fn do_run<H: BreakpointHandler>(&mut self, break_handler: H) -> RunResult {
+    fn do_run<H: BreakpointHandler>(&mut self, mut break_handler: H) -> RunResult {
         let last_frame = self.ppu.frame();
         while self.ppu.frame() == last_frame {
             let tick_result = self.cpu.tick(self.cpu_pin_in);
@@ -200,7 +200,7 @@ impl Machine {
             self.cpu_pin_in.reset = false;
             self.cycle += 1;
 
-            if self.debug.breakpoint(&break_handler) {
+            if self.debug.breakpoint(&mut break_handler) {
                 return RunResult::Breakpoint;
             }
         }
