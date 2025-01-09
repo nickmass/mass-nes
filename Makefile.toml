@@ -1,0 +1,44 @@
+[tasks.clean]
+script = '''
+cargo clean
+rm -rf dist
+'''
+
+[tasks.web]
+script = '''
+cd crates/web
+mkdir -p target/web
+cp static/* target/web
+wasm-pack build --release --weak-refs --reference-types --target web --no-typescript --no-pack -d target/web/pkg
+rm target/web/pkg/.gitignore
+tar -C target -zcf target/web.tar.gz web
+echo "Package created: crates/web/target/web.tar.gz"
+'''
+
+[tasks.desktop]
+script = '''
+cargo build --release -p desktop
+strip target/release/desktop
+'''
+
+[tasks.debugger]
+script = '''
+cargo build --release -p debugger
+strip target/release/debugger
+'''
+
+[tasks.release]
+script = '''
+mkdir dist
+cp crates/web/target/web.tar.gz dist/web.tar.gz
+cp target/release/desktop dist/desktop-${TARGET}
+cp target/release/debugger dist/debugger-${TARGET}
+'''
+dependencies = ["clean", "web", "desktop", "debugger"]
+
+[env]
+TARGET = "linux-x86_64"
+
+[config]
+default_to_workspace = false
+skip_core_tasks = true

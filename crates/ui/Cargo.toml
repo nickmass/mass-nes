@@ -1,8 +1,9 @@
 [package]
 name = "ui"
-version = "0.1.0"
-edition = "2021"
-authors = ["Nick Massey <nickmass@nickmass.com>"]
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
 
 [dependencies]
 nes = { path = "../nes", default-features = false }

@@ -1,8 +1,9 @@
 [package]
 name = "nes_ntsc-sys"
-version = "0.1.0"
-edition = "2021"
-authors = ["Nick Massey <nickmass@nickmass.com>"]
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
 build = "build.rs"
 
 [lib]

@@ -2,5 +2,11 @@
 resolver = "2"
 members = ["crates/*"]
 
+[workspace.package]
+version = "0.1.0"
+authors = ["Nick Massey <nickmass@nickmass.com>"]
+license = "MIT"
+edition = "2021"
+
 [profile.dev]
 opt-level = 1

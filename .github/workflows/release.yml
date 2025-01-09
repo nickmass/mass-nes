@@ -1,0 +1,53 @@
+name: Release
+run-name: Building and Publishing a Release
+on:
+  push:
+    tags:
+      - v*
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install System Deps
+        run: |
+          sudo apt-get install -y libasound2-dev libudev-dev
+      - name: Install Rust Toolchain
+        run: |
+          rustup target add wasm32-unknown-unknown
+          rustup toolchain install nightly
+      - name: Install Tools
+        run: |
+          cargo install cargo-make
+          cargo install wasm-bindgen-cli
+          cargo install wasm-pack
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Test
+        run: |
+          cargo test --release -p nes || true
+      - name: Build
+        run: |
+          cargo make release
+      - name: Release
+        run: |
+          gh release create $GITHUB_REF_NAME --draft --verify-tag
+          gh release upload $GITHUB_REF_NAME dist/* --clobber
+          gh release edit $GITHUB_REF_NAME --draft=false --latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+
+  deploy-web:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy
+        uses: distributhor/workflow-webhook@v3
+        with:
+          webhook_url: https://nickmass.com/hooks/deploy
+          webhook_secret: ${{ secrets.WEBHOOK_DEPLOY_SECRET }}
+          webhook_auth: ${{ secrets.WEBHOOK_DEPLOY_CLIENT_ID }}
