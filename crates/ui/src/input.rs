@@ -1,4 +1,4 @@
-use gilrs::Button;
+use gilrs::{Axis, Button};
 use winit::keyboard::KeyCode;
 
 use nes::Controller;
@@ -34,12 +34,43 @@ impl InputMap {
             .or_insert(false);
     }
 
+    pub fn axis(&mut self, axis: Axis, value: f32) {
+        let is_pressed = value.abs() >= 0.75;
+        match axis {
+            Axis::LeftStickX if is_pressed => {
+                if value > 0.0 {
+                    self.release(Button::DPadLeft);
+                    self.press(Button::DPadRight);
+                } else {
+                    self.release(Button::DPadRight);
+                    self.press(Button::DPadLeft);
+                }
+            }
+            Axis::LeftStickY if is_pressed => {
+                if value > 0.0 {
+                    self.release(Button::DPadDown);
+                    self.press(Button::DPadUp);
+                } else {
+                    self.release(Button::DPadUp);
+                    self.press(Button::DPadDown);
+                }
+            }
+            Axis::LeftStickX => {
+                self.release(Button::DPadLeft);
+                self.release(Button::DPadRight);
+            }
+            Axis::LeftStickY => {
+                self.release(Button::DPadUp);
+                self.release(Button::DPadDown);
+            }
+            _ => (),
+        };
+    }
+
     pub fn controller(&self) -> Controller {
         Controller {
-            a: self.is_pressed(KeyCode::KeyZ)
-                || self.is_pressed(Button::East)
-                || self.is_pressed(Button::West),
-            b: self.is_pressed(KeyCode::KeyX) || self.is_pressed(Button::South),
+            a: self.is_pressed(KeyCode::KeyZ) || self.is_pressed(Button::South),
+            b: self.is_pressed(KeyCode::KeyX) || self.is_pressed(Button::West),
             select: self.is_pressed(KeyCode::ShiftRight)
                 || self.is_pressed(Button::Select) | self.is_pressed(KeyCode::Backslash),
             start: self.is_pressed(KeyCode::Enter) || self.is_pressed(Button::Start),

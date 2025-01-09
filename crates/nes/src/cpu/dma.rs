@@ -130,7 +130,10 @@ impl Dma {
         match (dma, self.alignment()) {
             (DmcDmaKind::Load(addr), Alignment::Get) => self.dmc_timer = Some((3, addr)),
             (DmcDmaKind::Load(addr), Alignment::Put) => self.dmc_timer = Some((2, addr)),
-            (DmcDmaKind::Reload(addr), _) => self.want_dmc = Some(addr),
+            // the reload should have no delay, but this 1-cycle delay solves some of the lockups
+            // that were happening related to alignment in testroms.... there is some root cause
+            // that needs to be discovered
+            (DmcDmaKind::Reload(addr), _) => self.dmc_timer = Some((1, addr)),
         }
     }
 

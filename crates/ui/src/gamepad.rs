@@ -1,15 +1,18 @@
+use std::sync::mpsc::{SendError, Sender, SyncSender};
+
+pub use gilrs;
 use gilrs::{EventType, Gilrs};
 use winit::event::ElementState;
-use winit::event_loop::EventLoopProxy;
+use winit::event_loop::{EventLoopClosed, EventLoopProxy};
 
-pub struct GilrsInput<E: 'static> {
+pub struct GilrsInput<P: GamepadChannel> {
     gilrs: Gilrs,
-    proxy: EventLoopProxy<E>,
+    proxy: P,
     shutdown: bool,
 }
 
-impl<E: From<GamepadEvent> + Send + 'static> GilrsInput<E> {
-    pub fn new(proxy: EventLoopProxy<E>) -> Result<Self, gilrs::Error> {
+impl<P: GamepadChannel> GilrsInput<P> {
+    pub fn new(proxy: P) -> Result<Self, gilrs::Error> {
         let gilrs = Gilrs::new()?;
         Ok(Self {
             proxy,
@@ -45,6 +48,43 @@ impl<E: From<GamepadEvent> + Send + 'static> GilrsInput<E> {
                 self.shutdown = true;
             }
         }
+    }
+}
+
+pub trait GamepadChannel {
+    type Event: From<GamepadEvent> + Send + 'static;
+    type Err;
+
+    fn send_event(&self, event: Self::Event) -> Result<(), Self::Err>;
+}
+
+impl<E: From<GamepadEvent> + Send + 'static> GamepadChannel for EventLoopProxy<E> {
+    type Event = E;
+
+    type Err = EventLoopClosed<E>;
+
+    fn send_event(&self, event: Self::Event) -> Result<(), Self::Err> {
+        self.send_event(event)
+    }
+}
+
+impl<E: From<GamepadEvent> + Send + 'static> GamepadChannel for SyncSender<E> {
+    type Event = E;
+
+    type Err = SendError<E>;
+
+    fn send_event(&self, event: Self::Event) -> Result<(), Self::Err> {
+        self.send(event)
+    }
+}
+
+impl<E: From<GamepadEvent> + Send + 'static> GamepadChannel for Sender<E> {
+    type Event = E;
+
+    type Err = SendError<E>;
+
+    fn send_event(&self, event: Self::Event) -> Result<(), Self::Err> {
+        self.send(event)
     }
 }
 

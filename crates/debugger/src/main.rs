@@ -13,6 +13,7 @@ use tracing::instrument;
 use ui::{
     audio::{Audio, CpalAudio, SamplesProducer},
     filters::{NesNtscSetup, PalettedFilter},
+    gamepad::{GamepadChannel, GamepadEvent, GilrsInput},
     input::{InputMap, InputType},
 };
 
@@ -51,7 +52,8 @@ impl Into<nes::Region> for Region {
 }
 
 fn main() {
-    init_tracing();
+    let message_store = MessageStore::new(10_000);
+    init_tracing(message_store.clone());
 
     let options = eframe::NativeOptions {
         vsync: false,
@@ -61,12 +63,12 @@ fn main() {
     eframe::run_native(
         "Mass Emu",
         options,
-        Box::new(|cc| Ok(Box::new(DebuggerApp::new(cc)?))),
+        Box::new(|cc| Ok(Box::new(DebuggerApp::new(cc, message_store)?))),
     )
     .unwrap();
 }
 
-fn init_tracing() {
+fn init_tracing(message_store: MessageStore) {
     use tracing::Level;
     use tracing_subscriber::{filter, layer::SubscriberExt, Layer};
 
@@ -77,9 +79,20 @@ fn init_tracing() {
             ("ui", Level::TRACE),
         ]));
     let log = tracing_subscriber::fmt::layer().with_filter(filter::LevelFilter::DEBUG);
+    let messages =
+        EguiMessageLayer::new(message_store).with_filter(filter::Targets::new().with_targets([
+            ("debugger", Level::TRACE),
+            ("nes", Level::TRACE),
+            ("ui", Level::TRACE),
+        ]));
 
-    tracing::subscriber::set_global_default(tracing_subscriber::registry().with(tracy).with(log))
-        .expect("init tracing");
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::registry()
+            .with(tracy)
+            .with(log)
+            .with(messages),
+    )
+    .expect("init tracing");
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,6 +108,7 @@ struct UiState {
     show_chr_tiles: bool,
     show_sprites: bool,
     show_all_sprites: bool,
+    show_messages: bool,
     show_code: bool,
     auto_open_most_recent: bool,
     recent_files: Vec<PathBuf>,
@@ -115,6 +129,7 @@ impl Default for UiState {
             show_chr_tiles: false,
             show_sprites: false,
             show_all_sprites: false,
+            show_messages: false,
             show_code: false,
             auto_open_most_recent: true,
             recent_files: Vec::new(),
@@ -138,6 +153,7 @@ struct DebuggerApp {
     chr_tiles: ChrTiles,
     nt_viewer: NametableViewer,
     sprite_viewer: SpriteViewer,
+    messages: Messages,
     code_viewer: CodeViewer,
     breakpoints: Breakpoints,
     first_update: bool,
@@ -146,6 +162,7 @@ struct DebuggerApp {
 impl DebuggerApp {
     fn new(
         cc: &CreationContext,
+        message_store: MessageStore,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
         let ntsc_setup = NesNtscSetup::composite();
         let filter = PalettedFilter::new(ntsc_setup.generate_palette());
@@ -157,14 +174,17 @@ impl DebuggerApp {
         let nes_screen = NesScreen::new(gfx);
         let palette = Palette::new(palette);
 
+        let app_events = AppEvents::new();
         let input = SharedInput::new();
         let last_input = input.state();
         let (emu_control, emu_commands) = EmulatorControl::new();
+        let gamepad_channel = GilrsInput::new(app_events.create_proxy()).ok();
         let debug_swap = DebugSwapState::new();
         let debug = DebugUiState::new(debug_swap.clone(), palette);
         let chr_tiles = ChrTiles::new();
         let nt_viewer = NametableViewer::new();
         let sprite_viewer = SpriteViewer::new();
+        let messages = Messages::new(message_store);
 
         let (mut audio, sync, samples) =
             CpalAudio::new(CpalSync::new(), nes::Region::Ntsc.refresh_rate(), 64).unwrap();
@@ -180,6 +200,8 @@ impl DebuggerApp {
         );
         audio.pause();
 
+        spawn_gamepad_thread(gamepad_channel);
+
         let state = if let Some(storage) = cc.storage {
             storage
                 .get_string("debugger_ui_state")
@@ -189,7 +211,6 @@ impl DebuggerApp {
         };
 
         let state: UiState = state.unwrap_or_default();
-        let app_events = AppEvents::new();
 
         let mut app = DebuggerApp {
             first_update: true,
@@ -205,6 +226,7 @@ impl DebuggerApp {
             chr_tiles,
             nt_viewer,
             sprite_viewer,
+            messages,
             code_viewer: CodeViewer::new(),
             breakpoints: Breakpoints::new(),
             recents: Recents::new(&[], 10),
@@ -295,6 +317,21 @@ impl DebuggerApp {
                 self.pause = true;
                 self.handle_pause();
             }
+            AppEvent::Gamepad(gamepad) => match gamepad {
+                GamepadEvent::Button { state, button, .. } => {
+                    let mut input = self.input.input_map.lock().unwrap();
+                    if state.is_pressed() {
+                        input.press(button);
+                    } else {
+                        input.release(button);
+                    }
+                }
+                GamepadEvent::Axis { axis, value, .. } => {
+                    let mut input = self.input.input_map.lock().unwrap();
+                    input.axis(axis, value);
+                }
+                _ => (),
+            },
         }
     }
 
@@ -396,6 +433,7 @@ impl eframe::App for DebuggerApp {
                     {
                         self.update_debug_req();
                     }
+                    ui.checkbox(&mut self.state.show_messages, "Messages");
                 });
                 ui.separator();
 
@@ -469,6 +507,10 @@ impl eframe::App for DebuggerApp {
             );
         }
 
+        if self.state.show_messages {
+            self.messages.show(ctx);
+        }
+
         if self.first_update {
             self.first_update = false;
             self.app_events.send(AppEvent::FocusScreen);
@@ -530,11 +572,26 @@ fn spawn_sync_thread(input: SharedInput, emu_control: EmulatorControl, mut sync:
     });
 }
 
+fn spawn_gamepad_thread(gamepad_channel: Option<GilrsInput<AppEventsProxy>>) {
+    if let Some(mut gamepad) = gamepad_channel {
+        std::thread::spawn(move || loop {
+            gamepad.poll();
+        });
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum AppEvent {
     RomLoaded(std::path::PathBuf),
     FocusScreen,
     Breakpoint,
+    Gamepad(GamepadEvent),
+}
+
+impl From<GamepadEvent> for AppEvent {
+    fn from(value: GamepadEvent) -> Self {
+        Self::Gamepad(value)
+    }
 }
 
 pub struct AppEvents {
@@ -571,6 +628,16 @@ pub struct AppEventsProxy {
 impl AppEventsProxy {
     pub fn send(&self, event: AppEvent) {
         let _ = self.tx.send(event);
+    }
+}
+
+impl GamepadChannel for AppEventsProxy {
+    type Event = AppEvent;
+
+    type Err = ();
+
+    fn send_event(&self, event: Self::Event) -> Result<(), Self::Err> {
+        Ok(self.send(event))
     }
 }
 

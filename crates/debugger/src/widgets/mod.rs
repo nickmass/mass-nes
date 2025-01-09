@@ -1,6 +1,7 @@
 mod chr_tiles;
 mod code_viewer;
 mod memory;
+mod messages;
 mod nametables;
 mod palette_viewer;
 mod recents;
@@ -11,6 +12,7 @@ mod volume;
 pub use chr_tiles::ChrTiles;
 pub use code_viewer::{Breakpoints, CodeViewer};
 pub use memory::MemoryViewer;
+pub use messages::{EguiMessageLayer, MessageStore, Messages};
 pub use nametables::NametableViewer;
 pub use palette_viewer::PaletteViewer;
 pub use recents::Recents;

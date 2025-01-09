@@ -56,7 +56,6 @@ fn even_odd_frames() {
 }
 
 #[test]
-#[should_panic]
 fn even_odd_timing() {
     run("10-even_odd_timing.nes");
 }

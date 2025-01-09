@@ -41,7 +41,7 @@ pub struct App<F, A, S> {
     audio: A,
     sync: Option<S>,
     gfx: Gfx<F>,
-    gamepad: Option<GilrsInput<UserEvent>>,
+    gamepad: Option<GilrsInput<winit::event_loop::EventLoopProxy<UserEvent>>>,
     window: winit::window::Window,
     event_loop: Option<winit::event_loop::EventLoop<UserEvent>>,
     input: InputMap,
@@ -235,16 +235,15 @@ impl<F: Filter, A: Audio, S: FrameSync> winit::application::ApplicationHandler<U
                 }
             }
             UserEvent::Gamepad(ev) => match ev {
-                GamepadEvent::Button {
-                    gamepad_id: _,
-                    state,
-                    button,
-                } => {
+                GamepadEvent::Button { state, button, .. } => {
                     if state.is_pressed() {
                         self.input.press(button);
                     } else {
                         self.input.release(button);
                     }
+                }
+                GamepadEvent::Axis { axis, value, .. } => {
+                    self.input.axis(axis, value);
                 }
                 _ => (),
             },

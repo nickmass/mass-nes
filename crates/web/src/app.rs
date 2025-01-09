@@ -42,7 +42,7 @@ impl From<GamepadEvent> for UserEvent {
 
 pub struct App<A> {
     audio: A,
-    gamepad: Option<GilrsInput<UserEvent>>,
+    gamepad: Option<GilrsInput<EventLoopProxy<UserEvent>>>,
     canvas: HtmlCanvasElement,
     window: Option<Window>,
     event_loop: Option<EventLoop<UserEvent>>,
@@ -198,16 +198,15 @@ impl<A: Audio> ApplicationHandler<UserEvent> for App<A> {
                 }
             }
             UserEvent::Gamepad(ev) => match ev {
-                GamepadEvent::Button {
-                    gamepad_id: _,
-                    state,
-                    button,
-                } => {
+                GamepadEvent::Button { state, button, .. } => {
                     if state.is_pressed() {
                         self.input.press(button);
                     } else {
                         self.input.release(button);
                     }
+                }
+                GamepadEvent::Axis { axis, value, .. } => {
+                    self.input.axis(axis, value);
                 }
                 _ => (),
             },
