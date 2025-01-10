@@ -62,6 +62,7 @@ impl<F: Filter, A: Audio, S: FrameSync> App<F, A, S> {
             .with_config_template_builder(
                 ConfigTemplateBuilder::new().with_swap_interval(None, None),
             )
+            .with_vsync(false)
             .with_inner_size(dims.0, dims.1)
             .with_title("Mass NES")
             .build(&event_loop);
