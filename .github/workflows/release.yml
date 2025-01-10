@@ -6,7 +6,9 @@ on:
       - v*
 
 permissions:
+  attestations: write
   contents: write
+  id-token: write
 
 jobs:
   release:
@@ -32,6 +34,10 @@ jobs:
       - name: Build
         run: |
           cargo make release
+      - name: Attest
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/*"
       - name: Release
         run: |
           gh release create $GITHUB_REF_NAME --draft --verify-tag
