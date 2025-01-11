@@ -359,7 +359,7 @@ impl Texture {
             );
             ctx.tex_parameter_i32(
                 glow::TEXTURE_2D,
-                glow::TEXTURE_WRAP_S,
+                glow::TEXTURE_WRAP_T,
                 glow::CLAMP_TO_EDGE as i32,
             );
             ctx.tex_parameter_i32(
