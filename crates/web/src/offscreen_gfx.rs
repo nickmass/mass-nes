@@ -19,7 +19,7 @@ pub async fn gfx_worker(ptr: u32, transferables: Array) {
 }
 
 impl WorkerSpawn for OffscreenGfxSpawner {
-    const KIND: &'static str = "gfx";
+    const ENTRY_POINT: &'static str = stringify!(gfx_worker);
 
     async fn run(self, transferables: Array) {
         let canvas = worker::unpack_transferable(&transferables).unwrap_throw();

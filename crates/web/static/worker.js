@@ -1,4 +1,4 @@
-import init, { gfx_worker, machine_worker, sync_worker } from "./pkg/web.js";
+import init, * as wasm from "./pkg/web.js";
 
 let finished = false;
 onmessage = async function (event) {
@@ -8,23 +8,15 @@ onmessage = async function (event) {
   }
   finished = true;
 
-  let { module, memory, ptr, transferables, worker_type } = event.data;
+  let { module, memory, ptr, transferables, entry_point } = event.data;
 
   await init({ module, memory });
   try {
-    switch (worker_type) {
-      case "gfx":
-        await gfx_worker(ptr, transferables);
-        break;
-      case "machine":
-        await machine_worker(ptr, transferables);
-        break;
-      case "sync":
-        await sync_worker(ptr, transferables);
-        break;
-      default:
-        throw new Error("invalid worker type");
-        break;
+    let entry = wasm[entry_point];
+    if (typeof entry === "function") {
+      entry(ptr, transferables);
+    } else {
+      throw new Error("invalid worker entry point");
     }
   } catch (err) {
     console.error(err);

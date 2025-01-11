@@ -44,7 +44,7 @@ pub async fn machine_worker(ptr: u32, transferables: Array) {
 }
 
 impl WorkerSpawn for MachineSpawner {
-    const KIND: &'static str = "machine";
+    const ENTRY_POINT: &'static str = stringify!(machine_worker);
 
     async fn run(self, _transferables: Array) {
         let runner = MachineRunner::new(self);

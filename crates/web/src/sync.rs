@@ -60,7 +60,7 @@ pub async fn sync_worker(ptr: u32, transferables: Array) {
 }
 
 impl<T: FrameSync + Send + 'static> WorkerSpawn for SyncSpawner<T> {
-    const KIND: &'static str = "sync";
+    const ENTRY_POINT: &'static str = stringify!(sync_worker);
 
     async fn run(mut self, _transferables: Array) {
         loop {

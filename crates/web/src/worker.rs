@@ -6,7 +6,7 @@ use web_sys::{
 };
 
 pub trait WorkerSpawn: Send + Sized + 'static {
-    const KIND: &'static str;
+    const ENTRY_POINT: &'static str;
 
     async fn run(self, transferables: Array);
 }
@@ -135,8 +135,8 @@ impl<T: WorkerSpawn> Into<JsValue> for WorkerInit<T> {
         let obj = Object::new();
         let _ = js_sys::Reflect::set(
             obj.as_ref(),
-            &JsValue::from_str("worker_type"),
-            &JsValue::from_str(T::KIND),
+            &JsValue::from_str("entry_point"),
+            &JsValue::from_str(T::ENTRY_POINT),
         );
         let _ = js_sys::Reflect::set(obj.as_ref(), &JsValue::from_str("memory"), &self.memory);
         let _ = js_sys::Reflect::set(obj.as_ref(), &JsValue::from_str("module"), &self.module);
