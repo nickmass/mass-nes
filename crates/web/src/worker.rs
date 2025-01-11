@@ -52,6 +52,7 @@ async fn try_spawn_worker<T: WorkerSpawn>(
 ) -> Result<(), SpawnError> {
     let opts = WorkerOptions::new();
     opts.set_type(web_sys::WorkerType::Module);
+    opts.set_name(T::ENTRY_POINT);
     let worker = Worker::new_with_options("worker.js", &opts)?;
 
     let (init_tx, init_rx) = futures::channel::oneshot::channel();
