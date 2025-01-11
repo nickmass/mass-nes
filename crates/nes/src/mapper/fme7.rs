@@ -217,8 +217,8 @@ impl Fme7 {
             0xc => match self.parameter & 0x3 {
                 0 => self.mirroring.vertical(),
                 1 => self.mirroring.horizontal(),
-                2 => self.mirroring.internal_a(),
-                3 => self.mirroring.internal_b(),
+                2 => self.mirroring.internal_b(),
+                3 => self.mirroring.internal_a(),
                 _ => unreachable!(),
             },
             0xd => {

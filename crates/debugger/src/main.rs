@@ -260,11 +260,21 @@ impl DebuggerApp {
     fn select_rom(&self) {
         let control = self.emu_control.clone();
         let region = self.state.region;
+        let last_dir = self
+            .state
+            .recent_files
+            .first()
+            .and_then(|r| r.parent())
+            .map(|p| p.to_owned());
         let proxy = self.app_events.create_proxy();
         std::thread::spawn(move || {
-            let rom_file = rfd::FileDialog::new()
-                .add_filter("NES Roms", &["nes"])
-                .pick_file();
+            let picker = rfd::FileDialog::new().add_filter("NES Roms", &["nes"]);
+
+            let rom_file = if let Some(last_dir) = last_dir {
+                picker.set_directory(last_dir).pick_file()
+            } else {
+                picker.pick_file()
+            };
 
             if let Some((path, bytes)) = rom_file.and_then(|p| {
                 let bytes = std::fs::read(&p).ok();

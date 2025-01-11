@@ -21,6 +21,7 @@ pub struct Sxrom {
     last: usize,
     mirroring: SimpleMirroring,
     chr_type: BankKind,
+    wide_prg: bool,
 }
 
 impl Sxrom {
@@ -39,6 +40,7 @@ impl Sxrom {
 
         let mirroring = SimpleMirroring::new(cartridge.mirroring.into());
         let last = (cartridge.prg_rom.len() / 0x4000) - 1;
+        let wide_prg = cartridge.prg_rom.len() == 512 * 1024;
 
         let mut rom = Sxrom {
             cartridge,
@@ -51,6 +53,7 @@ impl Sxrom {
             last,
             mirroring,
             chr_type,
+            wide_prg,
         };
 
         rom.sync();
@@ -113,44 +116,48 @@ impl Sxrom {
             _ => unreachable!(),
         }
 
+        let prg_high = if self.wide_prg {
+            (self.regs[1] & 0x10) as usize
+        } else {
+            0
+        };
+        let prg_bank = (self.regs[3] & 0xf) as usize;
+
         match self.regs[0] & 0xc {
             0 | 0x4 => {
-                self.prg.map(
-                    0x8000,
-                    32,
-                    ((self.regs[3] & 0xf) >> 1) as usize,
-                    BankKind::Rom,
-                );
+                self.prg
+                    .map(0x8000, 32, (prg_bank | prg_high) >> 1, BankKind::Rom);
             }
             0x8 => {
-                self.prg.map(0x8000, 16, 0, BankKind::Rom);
-                self.prg
-                    .map(0xc000, 16, (self.regs[3] & 0xf) as usize, BankKind::Rom);
+                self.prg.map(0x8000, 16, 0 | prg_high, BankKind::Rom);
+                self.prg.map(0xc000, 16, prg_bank | prg_high, BankKind::Rom);
             }
             0xc => {
+                self.prg.map(0x8000, 16, prg_bank | prg_high, BankKind::Rom);
                 self.prg
-                    .map(0x8000, 16, (self.regs[3] & 0xf) as usize, BankKind::Rom);
-                self.prg.map(0xc000, 16, self.last, BankKind::Rom);
+                    .map(0xc000, 16, (self.last & 0xf) | prg_high, BankKind::Rom);
             }
             _ => unreachable!(),
         }
 
         self.prg_ram_write_protect = self.regs[3] & 0x10 != 0;
 
+        let chr_mask = if self.wide_prg { 0x1 } else { 0x1f };
+
         match self.regs[0] & 0x10 {
             0x0 => {
                 self.chr.map(
                     0x0000,
                     8,
-                    ((self.regs[1] & 0x1f) >> 1) as usize,
+                    ((self.regs[1] & chr_mask) >> 1) as usize,
                     self.chr_type,
                 );
             }
             0x10 => {
                 self.chr
-                    .map(0x0000, 4, (self.regs[1] & 0x1f) as usize, self.chr_type);
+                    .map(0x0000, 4, (self.regs[1] & chr_mask) as usize, self.chr_type);
                 self.chr
-                    .map(0x1000, 4, (self.regs[2] & 0x1f) as usize, self.chr_type);
+                    .map(0x1000, 4, (self.regs[2] & chr_mask) as usize, self.chr_type);
             }
             _ => unreachable!(),
         }

@@ -18,6 +18,7 @@ pub struct Txrom {
     prg: MappedMemory,
     chr: MappedMemory,
     chr_type: BankKind,
+    chr_count: usize,
     bank_data: [u8; 8],
     bank_select: u8,
     ram_protect: bool,
@@ -27,6 +28,7 @@ pub struct Txrom {
     irq_latch: u8,
     irq_counter: u8,
     irq_reload_pending: bool,
+    irq_force_reload_pending: bool,
     last: usize,
     ext_nt: Option<[MemoryBlock; 2]>,
 }
@@ -45,6 +47,11 @@ impl Txrom {
                 mem.map(0x0000, 8, 0, BankKind::Ram);
                 mem
             }
+        };
+
+        let chr_count = match chr_type {
+            BankKind::Ram => 0,
+            BankKind::Rom => cartridge.chr_rom.len() / 1024,
         };
 
         let mut prg = MappedMemory::new(&cartridge, 0x6000, 16, 48, MemKind::Prg);
@@ -67,6 +74,7 @@ impl Txrom {
             prg,
             chr,
             chr_type,
+            chr_count,
             bank_data: [0; 8],
             bank_select: 0,
             ram_protect: false,
@@ -76,6 +84,7 @@ impl Txrom {
             irq_latch: 0,
             irq_counter: 0,
             irq_reload_pending: false,
+            irq_force_reload_pending: false,
             ext_nt,
             last,
         };
@@ -146,7 +155,7 @@ impl Txrom {
                 self.irq_latch = value;
             }
             0xc001 => {
-                self.irq_reload_pending = true;
+                self.irq_force_reload_pending = true;
             }
             0xe000 => {
                 self.irq = false;
@@ -187,12 +196,13 @@ impl Txrom {
         }
         let mut is_zero = false;
         if clock {
-            if self.irq_reload_pending {
+            if self.irq_reload_pending || self.irq_force_reload_pending {
                 self.irq_counter = self.irq_latch;
-                self.irq_reload_pending = false;
                 if self.irq_counter == 0 {
                     is_zero = true;
                 }
+                self.irq_reload_pending = false;
+                self.irq_force_reload_pending = false;
             } else {
                 self.irq_counter = self.irq_counter.saturating_sub(1);
                 if self.irq_counter == 0 {
@@ -208,64 +218,21 @@ impl Txrom {
 
     fn sync(&mut self) {
         if self.chr_type == BankKind::Rom {
+            let chr = |n| self.bank_data[n] as usize % self.chr_count;
             if self.bank_select & 0x80 == 0 {
-                self.chr.map(
-                    0x0000,
-                    1,
-                    (self.bank_data[0] & 0xfe) as usize,
-                    BankKind::Rom,
-                );
-                self.chr
-                    .map(0x0400, 1, (self.bank_data[0] | 0x1) as usize, BankKind::Rom);
-                self.chr.map(
-                    0x0800,
-                    1,
-                    (self.bank_data[1] & 0xfe) as usize,
-                    BankKind::Rom,
-                );
-                self.chr.map(
-                    0x0c00,
-                    1,
-                    (self.bank_data[1] | 0x01) as usize,
-                    BankKind::Rom,
-                );
-                self.chr
-                    .map(0x1000, 1, self.bank_data[2] as usize, BankKind::Rom);
-                self.chr
-                    .map(0x1400, 1, self.bank_data[3] as usize, BankKind::Rom);
-                self.chr
-                    .map(0x1800, 1, self.bank_data[4] as usize, BankKind::Rom);
-                self.chr
-                    .map(0x1c00, 1, self.bank_data[5] as usize, BankKind::Rom);
+                self.chr.map(0x0000, 2, chr(0) >> 1, BankKind::Rom);
+                self.chr.map(0x0800, 2, chr(1) >> 1, BankKind::Rom);
+                self.chr.map(0x1000, 1, chr(2), BankKind::Rom);
+                self.chr.map(0x1400, 1, chr(3), BankKind::Rom);
+                self.chr.map(0x1800, 1, chr(4), BankKind::Rom);
+                self.chr.map(0x1c00, 1, chr(5), BankKind::Rom);
             } else {
-                self.chr
-                    .map(0x0000, 1, self.bank_data[2] as usize, BankKind::Rom);
-                self.chr
-                    .map(0x0400, 1, self.bank_data[3] as usize, BankKind::Rom);
-                self.chr
-                    .map(0x0800, 1, self.bank_data[4] as usize, BankKind::Rom);
-                self.chr
-                    .map(0x0c00, 1, self.bank_data[5] as usize, BankKind::Rom);
-                self.chr.map(
-                    0x1000,
-                    1,
-                    (self.bank_data[0] & 0xfe) as usize,
-                    BankKind::Rom,
-                );
-                self.chr
-                    .map(0x1400, 1, (self.bank_data[0] | 0x1) as usize, BankKind::Rom);
-                self.chr.map(
-                    0x1800,
-                    1,
-                    (self.bank_data[1] & 0xfe) as usize,
-                    BankKind::Rom,
-                );
-                self.chr.map(
-                    0x1c00,
-                    1,
-                    (self.bank_data[1] | 0x01) as usize,
-                    BankKind::Rom,
-                );
+                self.chr.map(0x0000, 1, chr(2), BankKind::Rom);
+                self.chr.map(0x0400, 1, chr(3), BankKind::Rom);
+                self.chr.map(0x0800, 1, chr(4), BankKind::Rom);
+                self.chr.map(0x0c00, 1, chr(5), BankKind::Rom);
+                self.chr.map(0x1000, 2, chr(0) >> 1, BankKind::Rom);
+                self.chr.map(0x1800, 2, chr(1) >> 1, BankKind::Rom);
             }
         }
 
