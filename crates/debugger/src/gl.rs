@@ -103,6 +103,14 @@ impl<V: Vertex> VertexBuffer<V> {
     }
 }
 
+impl<V> Drop for VertexBuffer<V> {
+    fn drop(&mut self) {
+        unsafe {
+            self.ctx.delete_buffer(self.buffer);
+        }
+    }
+}
+
 pub struct Program {
     ctx: GlowContext,
     texture_unit: Cell<u32>,
@@ -196,6 +204,17 @@ impl Program {
 
     fn reset_texture_unit(&self) {
         self.texture_unit.set(0);
+    }
+}
+
+impl Drop for Program {
+    fn drop(&mut self) {
+        unsafe {
+            if let Some(vao) = self.vao.take() {
+                self.ctx.delete_vertex_array(vao);
+            }
+            self.ctx.delete_program(self.program);
+        }
     }
 }
 
@@ -375,6 +394,14 @@ impl Texture {
                 .tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, filter.into());
 
             self
+        }
+    }
+}
+
+impl Drop for Texture {
+    fn drop(&mut self) {
+        unsafe {
+            self.ctx.delete_texture(self.texture);
         }
     }
 }

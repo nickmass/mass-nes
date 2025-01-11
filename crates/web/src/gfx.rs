@@ -32,7 +32,7 @@ pub struct Gfx<T> {
     back_buffer: GfxBackBuffer,
 }
 
-impl<T: Filter> Gfx<T> {
+impl<T: Filter<gl::GlContext>> Gfx<T> {
     pub fn new(filter: T, channel: OffscreenGfxSpawner, canvas: OffscreenCanvas) -> Self {
         let OffscreenGfxSpawner { rx, back_buffer } = channel;
         let (width, height) = filter.dimensions();

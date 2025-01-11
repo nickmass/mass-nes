@@ -1,5 +1,6 @@
 use eframe::{egui, egui::PaintCallbackInfo, glow};
 use glow::HasContext;
+use serde::{Deserialize, Serialize};
 use tracy_ext::TracyExt;
 
 use std::sync::{
@@ -7,9 +8,15 @@ use std::sync::{
     Arc, Mutex,
 };
 
-use ui::filters::{Filter, FilterContext, FilterUniforms};
+use ui::filters::{Filter as FilterTrait, FilterContext, FilterUniforms};
 
 use crate::gl::{self, Vertex as _};
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Filter {
+    Paletted,
+    Ntsc,
+}
 
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
@@ -27,23 +34,25 @@ impl gl::Vertex for Vertex {
     const SIZE: usize = std::mem::size_of::<Vertex>();
 }
 
-pub struct Gfx<T> {
-    filter: T,
+pub trait SyncFilter: FilterTrait<GlowContext> + Send + Sync + 'static {}
+
+impl<F: FilterTrait<GlowContext> + Send + Sync + 'static> SyncFilter for F {}
+
+pub struct Gfx {
+    filter: Option<Box<dyn SyncFilter>>,
     ctx: GlowContext,
-    program: gl::Program,
+    program: Option<gl::Program>,
     vertex_buffer: gl::VertexBuffer<Vertex>,
-    size: (f64, f64),
     frame: Vec<u16>,
     tracy: Tracy,
     back_buffer: GfxBackBuffer,
 }
 
-impl<T: Filter> Gfx<T> {
+impl Gfx {
     pub fn new(
         ctx: gl::GlowContext,
         back_buffer: GfxBackBuffer,
         palette: &[u8],
-        filter: T,
     ) -> Result<Self, String> {
         let ctx = GlowContext(ctx);
         let ver = ctx.version();
@@ -70,32 +79,46 @@ impl<T: Filter> Gfx<T> {
 
         let vertex_buffer = gl::VertexBuffer::new(&ctx, gl::Polygon::TriangleFan, &shape)?;
 
-        let program = gl::Program::new(&ctx, filter.vertex_shader(), filter.fragment_shader())?;
-
-        let size = filter.dimensions();
-        let size = (size.0 as f64, size.1 as f64);
-
         let tracy = Tracy::new(palette);
 
         Ok(Self {
-            filter,
+            filter: None,
+            program: None,
             ctx,
-            program,
             vertex_buffer,
-            size,
             back_buffer,
             frame: vec![15; 240 * 256],
             tracy,
         })
     }
 
-    pub fn filter_dimensions(&self) -> (u32, u32) {
-        self.filter.dimensions()
+    pub fn filter(&mut self, filter: Filter) {
+        let ntsc_setup = ui::filters::NesNtscSetup::composite();
+
+        let filter: Box<dyn SyncFilter> = match filter {
+            Filter::Paletted => Box::new(ui::filters::PalettedFilter::new(
+                ntsc_setup.generate_palette(),
+            )),
+            Filter::Ntsc => Box::new(ui::filters::NtscFilter::new(&ntsc_setup)),
+        };
+
+        let program =
+            match gl::Program::new(&self.ctx, filter.vertex_shader(), filter.fragment_shader()) {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    tracing::error!("unable to compile filter: {e}");
+                    None
+                }
+            };
+        self.filter = Some(filter);
+        self.program = program;
     }
 
-    pub fn resize(&mut self, size: (u32, u32)) {
-        let size = (size.0 as f64, size.1 as f64);
-        self.size = size;
+    pub fn filter_dimensions(&self) -> (u32, u32) {
+        self.filter
+            .as_ref()
+            .map(|f| f.dimensions())
+            .unwrap_or((256, 240))
     }
 
     pub fn swap(&mut self) {
@@ -104,10 +127,13 @@ impl<T: Filter> Gfx<T> {
 
     pub fn render(&mut self, paint_info: PaintCallbackInfo) {
         self.swap();
+        let Some((filter, program)) = self.filter.as_mut().zip(self.program.as_mut()) else {
+            return;
+        };
         let view = paint_info.viewport_in_pixels();
-        self.resize((view.width_px as u32, view.height_px as u32));
-        let uniforms = self.filter.process(&self.ctx, self.size, &self.frame);
-        self.program.draw(&self.vertex_buffer, &uniforms);
+        let size = (view.width_px as f64, view.height_px as f64);
+        let uniforms = filter.process(&self.ctx, size, &self.frame);
+        program.draw(&self.vertex_buffer, &uniforms);
         self.tracy.frame(&self.frame);
     }
 }
@@ -181,9 +207,9 @@ impl Tracy {
                     let [r2, g2, b2] = pixel(col * 2 + 0, row * 2 + 1);
                     let [r3, g3, b3] = pixel(col * 2 + 1, row * 2 + 1);
 
-                    let r = ((r0 + r1 + r2 + r3) as f32 / 4.0) as u32;
-                    let g = ((g0 + g1 + g2 + g3) as f32 / 4.0) as u32;
-                    let b = ((b0 + b1 + b2 + b3) as f32 / 4.0) as u32;
+                    let r = (r0 + r1 + r2 + r3) / 4;
+                    let g = (g0 + g1 + g2 + g3) / 4;
+                    let b = (b0 + b1 + b2 + b3) / 4;
 
                     let p = r << 16 | g << 8 | b;
 
@@ -198,7 +224,7 @@ impl Tracy {
     }
 }
 
-struct GlowContext(gl::GlowContext);
+pub struct GlowContext(gl::GlowContext);
 
 impl std::ops::Deref for GlowContext {
     type Target = gl::GlowContext;

@@ -8,7 +8,7 @@ use ui::filters::Filter;
 use ui::gamepad::{GamepadEvent, GilrsInput};
 use ui::input::InputMap;
 
-use super::gfx::{Gfx, GfxBackBuffer};
+use super::gfx::{Gfx, GfxBackBuffer, GliumContext};
 use super::sync::FrameSync;
 
 pub enum UserEvent {
@@ -50,7 +50,7 @@ pub struct App<F, A, S> {
     pause: bool,
 }
 
-impl<F: Filter, A: Audio, S: FrameSync> App<F, A, S> {
+impl<F: Filter<GliumContext>, A: Audio, S: FrameSync> App<F, A, S> {
     pub fn new(filter: F, audio: A, sync: S) -> Self {
         let event_loop = winit::event_loop::EventLoop::with_user_event()
             .build()
@@ -146,8 +146,8 @@ impl<F: Filter, A: Audio, S: FrameSync> App<F, A, S> {
     }
 }
 
-impl<F: Filter, A: Audio, S: FrameSync> winit::application::ApplicationHandler<UserEvent>
-    for App<F, A, S>
+impl<F: Filter<GliumContext>, A: Audio, S: FrameSync>
+    winit::application::ApplicationHandler<UserEvent> for App<F, A, S>
 {
     fn resumed(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {}
 

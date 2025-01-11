@@ -4,16 +4,11 @@ mod paletted;
 pub use ntsc::*;
 pub use paletted::*;
 
-pub trait Filter {
+pub trait Filter<C: FilterContext> {
     fn dimensions(&self) -> (u32, u32);
     fn vertex_shader(&self) -> &'static str;
     fn fragment_shader(&self) -> &'static str;
-    fn process<C: FilterContext>(
-        &mut self,
-        ctx: &C,
-        render_size: (f64, f64),
-        screen: &[u16],
-    ) -> C::Uniforms;
+    fn process(&mut self, ctx: &C, render_size: (f64, f64), screen: &[u16]) -> C::Uniforms;
 }
 
 pub trait FilterContext: Sized {

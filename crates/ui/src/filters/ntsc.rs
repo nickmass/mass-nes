@@ -24,7 +24,7 @@ impl NtscFilter {
     }
 }
 
-impl Filter for NtscFilter {
+impl<C: FilterContext> Filter<C> for NtscFilter {
     fn dimensions(&self) -> (u32, u32) {
         (self.width * 2, self.height * 4)
     }
@@ -38,12 +38,7 @@ impl Filter for NtscFilter {
     }
 
     #[tracing::instrument(skip_all)]
-    fn process<C: FilterContext>(
-        &mut self,
-        display: &C,
-        render_size: (f64, f64),
-        screen: &[u16],
-    ) -> C::Uniforms {
+    fn process(&mut self, display: &C, render_size: (f64, f64), screen: &[u16]) -> C::Uniforms {
         let mut unis = display.create_uniforms();
 
         self.ntsc.blit(screen, &mut self.frame, 256, 240, 0);

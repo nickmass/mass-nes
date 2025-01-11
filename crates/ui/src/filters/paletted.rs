@@ -10,7 +10,7 @@ impl PalettedFilter {
     }
 }
 
-impl Filter for PalettedFilter {
+impl<C: FilterContext> Filter<C> for PalettedFilter {
     fn dimensions(&self) -> (u32, u32) {
         (256, 240)
     }
@@ -24,13 +24,8 @@ impl Filter for PalettedFilter {
     }
 
     #[tracing::instrument(skip_all)]
-    fn process<C: FilterContext>(
-        &mut self,
-        display: &C,
-        _render_size: (f64, f64),
-        screen: &[u16],
-    ) -> C::Uniforms {
-        let (width, height) = self.dimensions();
+    fn process(&mut self, display: &C, _render_size: (f64, f64), screen: &[u16]) -> C::Uniforms {
+        let (width, height) = <Self as Filter<C>>::dimensions(self);
 
         let mut uniforms = display.create_uniforms();
 

@@ -5,14 +5,14 @@ use eframe::{
     egui::{Event, Widget},
     CreationContext,
 };
-use gfx::{Gfx, GfxBackBuffer};
+use gfx::{Filter, Gfx, GfxBackBuffer};
 use nes::UserInput;
 use runner::{DebugRequest, EmulatorInput};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use ui::{
     audio::{Audio, CpalAudio, SamplesProducer},
-    filters::{NesNtscSetup, PalettedFilter},
+    filters::NesNtscSetup,
     gamepad::{GamepadChannel, GamepadEvent, GilrsInput},
     input::{InputMap, InputType},
 };
@@ -114,6 +114,7 @@ struct UiState {
     recent_files: Vec<PathBuf>,
     debug_interval: u64,
     selected_palette: u8,
+    filter: Filter,
 }
 
 impl Default for UiState {
@@ -122,7 +123,7 @@ impl Default for UiState {
             region: Region::Ntsc,
             volume: 1.0,
             mute: false,
-            show_screen: true,
+            show_screen: false,
             show_nametables: false,
             show_cpu_mem: false,
             show_ppu_mem: false,
@@ -135,6 +136,7 @@ impl Default for UiState {
             recent_files: Vec::new(),
             debug_interval: 10,
             selected_palette: 0,
+            filter: Filter::Ntsc,
         }
     }
 }
@@ -144,7 +146,7 @@ struct DebuggerApp {
     input: SharedInput,
     emu_control: EmulatorControl,
     audio: CpalAudio<CpalSync>,
-    nes_screen: NesScreen<PalettedFilter>,
+    nes_screen: NesScreen,
     recents: Recents,
     last_input: InputState,
     pause: bool,
@@ -165,12 +167,11 @@ impl DebuggerApp {
         message_store: MessageStore,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
         let ntsc_setup = NesNtscSetup::composite();
-        let filter = PalettedFilter::new(ntsc_setup.generate_palette());
         let palette = ntsc_setup.generate_palette();
 
         let gl = cc.gl.as_ref().expect("require glow opengl context").clone();
         let back_buffer = GfxBackBuffer::new(cc.egui_ctx.clone());
-        let gfx = Gfx::new(gl, back_buffer.clone(), &palette, filter)?;
+        let gfx = Gfx::new(gl, back_buffer.clone(), &palette)?;
         let nes_screen = NesScreen::new(gfx);
         let palette = Palette::new(palette);
 
@@ -245,6 +246,7 @@ impl DebuggerApp {
         }
 
         self.recents = Recents::new(&self.state.recent_files.as_slice(), 10);
+        self.nes_screen.filter(self.state.filter);
 
         if self.state.auto_open_most_recent {
             if let Some(recent) = self.state.recent_files.first() {
@@ -435,6 +437,20 @@ impl eframe::App for DebuggerApp {
                     }
                     ui.checkbox(&mut self.state.show_messages, "Messages");
                 });
+                ui.menu_button("Filter", |ui| {
+                    if ui
+                        .radio_value(&mut self.state.filter, Filter::Paletted, "None")
+                        .changed()
+                    {
+                        self.nes_screen.filter(self.state.filter);
+                    }
+                    if ui
+                        .radio_value(&mut self.state.filter, Filter::Ntsc, "NTSC")
+                        .changed()
+                    {
+                        self.nes_screen.filter(self.state.filter);
+                    }
+                });
                 ui.separator();
 
                 match VolumePicker::new(&mut self.state.mute, &mut self.state.volume).ui(ui) {
@@ -454,9 +470,25 @@ impl eframe::App for DebuggerApp {
             });
         });
 
-        egui::CentralPanel::default().show(ctx, |_| {});
-
         self.debug.swap();
+
+        let bg = if self.state.show_screen {
+            egui::Frame::central_panel(&*ctx.style())
+        } else {
+            egui::Frame::none()
+                .inner_margin(0.0)
+                .outer_margin(0.0)
+                .fill(egui::Color32::BLACK)
+        };
+
+        egui::CentralPanel::default().frame(bg).show(ctx, |ui| {
+            if !self.state.show_screen {
+                ui.centered_and_justified(|ui| {
+                    self.nes_screen.fill(ctx, ui);
+                });
+            }
+        });
+
         if self.state.show_screen {
             self.nes_screen.show(&ctx);
         }

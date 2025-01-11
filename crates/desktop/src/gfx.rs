@@ -32,7 +32,7 @@ pub struct Gfx<T> {
     back_buffer: GfxBackBuffer,
 }
 
-impl<T: Filter> Gfx<T> {
+impl<T: Filter<GliumContext>> Gfx<T> {
     pub fn new(display: Display<WindowSurface>, back_buffer: GfxBackBuffer, filter: T) -> Self {
         let ver = display.get_opengl_version_string();
         let glsl = display.get_supported_glsl_version();
@@ -248,7 +248,7 @@ impl Tracy {
     }
 }
 
-struct GliumContext(Display<WindowSurface>);
+pub struct GliumContext(Display<WindowSurface>);
 
 impl std::ops::Deref for GliumContext {
     type Target = Display<WindowSurface>;
@@ -327,7 +327,7 @@ impl FilterUniforms<GliumContext> for UniformCollection<'static> {
     }
 }
 
-enum Texture {
+pub enum Texture {
     Texture2d(Texture2d, FilterScaling),
     UTexture2d(UnsignedTexture2d, FilterScaling),
 }
