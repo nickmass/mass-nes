@@ -7,6 +7,7 @@ use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::Cartridge;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind};
+use crate::ppu::PpuFetchKind;
 
 use super::{Nametable, SimpleMirroring};
 
@@ -315,7 +316,7 @@ impl Mapper for Vrc6 {
         }
     }
 
-    fn peek_ppu_fetch(&self, address: u16) -> Nametable {
+    fn peek_ppu_fetch(&self, address: u16, _kind: PpuFetchKind) -> Nametable {
         self.mirroring.ppu_fetch(address)
     }
 

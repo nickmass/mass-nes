@@ -5,6 +5,7 @@ use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::Cartridge;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind};
+use crate::ppu::PpuFetchKind;
 
 use super::SimpleMirroring;
 
@@ -390,7 +391,7 @@ impl Mapper for Fme7 {
         self.irq
     }
 
-    fn peek_ppu_fetch(&self, address: u16) -> super::Nametable {
+    fn peek_ppu_fetch(&self, address: u16, _kind: PpuFetchKind) -> super::Nametable {
         self.mirroring.ppu_fetch(address)
     }
 

@@ -9,6 +9,13 @@ use crate::memory::MemoryBlock;
 use crate::ppu_step::*;
 use crate::region::{EmphMode, Region};
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum PpuFetchKind {
+    Idle,
+    Read,
+    Write,
+}
+
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Copy, Clone)]
 struct SpriteData {
@@ -595,7 +602,8 @@ impl Ppu {
             // only setting bus on odd cycles to acount for PPU mem access being 2 cycles long,
             // not sure on details when rendering disbaled / in vblank
             if step.dot & 1 == 1 {
-                self.mapper.ppu_fetch(self.vram_addr & 0x3fff);
+                self.mapper
+                    .ppu_fetch(self.vram_addr & 0x3fff, PpuFetchKind::Idle);
             }
         }
 
@@ -976,7 +984,9 @@ impl Ppu {
 
     #[cfg(feature = "debugger")]
     pub fn ppu_peek(&self, address: u16) -> u8 {
-        let bank = self.mapper.peek_ppu_fetch(address & 0x3fff);
+        let bank = self
+            .mapper
+            .peek_ppu_fetch(address & 0x3fff, PpuFetchKind::Read);
         match bank {
             Nametable::InternalA => self.nt_internal_a.read(address & 0x3ff),
             Nametable::InternalB => self.nt_internal_b.read(address & 0x3ff),
@@ -985,7 +995,7 @@ impl Ppu {
     }
 
     fn ppu_read(&self, address: u16) -> u8 {
-        let bank = self.mapper.ppu_fetch(address & 0x3fff);
+        let bank = self.mapper.ppu_fetch(address & 0x3fff, PpuFetchKind::Read);
         match bank {
             Nametable::InternalA => self.nt_internal_a.read(address & 0x3ff),
             Nametable::InternalB => self.nt_internal_b.read(address & 0x3ff),
@@ -994,7 +1004,7 @@ impl Ppu {
     }
 
     fn ppu_write(&self, address: u16, value: u8) {
-        let bank = self.mapper.ppu_fetch(address & 0x3fff);
+        let bank = self.mapper.ppu_fetch(address & 0x3fff, PpuFetchKind::Write);
         match bank {
             Nametable::InternalA => self.nt_internal_a.write(address & 0x3ff, value),
             Nametable::InternalB => self.nt_internal_b.write(address & 0x3ff, value),

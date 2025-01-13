@@ -35,13 +35,13 @@ impl DeviceMapping {
     }
 
     fn map(&self, addr: u16) -> Option<(u16, DeviceKind)> {
-        for (map_fn, device) in self.mappings.iter() {
-            if let Some(addr) = map_fn.map(addr) {
-                return Some((addr, *device));
-            }
-        }
+        self.iter(addr).next()
+    }
 
-        None
+    fn iter(&self, addr: u16) -> impl Iterator<Item = (u16, DeviceKind)> + '_ {
+        self.mappings
+            .iter()
+            .filter_map(move |(map_fn, device)| map_fn.map(addr).zip(Some(*device)))
     }
 }
 
@@ -83,9 +83,9 @@ impl AddressBus {
         self.read_mapping.map(addr)
     }
 
-    pub(crate) fn write_addr(&self, addr: u16) -> Option<(u16, DeviceKind)> {
+    pub(crate) fn write_addrs(&self, addr: u16) -> impl Iterator<Item = (u16, DeviceKind)> + '_ {
         let addr = (addr & !(self.block_size - 1)) & self.mask;
-        self.write_mapping.map(addr)
+        self.write_mapping.iter(addr)
     }
 }
 

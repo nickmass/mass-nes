@@ -5,6 +5,7 @@ use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind};
 use crate::cartridge::Cartridge;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
+use crate::ppu::PpuFetchKind;
 
 use super::SimpleMirroring;
 
@@ -84,7 +85,7 @@ impl Mapper for Axrom {
         }
     }
 
-    fn peek_ppu_fetch(&self, address: u16) -> super::Nametable {
+    fn peek_ppu_fetch(&self, address: u16, _kind: PpuFetchKind) -> super::Nametable {
         self.mirroring.ppu_fetch(address)
     }
 }

@@ -232,19 +232,21 @@ impl Machine {
 
     fn write(&mut self, addr: u16, value: u8) {
         use crate::channel::Channel;
-        match self.cpu_bus.write_addr(addr) {
-            Some((addr, DeviceKind::CpuRam)) => self.cpu_mem.write(addr, value),
-            Some((addr, DeviceKind::Ppu)) => self.ppu.write(addr, value),
-            Some((addr, DeviceKind::Mapper)) => self.mapper.write(BusKind::Cpu, addr, value),
-            Some((addr, DeviceKind::Input)) => self.input.write(addr, value),
-            Some((addr, DeviceKind::Apu)) => self.apu.write(addr, value),
-            Some((addr, DeviceKind::PulseOne)) => self.apu.pulse_one.write(addr, value),
-            Some((addr, DeviceKind::PulseTwo)) => self.apu.pulse_two.write(addr, value),
-            Some((addr, DeviceKind::Noise)) => self.apu.noise.write(addr, value),
-            Some((addr, DeviceKind::Triangle)) => self.apu.triangle.write(addr, value),
-            Some((addr, DeviceKind::Dmc)) => self.apu.dmc.write(addr, value),
-            Some((addr, DeviceKind::Debug)) => self.debug.write(addr, value),
-            None => (),
+        // Loop through potential mappings to allow MMC5 to snoop on PPU register writes
+        for mapping in self.cpu_bus.write_addrs(addr) {
+            match mapping {
+                (addr, DeviceKind::CpuRam) => self.cpu_mem.write(addr, value),
+                (addr, DeviceKind::Ppu) => self.ppu.write(addr, value),
+                (addr, DeviceKind::Mapper) => self.mapper.write(BusKind::Cpu, addr, value),
+                (addr, DeviceKind::Input) => self.input.write(addr, value),
+                (addr, DeviceKind::Apu) => self.apu.write(addr, value),
+                (addr, DeviceKind::PulseOne) => self.apu.pulse_one.write(addr, value),
+                (addr, DeviceKind::PulseTwo) => self.apu.pulse_two.write(addr, value),
+                (addr, DeviceKind::Noise) => self.apu.noise.write(addr, value),
+                (addr, DeviceKind::Triangle) => self.apu.triangle.write(addr, value),
+                (addr, DeviceKind::Dmc) => self.apu.dmc.write(addr, value),
+                (addr, DeviceKind::Debug) => self.debug.write(addr, value),
+            }
         }
     }
 

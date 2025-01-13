@@ -5,6 +5,7 @@ use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::{CartMirroring, Cartridge};
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
+use crate::ppu::PpuFetchKind;
 
 use super::{Nametable, SimpleMirroring};
 
@@ -293,7 +294,7 @@ impl Mapper for Txrom {
         self.irq
     }
 
-    fn peek_ppu_fetch(&self, address: u16) -> Nametable {
+    fn peek_ppu_fetch(&self, address: u16, _kind: PpuFetchKind) -> Nametable {
         if let Some(_) = self.ext_nt {
             if address & 0x2000 != 0 {
                 match address & 0xc00 {
@@ -310,8 +311,8 @@ impl Mapper for Txrom {
         }
     }
 
-    fn ppu_fetch(&mut self, address: u16) -> super::Nametable {
+    fn ppu_fetch(&mut self, address: u16, kind: PpuFetchKind) -> super::Nametable {
         self.irq_tick(address);
-        self.peek_ppu_fetch(address)
+        self.peek_ppu_fetch(address, kind)
     }
 }

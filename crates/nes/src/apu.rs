@@ -262,7 +262,7 @@ impl Apu {
         let tnd_out = self.tnd_table[((3 * triangle) + (2 * noise) + dmc) as usize];
         let ext_out = self.mapper.get_sample().unwrap_or(0);
         if let Some(v) = self.samples.get_mut(self.sample_index) {
-            // laxy mixing
+            // lazy mixing
             *v = (pulse_out + tnd_out) - (ext_out);
         }
 

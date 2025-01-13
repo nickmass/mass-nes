@@ -268,7 +268,7 @@ impl DebuggerApp {
             .map(|p| p.to_owned());
         let proxy = self.app_events.create_proxy();
         std::thread::spawn(move || {
-            let picker = rfd::FileDialog::new().add_filter("NES Roms", &["nes"]);
+            let picker = rfd::FileDialog::new().add_filter("NES Roms", &["nes", "NES"]);
 
             let rom_file = if let Some(last_dir) = last_dir {
                 picker.set_directory(last_dir).pick_file()

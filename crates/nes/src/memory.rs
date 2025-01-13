@@ -177,7 +177,13 @@ impl MappedMemory {
 
     fn get_mapping(&self, addr: u16) -> Mapped {
         let offset = (addr - self.base_addr) / 0x400;
-        self.mapping[offset as usize]
+        self.mapping
+            .get(offset as usize)
+            .copied()
+            .unwrap_or_else(|| {
+                tracing::error!("bad mapping {:04x} : {:?}", addr, self.banks.kind);
+                panic!("out of bounds")
+            })
     }
 
     pub fn read(&self, cartridge: &Cartridge, addr: u16) -> u8 {

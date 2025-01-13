@@ -3,6 +3,7 @@ mod axrom;
 mod bf909x;
 mod bxrom;
 mod cnrom;
+mod exrom;
 mod fme7;
 mod nina001;
 mod nrom;
@@ -17,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bus::{AddressBus, BusKind};
 use crate::cartridge::Cartridge;
+use crate::ppu::PpuFetchKind;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -65,10 +67,10 @@ pub trait Mapper {
 
     fn tick(&mut self) {}
 
-    fn peek_ppu_fetch(&self, address: u16) -> Nametable;
+    fn peek_ppu_fetch(&self, address: u16, kind: PpuFetchKind) -> Nametable;
 
-    fn ppu_fetch(&mut self, address: u16) -> Nametable {
-        self.peek_ppu_fetch(address)
+    fn ppu_fetch(&mut self, address: u16, kind: PpuFetchKind) -> Nametable {
+        self.peek_ppu_fetch(address, kind)
     }
 
     fn get_sample(&self) -> Option<i16> {
@@ -100,12 +102,12 @@ impl RcMapper {
         self.0.borrow_mut().write(bus, addr, value)
     }
 
-    pub fn peek_ppu_fetch(&self, address: u16) -> Nametable {
-        self.0.borrow_mut().peek_ppu_fetch(address)
+    pub fn peek_ppu_fetch(&self, address: u16, kind: PpuFetchKind) -> Nametable {
+        self.0.borrow_mut().peek_ppu_fetch(address, kind)
     }
 
-    pub fn ppu_fetch(&self, address: u16) -> Nametable {
-        self.0.borrow_mut().ppu_fetch(address)
+    pub fn ppu_fetch(&self, address: u16, kind: PpuFetchKind) -> Nametable {
+        self.0.borrow_mut().ppu_fetch(address, kind)
     }
 
     pub fn get_irq(&self) -> bool {
@@ -128,6 +130,7 @@ pub fn ines(cart: Cartridge) -> RcMapper {
         2 => RcMapper::new(uxrom::Uxrom::new(cart)),
         3 => RcMapper::new(cnrom::Cnrom::new(cart)),
         4 => RcMapper::new(txrom::Txrom::new(cart)),
+        5 => RcMapper::new(exrom::Exrom::new(cart)),
         7 => RcMapper::new(axrom::Axrom::new(cart)),
         9 => RcMapper::new(pxrom::Pxrom::new(cart)),
         24 => RcMapper::new(vrc6::Vrc6::new(cart, vrc6::Vrc6Variant::A)),
