@@ -1,7 +1,10 @@
-use eframe::{egui, egui::PaintCallbackInfo, glow};
+use eframe::{
+    egui::{self, PaintCallbackInfo},
+    egui_glow::Painter,
+    glow,
+};
 use glow::HasContext;
 use serde::{Deserialize, Serialize};
-use tracy_ext::TracyExt;
 
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -40,12 +43,13 @@ impl<F: FilterTrait<GlowContext> + Send + Sync + 'static> SyncFilter for F {}
 
 pub struct Gfx {
     filter: Option<Box<dyn SyncFilter>>,
-    ctx: GlowContext,
     program: Option<gl::Program>,
     vertex_buffer: gl::VertexBuffer<Vertex>,
     frame: Vec<u16>,
     tracy: Tracy,
     back_buffer: GfxBackBuffer,
+    selected_filter: Option<Filter>,
+    current_filter: Option<Filter>,
 }
 
 impl Gfx {
@@ -84,34 +88,17 @@ impl Gfx {
         Ok(Self {
             filter: None,
             program: None,
-            ctx,
             vertex_buffer,
             back_buffer,
             frame: vec![15; 240 * 256],
             tracy,
+            selected_filter: None,
+            current_filter: None,
         })
     }
 
     pub fn filter(&mut self, filter: Filter) {
-        let ntsc_setup = ui::filters::NesNtscSetup::composite();
-
-        let filter: Box<dyn SyncFilter> = match filter {
-            Filter::Paletted => Box::new(ui::filters::PalettedFilter::new(
-                ntsc_setup.generate_palette(),
-            )),
-            Filter::Ntsc => Box::new(ui::filters::NtscFilter::new(&ntsc_setup)),
-        };
-
-        let program =
-            match gl::Program::new(&self.ctx, filter.vertex_shader(), filter.fragment_shader()) {
-                Ok(p) => Some(p),
-                Err(e) => {
-                    tracing::error!("unable to compile filter: {e}");
-                    None
-                }
-            };
-        self.filter = Some(filter);
-        self.program = program;
+        self.selected_filter = Some(filter);
     }
 
     pub fn filter_dimensions(&self) -> (u32, u32) {
@@ -125,14 +112,48 @@ impl Gfx {
         self.back_buffer.attempt_swap(&mut self.frame);
     }
 
-    pub fn render(&mut self, paint_info: PaintCallbackInfo) {
+    pub fn render(&mut self, painter: &Painter, paint_info: PaintCallbackInfo) {
+        let ctx = GlowContext(painter.gl().clone());
         self.swap();
+
+        if let Some(selected_filter) = self.selected_filter {
+            if Some(selected_filter) != self.current_filter {
+                let ctx = GlowContext(painter.gl().clone());
+                let ntsc_setup = ui::filters::NesNtscSetup::composite();
+
+                let filter: Box<dyn SyncFilter> = match selected_filter {
+                    Filter::Paletted => Box::new(ui::filters::PalettedFilter::new(
+                        ntsc_setup.generate_palette(),
+                    )),
+                    Filter::Ntsc => Box::new(ui::filters::NtscFilter::new(&ntsc_setup)),
+                };
+
+                let program = match gl::Program::new(
+                    &ctx,
+                    filter.vertex_shader(),
+                    filter.fragment_shader(),
+                ) {
+                    Ok(p) => Some(p),
+                    Err(e) => {
+                        tracing::error!("unable to compile filter: {e}");
+                        self.selected_filter = None;
+                        None
+                    }
+                };
+
+                self.filter = Some(filter);
+                self.program = program;
+                self.current_filter = self.selected_filter;
+            }
+        }
+
         let Some((filter, program)) = self.filter.as_mut().zip(self.program.as_mut()) else {
             return;
         };
+
         let view = paint_info.viewport_in_pixels();
         let size = (view.width_px as f64, view.height_px as f64);
-        let uniforms = filter.process(&self.ctx, size, &self.frame);
+        let uniforms = filter.process(&ctx, size, &self.frame);
         program.draw(&self.vertex_buffer, &uniforms);
         self.tracy.frame(&self.frame);
     }
@@ -169,57 +190,6 @@ impl GfxBackBuffer {
             let mut frame = self.frame.lock().unwrap();
             std::mem::swap(&mut *frame, other);
             self.updated.store(false, Ordering::Relaxed);
-        }
-    }
-}
-
-struct Tracy {
-    palette: Box<[u8]>,
-    frame_image: Vec<u32>,
-}
-
-impl Tracy {
-    fn new(palette: &[u8]) -> Self {
-        let frame_image = vec![0; 120 * 128];
-
-        Self {
-            palette: palette.into(),
-            frame_image,
-        }
-    }
-
-    #[tracing::instrument(skip_all)]
-    fn frame(&mut self, screen: &[u16]) {
-        if let Some(client) = tracy_client::Client::running() {
-            let pixel = |x: usize, y: usize| {
-                let s = screen[y * 256 + x] as usize;
-                let r = self.palette[s * 3 + 2] as u32;
-                let g = self.palette[s * 3 + 1] as u32;
-                let b = self.palette[s * 3 + 0] as u32;
-
-                [r, g, b]
-            };
-
-            for row in 0..120 {
-                for col in 0..128 {
-                    let [r0, g0, b0] = pixel(col * 2 + 0, row * 2 + 0);
-                    let [r1, g1, b1] = pixel(col * 2 + 1, row * 2 + 0);
-                    let [r2, g2, b2] = pixel(col * 2 + 0, row * 2 + 1);
-                    let [r3, g3, b3] = pixel(col * 2 + 1, row * 2 + 1);
-
-                    let r = (r0 + r1 + r2 + r3) / 4;
-                    let g = (g0 + g1 + g2 + g3) / 4;
-                    let b = (b0 + b1 + b2 + b3) / 4;
-
-                    let p = r << 16 | g << 8 | b;
-
-                    self.frame_image[row * 128 + col] = p;
-                }
-            }
-
-            client.emit_frame_image(bytemuck::cast_slice(&self.frame_image), 128, 120, 0, false);
-
-            client.frame_mark();
         }
     }
 }
@@ -281,5 +251,86 @@ impl FilterUniforms<GlowContext> for gl::Uniforms {
 
     fn add_texture(&mut self, name: &'static str, value: gl::Texture) {
         self.add(name, value);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+use desktop::Tracy;
+
+#[cfg(target_arch = "wasm32")]
+use web::Tracy;
+
+#[cfg(not(target_arch = "wasm32"))]
+mod desktop {
+    use tracy_ext::TracyExt;
+
+    pub struct Tracy {
+        palette: Box<[u8]>,
+        frame_image: Vec<u32>,
+    }
+
+    impl Tracy {
+        pub fn new(palette: &[u8]) -> Self {
+            let frame_image = vec![0; 120 * 128];
+
+            Self {
+                palette: palette.into(),
+                frame_image,
+            }
+        }
+
+        #[tracing::instrument(skip_all)]
+        pub fn frame(&mut self, screen: &[u16]) {
+            if let Some(client) = tracy_client::Client::running() {
+                let pixel = |x: usize, y: usize| {
+                    let s = screen[y * 256 + x] as usize;
+                    let r = self.palette[s * 3 + 2] as u32;
+                    let g = self.palette[s * 3 + 1] as u32;
+                    let b = self.palette[s * 3 + 0] as u32;
+
+                    [r, g, b]
+                };
+
+                for row in 0..120 {
+                    for col in 0..128 {
+                        let [r0, g0, b0] = pixel(col * 2 + 0, row * 2 + 0);
+                        let [r1, g1, b1] = pixel(col * 2 + 1, row * 2 + 0);
+                        let [r2, g2, b2] = pixel(col * 2 + 0, row * 2 + 1);
+                        let [r3, g3, b3] = pixel(col * 2 + 1, row * 2 + 1);
+
+                        let r = (r0 + r1 + r2 + r3) / 4;
+                        let g = (g0 + g1 + g2 + g3) / 4;
+                        let b = (b0 + b1 + b2 + b3) / 4;
+
+                        let p = r << 16 | g << 8 | b;
+
+                        self.frame_image[row * 128 + col] = p;
+                    }
+                }
+
+                client.emit_frame_image(
+                    bytemuck::cast_slice(&self.frame_image),
+                    128,
+                    120,
+                    0,
+                    false,
+                );
+
+                client.frame_mark();
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+mod web {
+    pub struct Tracy;
+
+    impl Tracy {
+        pub fn new(_palette: &[u8]) -> Self {
+            Self
+        }
+
+        pub fn frame(&mut self, _screen: &[u16]) {}
     }
 }

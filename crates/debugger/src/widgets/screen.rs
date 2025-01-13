@@ -37,9 +37,9 @@ impl NesScreen {
         let gfx = self.gfx.clone();
         let callback = egui::PaintCallback {
             rect,
-            callback: Arc::new(egui_glow::CallbackFn::new(move |paint_info, _painter| {
+            callback: Arc::new(egui_glow::CallbackFn::new(move |paint_info, painter| {
                 let mut gfx = gfx.lock().unwrap();
-                gfx.render(paint_info);
+                gfx.render(painter, paint_info);
             })),
         };
 

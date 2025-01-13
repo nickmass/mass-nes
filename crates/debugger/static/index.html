@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+    <head>
+        <meta name="robots" content="noindex, nofollow" />
+        <title>mass-nes</title>
+        <link rel="modulepreload" href="pkg/debugger.js" />
+        <link
+            rel="preload"
+            href="pkg/debugger_bg.wasm"
+            as="fetch"
+            crossorigin
+        />
+        <script type="module">
+            import init from "./pkg/debugger.js";
+
+            await init({});
+        </script>
+        <style>
+            body {
+                background-color: #000;
+
+                margin: 0;
+
+                display: flex;
+                flex-wrap: wrap;
+            }
+
+            #render_canvas {
+                object-fit: contain;
+                image-rendering: pixelated;
+
+                max-width: 100vh;
+                max-height: 100vh;
+                min-width: 75%;
+                flex-grow: 1;
+                flex-basis: max-content;
+            }
+
+            #render_canvas:focus {
+                outline: none;
+            }
+
+            .info {
+                font-family: sans-serif;
+                color: #ccc;
+                background-color: #333;
+
+                border-radius: 5px;
+                border-color: #555;
+                border-width: 5px;
+
+                margin: 25px;
+                padding: 25px;
+                box-sizing: border-box;
+
+                width: 33%;
+                min-width: 400px;
+                flex-grow: 1;
+                flex-basis: min-content;
+            }
+        </style>
+    </head>
+    <body>
+        <canvas id="render_canvas"></canvas>
+    </body>
+</html>

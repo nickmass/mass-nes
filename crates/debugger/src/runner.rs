@@ -25,7 +25,9 @@ pub struct DebugRequest {
     pub breakpoints: Breakpoints,
 }
 
-use crate::{gfx::GfxBackBuffer, Breakpoints, DebugSwapState, EmulatorCommands};
+use crate::{
+    app::EmulatorCommands, debug_state::DebugSwapState, gfx::GfxBackBuffer, widgets::Breakpoints,
+};
 
 pub struct Runner {
     machine: Option<Machine>,

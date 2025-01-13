@@ -22,10 +22,14 @@ impl MessageStore {
     pub fn lock(&self) -> MutexGuard<'_, MessageStoreInner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
+
+    pub fn try_lock(&self) -> Option<MutexGuard<'_, MessageStoreInner>> {
+        self.inner.try_lock().ok()
+    }
 }
 
 pub struct MessageStoreInner {
-    start: std::time::Instant,
+    start: (),
     capacity: usize,
     messages: VecDeque<Message>,
 }
@@ -33,7 +37,7 @@ pub struct MessageStoreInner {
 impl MessageStoreInner {
     fn new(capacity: usize) -> Self {
         Self {
-            start: std::time::Instant::now(),
+            start: (),
             capacity,
             messages: VecDeque::with_capacity(capacity),
         }
@@ -57,7 +61,7 @@ impl MessageStoreInner {
 
 #[derive(Debug, Clone)]
 pub struct Message {
-    pub time: std::time::Instant,
+    pub time: (),
     pub level: tracing::Level,
     pub message: String,
 }
@@ -83,7 +87,8 @@ impl Messages {
             egui::ScrollArea::vertical().show_rows(ui, line_height, store.len(), |ui, range| {
                 for msg in range.filter_map(|i| store.get(i)) {
                     ui.horizontal(|ui| {
-                        let elapsed = DisplayDuration(msg.time.duration_since(store.start));
+                        //let elapsed = DisplayDuration(msg.time.duration_since(store.start));
+                        let elapsed = "";
                         let level =
                             egui::RichText::new(msg.level.as_str()).color(level_color(msg.level));
 
@@ -131,15 +136,17 @@ impl std::fmt::Display for DisplayDuration {
 
 struct MessageWriter {
     level: tracing::Level,
-    time: std::time::Instant,
+    time: (),
     message: String,
 }
 
 impl MessageWriter {
     fn new(level: tracing::Level) -> Self {
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str("hi three"));
         Self {
             level,
-            time: std::time::Instant::now(),
+            time: (),
             message: String::new(),
         }
     }
@@ -193,7 +200,13 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for EguiMessageLayer {
 
         event.record(&mut writer);
 
-        let mut store = self.store.lock();
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str("hi one"));
+        let Some(mut store) = self.store.try_lock() else {
+            return;
+        };
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str("hi two"));
         store.push(writer.into());
     }
 }

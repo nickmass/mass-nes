@@ -66,7 +66,11 @@ impl<V: Vertex> VertexBuffer<V> {
             let ctx = ctx.clone();
             let buffer = ctx.create_buffer()?;
             ctx.bind_buffer(glow::ARRAY_BUFFER, Some(buffer));
-            ctx.named_buffer_data_u8_slice(buffer, bytemuck::cast_slice(data), glow::STATIC_DRAW);
+            ctx.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                bytemuck::cast_slice(data),
+                glow::STATIC_DRAW,
+            );
             ctx.bind_buffer(glow::ARRAY_BUFFER, None);
 
             Ok(Self {
