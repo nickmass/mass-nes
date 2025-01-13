@@ -80,8 +80,8 @@ pub struct Fme7 {
 impl Fme7 {
     pub fn new(cartridge: Cartridge) -> Fme7 {
         let chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
-        let mut prg = MappedMemory::new(&cartridge, 0x6000, 16, 48, MemKind::Prg);
-        prg.map(0x6000, 16, 0, BankKind::Ram);
+        let mut prg = MappedMemory::new(&cartridge, 0x6000, 16, 40, MemKind::Prg);
+        prg.map(0x6000, 8, 0, BankKind::Ram);
         prg.map(
             0xe000,
             8,
@@ -189,6 +189,7 @@ impl Fme7 {
     }
 
     fn sync(&mut self) {
+        let bank = ((self.parameter & 0x3f) as usize) % self.cartridge.prg_rom.len();
         match self.command {
             0..=7 => self.chr.map(
                 0x400 * self.command as u16,
@@ -202,19 +203,12 @@ impl Fme7 {
                 if self.ram_enable {
                     self.prg.map(0x6000, 8, 0, BankKind::Ram);
                 } else {
-                    self.prg
-                        .map(0x6000, 8, (self.parameter & 0x3f) as usize, BankKind::Rom);
+                    self.prg.map(0x6000, 8, bank, BankKind::Rom);
                 }
             }
-            9 => self
-                .prg
-                .map(0x8000, 8, (self.parameter & 0x3f) as usize, BankKind::Rom),
-            0xa => self
-                .prg
-                .map(0xa000, 8, (self.parameter & 0x3f) as usize, BankKind::Rom),
-            0xb => self
-                .prg
-                .map(0xc000, 8, (self.parameter & 0x3f) as usize, BankKind::Rom),
+            9 => self.prg.map(0x8000, 8, bank, BankKind::Rom),
+            0xa => self.prg.map(0xa000, 8, bank, BankKind::Rom),
+            0xb => self.prg.map(0xc000, 8, bank, BankKind::Rom),
             0xc => match self.parameter & 0x3 {
                 0 => self.mirroring.vertical(),
                 1 => self.mirroring.horizontal(),

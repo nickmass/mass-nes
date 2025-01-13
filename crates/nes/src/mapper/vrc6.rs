@@ -273,7 +273,8 @@ impl Vrc6 {
 
         // todo: implement unused banking modes
         if self.chr_mode & 0x10 != 0 || self.chr_mode & 0x20 == 0 {
-            unimplemented!()
+            tracing::warn!("vrc6 unimplemented mirroring mode");
+            self.mirroring.vertical();
         } else {
             let mirror_mode = self.chr_mode >> 2 & 0x3;
             match (self.chr_mode & 0x3, mirror_mode) {
@@ -281,7 +282,10 @@ impl Vrc6 {
                 (0x0, 0x1) => self.mirroring.horizontal(),
                 (0x0, 0x2) => self.mirroring.internal_b(),
                 (0x0, 0x3) => self.mirroring.internal_a(),
-                _ => unimplemented!(),
+                _ => {
+                    tracing::warn!("vrc6 unimplemented mirroring mode");
+                    self.mirroring.vertical();
+                }
             }
         }
     }
