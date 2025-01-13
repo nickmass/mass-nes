@@ -23,7 +23,7 @@ ui = { path = "../ui" }
 wasm-bindgen-futures = { version = "0.4" }
 winit = { version = "0.30.5" }
 tracing = { version = "0.1.40" }
-tracing-wasm = "0.2.1"
+wasm-tracing = "1.0"
 direct_ring_buffer = "0.2"
 crossbeam = "0.8.4"
 
