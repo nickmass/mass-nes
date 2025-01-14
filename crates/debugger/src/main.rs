@@ -296,6 +296,21 @@ impl DebuggerApp {
             self.handle_pause();
         }
 
+        if !self.last_input.step_backward && input_state.step_backward {
+            self.emu_control.rewind();
+        } else if self.last_input.step_backward {
+            self.pause = true;
+            self.handle_pause();
+        }
+
+        if !self.last_input.step_forward && input_state.step_forward {
+            self.pause = false;
+            self.handle_pause();
+        } else if self.last_input.step_forward {
+            self.pause = true;
+            self.handle_pause();
+        }
+
         self.last_input = input_state;
     }
 
@@ -746,6 +761,8 @@ pub struct InputState {
     pub power: bool,
     pub reset: bool,
     pub pause: bool,
+    pub step_forward: bool,
+    pub step_backward: bool,
 }
 
 #[derive(Clone)]
@@ -781,6 +798,8 @@ impl SharedInput {
             power: input_map.power(),
             reset: input_map.reset(),
             pause: input_map.pause(),
+            step_forward: input_map.step_forward(),
+            step_backward: input_map.step_backward(),
         }
     }
 }

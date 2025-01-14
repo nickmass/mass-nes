@@ -105,7 +105,6 @@ pub struct Ppu {
     low_attr_shift: u16,
     high_attr_shift: u16,
 
-    in_sprite_render: bool,
     next_sprite_byte: u8,
     sprite_n: u32,
     sprite_m: u32,
@@ -178,7 +177,6 @@ impl Ppu {
             low_attr_shift: 0,
             high_attr_shift: 0,
 
-            in_sprite_render: false,
             next_sprite_byte: 0,
             sprite_n: 0,
             sprite_m: 0,
@@ -470,9 +468,12 @@ impl Ppu {
         match step.state {
             Some(StateChange::SkippedTick) => {
                 if self.frame % 2 == 1 && self.is_rendering() {
-                    let _ = self.ppu_steps.step();
+                    let skipped = self.ppu_steps.step();
                     step.scanline = 0;
                     step.dot = 0;
+
+                    // Need to assign this to ensure sprite reset still happens on dot 0 after a skip
+                    step.sprite = skipped.sprite;
                 }
             }
             Some(StateChange::SetVblank) => {
@@ -498,16 +499,7 @@ impl Ppu {
 
         // Always reset sprite eval, even if rendering disabled
         if let Some(SpriteStep::Reset) = step.sprite {
-            self.sprite_render_index = 0;
-            self.sprite_n = 0;
-            self.sprite_m = 0;
-            self.found_sprites = 0;
-            self.sprite_reads = 0;
-            self.line_oam_index = 0;
-            self.sprite_read_loop = false;
-            self.block_oam_writes = false;
-            self.sprite_zero_on_line = self.sprite_zero_on_next_line;
-            self.sprite_zero_on_next_line = false;
+            self.sprite_reset();
         }
 
         if self.is_rendering() {
@@ -550,19 +542,13 @@ impl Ppu {
             }
 
             match step.sprite {
-                Some(SpriteStep::Reset) => {
-                    self.in_sprite_render = false;
-                    self.init_line_oam(0);
-                }
                 Some(SpriteStep::Clear) => {
-                    self.in_sprite_render = false;
                     self.init_line_oam(step.dot / 2);
                 }
                 Some(SpriteStep::Eval) => {
                     self.sprite_eval(step.scanline, step.dot);
                 }
                 Some(SpriteStep::Read) => {
-                    self.in_sprite_render = false;
                     self.sprite_read();
                 }
                 Some(SpriteStep::Hblank) => {
@@ -593,8 +579,7 @@ impl Ppu {
                 Some(SpriteStep::BackgroundWait) => {
                     self.next_sprite_byte = self.line_oam_data[0];
                 }
-                None => (),
-                _ => unreachable!(),
+                _ => (),
             }
         }
         // outside of rending vram_addr is on bus (needed for mmc3)
@@ -871,9 +856,21 @@ impl Ppu {
     }
 
     fn init_line_oam(&mut self, addr: u32) {
-        self.in_sprite_render = true;
         self.next_sprite_byte = 0xff;
         self.line_oam_data[addr as usize] = self.next_sprite_byte;
+    }
+
+    fn sprite_reset(&mut self) {
+        self.sprite_render_index = 0;
+        self.sprite_n = 0;
+        self.sprite_m = 0;
+        self.found_sprites = 0;
+        self.sprite_reads = 0;
+        self.line_oam_index = 0;
+        self.sprite_read_loop = false;
+        self.block_oam_writes = false;
+        self.sprite_zero_on_line = self.sprite_zero_on_next_line;
+        self.sprite_zero_on_next_line = false;
     }
 
     fn horz_increment(&mut self) {

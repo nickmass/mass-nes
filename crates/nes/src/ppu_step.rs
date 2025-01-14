@@ -117,8 +117,8 @@ pub fn generate_steps(region: Region) -> PpuSteps {
 
         let sprite = if scanline == prerender || scanline < vblank {
             match dot {
-                1 => Some(SpriteStep::Reset),
-                d if d > 1 && d < 65 && d & 1 == 1 => Some(SpriteStep::Clear),
+                0 => Some(SpriteStep::Reset),
+                d if d >= 1 && d < 65 && d & 1 == 1 => Some(SpriteStep::Clear),
                 d if d >= 65 && d < 256 => {
                     if d & 1 == 0 {
                         Some(SpriteStep::Eval)

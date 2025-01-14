@@ -142,6 +142,14 @@ impl InputMap {
     pub fn pause(&self) -> bool {
         self.is_pressed(KeyCode::Space)
     }
+
+    pub fn step_forward(&self) -> bool {
+        self.is_pressed(KeyCode::BracketRight)
+    }
+
+    pub fn step_backward(&self) -> bool {
+        self.is_pressed(KeyCode::BracketLeft)
+    }
 }
 
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -192,6 +200,8 @@ impl From<egui::Key> for InputType {
             Key::Period => KeyCode::Period,
             Key::Semicolon => KeyCode::Semicolon,
             Key::Quote => KeyCode::Quote,
+            Key::OpenBracket => KeyCode::BracketLeft,
+            Key::CloseBracket => KeyCode::BracketRight,
             Key::Num0 => KeyCode::Digit0,
             Key::Num1 => KeyCode::Digit1,
             Key::Num2 => KeyCode::Digit2,
