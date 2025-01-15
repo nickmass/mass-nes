@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicU32, Ordering},
+    Arc, Mutex,
+};
 
 use crate::{
     egui, egui_glow,
@@ -8,8 +11,33 @@ use egui::Vec2;
 
 const SCREEN_INTERACT: &'static str = "screen_interact";
 
+struct Size {
+    width: AtomicU32,
+    height: AtomicU32,
+}
+
+impl Size {
+    fn new(width: u32, height: u32) -> Self {
+        Self {
+            width: width.into(),
+            height: height.into(),
+        }
+    }
+
+    fn set(&self, width: u32, height: u32) {
+        self.width.store(width, Ordering::Relaxed);
+        self.height.store(height, Ordering::Relaxed);
+    }
+
+    fn as_vec(&self) -> Vec2 {
+        let width = self.width.load(Ordering::Relaxed);
+        let height = self.height.load(Ordering::Relaxed);
+        Vec2::new(width as f32, height as f32)
+    }
+}
+
 pub struct NesScreen {
-    default_size: Vec2,
+    size: Arc<Size>,
     gfx: Arc<Mutex<Gfx>>,
 }
 
@@ -17,29 +45,33 @@ impl NesScreen {
     pub fn new(gfx: Gfx) -> Self {
         let gfx = Arc::new(Mutex::new(gfx));
         let (width, height) = gfx.lock().unwrap().filter_dimensions();
-        let default_size = Vec2::new(width as f32, height as f32);
+        let size = Arc::new(Size::new(width, height));
 
-        Self { gfx, default_size }
+        Self { gfx, size }
     }
 
     fn paint(&self, ui: &mut egui::Ui) {
         let avail = ui.available_size();
-        let ratio = avail / self.default_size;
+        let size = self.size.as_vec();
+        let ratio = avail / size;
 
         let size = if ratio.x > ratio.y {
-            self.default_size * ratio.y
+            size * ratio.y
         } else {
-            self.default_size * ratio.x
+            size * ratio.x
         };
 
         let (rect, _res) = ui.allocate_exact_size(size, egui::Sense::focusable_noninteractive());
 
         let gfx = self.gfx.clone();
+        let size = self.size.clone();
         let callback = egui::PaintCallback {
             rect,
             callback: Arc::new(egui_glow::CallbackFn::new(move |paint_info, painter| {
                 let mut gfx = gfx.lock().unwrap();
                 gfx.render(painter, paint_info);
+                let (width, height) = gfx.filter_dimensions();
+                size.set(width, height);
             })),
         };
 
@@ -49,8 +81,6 @@ impl NesScreen {
     pub fn filter(&mut self, filter: Filter) {
         let mut gfx = self.gfx.lock().unwrap();
         gfx.filter(filter);
-        let (width, height) = gfx.filter_dimensions();
-        self.default_size = Vec2::new(width as f32, height as f32);
     }
 
     pub fn focus(&self, ctx: &egui::Context) {
@@ -58,9 +88,10 @@ impl NesScreen {
     }
 
     pub fn show(&mut self, ctx: &egui::Context) -> Option<egui::Response> {
+        let size = self.size.as_vec();
         let res = egui::Window::new("Screen")
-            .min_size(self.default_size)
-            .default_size(self.default_size * 2.0)
+            .min_size(size)
+            .default_size(size * 2.0)
             .show(ctx, |ui| self.fill(ctx, ui));
 
         res.and_then(|r| r.inner)
