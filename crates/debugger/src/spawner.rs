@@ -7,10 +7,10 @@ use web_sys::js_sys::Array;
 use web_worker::worker;
 
 use crate::app::{AppEventsProxy, EmulatorCommands, EmulatorControl, SharedInput};
-use crate::audio::{CpalSync, FrameSync};
 use crate::debug_state::DebugSwapState;
 use crate::gfx::GfxBackBuffer;
-use ui::audio::SamplesProducer;
+use ui::audio::{SamplesProducer, SamplesSync};
+use ui::sync::FrameSync;
 
 pub trait Spawn: Sized + Send + 'static {
     const NAME: &'static str;
@@ -75,7 +75,7 @@ impl Spawn for MachineSpawner {
 }
 
 pub struct SyncSpawner {
-    pub sync: CpalSync,
+    pub audio_sync: SamplesSync,
     pub input: SharedInput,
     pub emu_control: EmulatorControl,
 }
@@ -91,19 +91,21 @@ impl Spawn for SyncSpawner {
 
     fn run(mut self) {
         loop {
-            self.sync.sync_frame();
-            let input = self.input.state();
-            self.emu_control.player_one(input.controller);
-            self.emu_control.sync();
-            if input.rewind {
-                self.emu_control.rewind();
+            self.audio_sync.sync_frame();
+            if !self.emu_control.pending_run() {
+                let input = self.input.state();
+                self.emu_control.player_one(input.controller);
+                if input.rewind {
+                    self.emu_control.rewind();
+                }
+                if input.power {
+                    self.emu_control.power();
+                }
+                if input.reset {
+                    self.emu_control.reset();
+                }
             }
-            if input.power {
-                self.emu_control.power();
-            }
-            if input.reset {
-                self.emu_control.reset();
-            }
+            self.emu_control.request_run();
         }
     }
 }

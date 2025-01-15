@@ -4,7 +4,7 @@ use web_sys::{js_sys, wasm_bindgen, HtmlCanvasElement};
 use winit::event_loop::EventLoopProxy;
 
 use nes::Region;
-use ui::audio::Audio;
+use ui::{audio::Audio, sync::EmuSync};
 
 mod app;
 mod gfx;
@@ -36,9 +36,8 @@ impl Emulator {
             "ntsc" | _ => Region::Ntsc,
         };
 
-        let sync = sync::CpalSync::new();
-        let (audio, sync, samples_producer) =
-            ui::audio::CpalAudio::new(sync, region.refresh_rate(), 128)?;
+        let (audio, audio_sync, samples_producer) =
+            ui::audio::CpalAudio::new(region.refresh_rate())?;
 
         let sample_rate = audio.sample_rate();
 
@@ -46,7 +45,8 @@ impl Emulator {
         let back_buffer = gfx_worker.back_buffer.clone();
         let mut app = app::App::new(gfx_worker, audio, canvas)?;
 
-        let sync_spawner = sync::SyncSpawner::new(sync, app.proxy());
+        let emu_sync = EmuSync::new();
+        let sync_spawner = sync::SyncSpawner::new(audio_sync, emu_sync.clone(), app.proxy());
         web_worker::spawn_worker(sync_spawner).await?;
 
         let nes_inputs = app.nes_io();
@@ -56,6 +56,7 @@ impl Emulator {
             sample_rate,
             back_buffer,
             samples_producer,
+            emu_sync,
             nes_inputs,
         );
         web_worker::spawn_worker(machine_spawner).await?;
@@ -88,6 +89,38 @@ impl Emulator {
         let bytes = res.binary().await.ok()?;
 
         self.load_rom_bytes(bytes);
+
+        Some(true)
+    }
+
+    #[wasm_bindgen]
+    pub fn run_bench(&self, rom: js_sys::ArrayBuffer, frames: u32) -> Option<bool> {
+        use nes::{Cartridge, Machine};
+        use std::io::Cursor;
+        let rom = js_sys::Uint8Array::new(&rom);
+        let rom = rom.to_vec();
+        let mut cursor = Cursor::new(rom);
+        let cart = Cartridge::load(&mut cursor).unwrap();
+        let mut machine = Machine::new(Region::Ntsc, cart);
+        let window = web_sys::window()?;
+        let performance = window.performance()?;
+
+        let start = performance.now();
+        for _ in 0..frames {
+            machine.run();
+            let _ = machine.get_audio();
+        }
+        let end = performance.now();
+        let elapsed = std::time::Duration::from_secs_f64((end - start) / 1000.0);
+        let fps = frames as f64 / elapsed.as_secs_f64();
+
+        tracing::info!(
+            "Benchmark {} frames in {}.{:03} seconds, {:.3}fps",
+            frames,
+            elapsed.as_secs(),
+            elapsed.subsec_millis(),
+            fps
+        );
 
         Some(true)
     }

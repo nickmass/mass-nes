@@ -4191,6 +4191,7 @@ dependencies = [
  "bytemuck",
  "const_format",
  "cpal",
+ "crossbeam",
  "direct_ring_buffer",
  "egui",
  "gilrs",

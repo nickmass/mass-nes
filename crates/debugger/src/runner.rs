@@ -87,53 +87,59 @@ impl Runner {
             panic!("nes commands taken");
         };
 
-        for input in commands.commands() {
-            match input {
-                EmulatorInput::Nes(input) => {
-                    if let Some(machine) = &mut self.machine {
-                        machine.handle_input(input)
-                    }
-                }
-                EmulatorInput::SaveState(slot) => {
-                    if let Some(machine) = &self.machine {
-                        let data = machine.save_state();
+        let emu_sync = commands.sync();
 
-                        self.save_states[slot as usize] = Some((self.frame, data));
-                    }
-                }
-                EmulatorInput::RestoreState(slot) => {
-                    if let Some(machine) = &mut self.machine {
-                        if let Some((frame, data)) = self.save_states[slot as usize].as_ref() {
-                            self.frame = *frame;
-                            machine.restore_state(data);
+        loop {
+            for input in commands.commands() {
+                match input {
+                    EmulatorInput::Nes(input) => {
+                        if let Some(machine) = &mut self.machine {
+                            machine.handle_input(input)
                         }
                     }
-                }
-                EmulatorInput::Rewind => {
-                    if let Some(machine) = &mut self.machine {
-                        if let Some((frame, data)) = self.save_store.pop() {
-                            self.frame = frame;
-                            machine.restore_state(&data);
+                    EmulatorInput::SaveState(slot) => {
+                        if let Some(machine) = &self.machine {
+                            let data = machine.save_state();
+
+                            self.save_states[slot as usize] = Some((self.frame, data));
                         }
                     }
-                }
-                EmulatorInput::LoadCartridge(region, rom) => {
-                    let mut rom = std::io::Cursor::new(rom);
-                    if let Ok(cart) = Cartridge::load(&mut rom) {
-                        self.save_store.clear();
-                        self.frame = 0;
-                        self.machine = Some(Machine::new(region, cart));
-                        self.blip.set_rates(
-                            region.frame_ticks() * region.refresh_rate(),
-                            self.sample_rate as f64,
-                        );
+                    EmulatorInput::RestoreState(slot) => {
+                        if let Some(machine) = &mut self.machine {
+                            if let Some((frame, data)) = self.save_states[slot as usize].as_ref() {
+                                self.frame = *frame;
+                                machine.restore_state(data);
+                            }
+                        }
                     }
-                }
-                EmulatorInput::Sync => {
-                    self.step();
-                }
-                EmulatorInput::DebugRequest(req) => {
-                    self.debug_request = req;
+                    EmulatorInput::Rewind => {
+                        if let Some(machine) = &mut self.machine {
+                            if let Some((frame, data)) = self.save_store.pop() {
+                                self.frame = frame;
+                                machine.restore_state(&data);
+                            }
+                        }
+                    }
+                    EmulatorInput::LoadCartridge(region, rom) => {
+                        let mut rom = std::io::Cursor::new(rom);
+                        if let Ok(cart) = Cartridge::load(&mut rom) {
+                            self.save_store.clear();
+                            self.frame = 0;
+                            self.machine = Some(Machine::new(region, cart));
+                            self.blip.set_rates(
+                                region.frame_ticks() * region.refresh_rate(),
+                                self.sample_rate as f64,
+                            );
+                        }
+                    }
+                    EmulatorInput::Sync => {
+                        if emu_sync.run() {
+                            self.step();
+                        }
+                    }
+                    EmulatorInput::DebugRequest(req) => {
+                        self.debug_request = req;
+                    }
                 }
             }
         }

@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use blip_buf_rs::Blip;
 use nes::{Cartridge, Machine, Region, UserInput};
 use tracing::instrument;
-use ui::audio::SamplesProducer;
+use ui::{audio::SamplesProducer, sync::EmuSync};
 
 use crate::{
     app::{EmulatorInput, NesInputs},
@@ -58,9 +58,11 @@ impl Runner {
             panic!("nes inputs taken");
         };
 
+        let sync = inputs.sync();
+
         for input in inputs.inputs() {
             match input {
-                EmulatorInput::Nes(input) => self.handle_input(input),
+                EmulatorInput::Nes(input) => self.handle_input(input, &sync),
                 EmulatorInput::SaveState(slot) => {
                     let data = self.machine.save_state();
 
@@ -82,8 +84,13 @@ impl Runner {
         }
     }
 
-    fn handle_input(&mut self, input: UserInput) {
+    fn handle_input(&mut self, input: UserInput, sync: &EmuSync) {
         self.machine.handle_input(input);
+
+        if !sync.run() {
+            return;
+        }
+
         self.machine.run();
 
         self.frame += 1;

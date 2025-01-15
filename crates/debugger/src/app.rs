@@ -10,6 +10,7 @@ use ui::{
     filters::NesNtscSetup,
     gamepad::{GamepadChannel, GamepadEvent, GilrsInput},
     input::{InputMap, InputType},
+    sync::EmuSync,
 };
 
 use std::{
@@ -26,7 +27,6 @@ use crate::gfx::{Filter, Gfx, GfxBackBuffer};
 use crate::runner::{DebugRequest, EmulatorInput};
 use crate::widgets::*;
 use crate::{
-    audio::CpalSync,
     gfx::Repainter,
     spawner::{GamepadSpawner, MachineSpawner, Spawn, SyncSpawner},
 };
@@ -95,7 +95,7 @@ pub struct DebuggerApp {
     app_events: AppEvents,
     input: SharedInput,
     emu_control: EmulatorControl,
-    audio: CpalAudio<CpalSync>,
+    audio: CpalAudio,
     nes_screen: NesScreen,
     recents: Recents,
     last_input: InputState,
@@ -129,7 +129,8 @@ impl DebuggerApp {
 
         let input = SharedInput::new();
         let last_input = input.state();
-        let (emu_control, emu_commands) = EmulatorControl::new();
+        let emu_sync = EmuSync::new();
+        let (emu_control, emu_commands) = EmulatorControl::new(emu_sync);
         let gamepad_channel = GilrsInput::new(app_events.create_proxy()).ok();
         let debug_swap = DebugSwapState::new();
         let debug = DebugUiState::new(debug_swap.clone(), palette);
@@ -139,14 +140,14 @@ impl DebuggerApp {
         let messages = Messages::new(message_store);
         let help = Help::new(app_events.create_proxy(), emu_control.clone());
 
-        let (mut audio, sync, samples) =
-            CpalAudio::new(CpalSync::new(), nes::Region::Ntsc.refresh_rate(), 64).unwrap();
+        let (mut audio, audio_sync, samples) =
+            CpalAudio::new(nes::Region::Ntsc.refresh_rate()).unwrap();
         audio.pause();
 
         let sync = SyncSpawner {
             input: input.clone(),
             emu_control: emu_control.clone(),
-            sync,
+            audio_sync,
         };
         sync.spawn();
 
@@ -613,13 +614,20 @@ impl GamepadChannel for AppEventsProxy {
 
 #[derive(Debug, Clone)]
 pub struct EmulatorControl {
+    emu_sync: EmuSync,
     tx: Sender<EmulatorInput>,
 }
 
 impl EmulatorControl {
-    pub fn new() -> (EmulatorControl, EmulatorCommands) {
+    pub fn new(emu_sync: EmuSync) -> (EmulatorControl, EmulatorCommands) {
         let (tx, rx) = channel();
-        (EmulatorControl { tx }, EmulatorCommands { rx })
+        (
+            EmulatorControl {
+                emu_sync: emu_sync.clone(),
+                tx,
+            },
+            EmulatorCommands { emu_sync, rx },
+        )
     }
 
     pub fn player_one(&self, controller: nes::Controller) {
@@ -651,15 +659,33 @@ impl EmulatorControl {
     pub fn debug_request(&self, debug: DebugRequest) {
         let _ = self.tx.send(EmulatorInput::DebugRequest(debug));
     }
+
+    pub fn pending_run(&self) -> bool {
+        self.emu_sync.pending_run()
+    }
+
+    pub fn request_run(&self) -> bool {
+        if !self.emu_sync.request_run() {
+            self.sync();
+            true
+        } else {
+            false
+        }
+    }
 }
 
 pub struct EmulatorCommands {
+    emu_sync: EmuSync,
     rx: Receiver<EmulatorInput>,
 }
 
 impl EmulatorCommands {
     pub fn commands(&mut self) -> impl Iterator<Item = EmulatorInput> + '_ {
         self.rx.iter()
+    }
+
+    pub fn sync(&self) -> EmuSync {
+        self.emu_sync.clone()
     }
 }
 

@@ -1,20 +1,17 @@
-use audio::CpalSync;
 use clap::{Parser, Subcommand, ValueEnum};
 use nes::{Cartridge, Machine};
 use runner::Runner;
 use ui::audio::{Audio, AudioDevices, CpalAudio, Null, SamplesProducer};
 use ui::filters::NesNtscSetup;
+use ui::sync::{NaiveSync, SyncDevices};
 
 use std::{fs::File, path::PathBuf};
 
 pub mod app;
-pub mod audio;
 pub mod gfx;
 mod runner;
-pub mod sync;
 
 use app::App;
-use sync::{NaiveSync, SyncDevices};
 
 fn main() {
     let args = Args::parse();
@@ -73,11 +70,13 @@ fn bench(path: PathBuf, region: nes::Region, mut frames: u32) {
     }
 }
 
-fn init_audio(
-    region: nes::Region,
-) -> (AudioDevices<CpalSync>, SyncDevices, Option<SamplesProducer>) {
-    let sync = audio::CpalSync::new();
-    match CpalAudio::new(sync, region.refresh_rate(), 64) {
+fn init_audio(region: nes::Region) -> (AudioDevices, SyncDevices, Option<SamplesProducer>) {
+    match CpalAudio::new(region.refresh_rate()) {
+        _ if std::env::var("MASS_NES_NO_AUDIO").is_ok() => (
+            Null.into(),
+            NaiveSync::new(region.refresh_rate()).into(),
+            None,
+        ),
         Ok((audio, frame_sync, samples_producer)) => {
             (audio.into(), frame_sync.into(), Some(samples_producer))
         }

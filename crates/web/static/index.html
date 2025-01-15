@@ -16,6 +16,12 @@
             await init({});
             const emu = await new Emulator("ntsc", canvas);
 
+            let bench = 0;
+            const url_params = new URL(window.location.href).searchParams;
+            if (url_params.has("bench")) {
+                bench = parseInt(url_params.get("bench"));
+            }
+
             const load_url = document.getElementById("load_url");
             const rom_url = document.getElementById("rom_url");
             load_url.addEventListener("click", async (e) => {
@@ -28,7 +34,11 @@
 
             const reader = new FileReader();
             reader.addEventListener("load", (e) => {
-                emu.load_rom_array_buffer(reader.result);
+                if (bench == 0) {
+                    emu.load_rom_array_buffer(reader.result);
+                } else {
+                    emu.run_bench(reader.result, bench);
+                }
                 display_rom_details(false);
                 canvas.focus();
             });

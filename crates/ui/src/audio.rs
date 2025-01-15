@@ -1,10 +1,11 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, OutputCallbackInfo, Sample};
+use crossbeam::sync::{Parker, Unparker};
 
 use direct_ring_buffer::{create_ring_buffer, Consumer, Producer};
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 pub trait Audio {
@@ -26,7 +27,19 @@ impl Audio for Null {
     fn volume(&mut self, _volume: f32) {}
 }
 
-const BUFFER_FRAMES: f64 = 2.0;
+// Number of frames to store samples for across all buffers
+#[cfg(not(target_arch = "wasm32"))]
+const BUFFER_FRAMES: f64 = 1.0;
+
+#[cfg(target_arch = "wasm32")]
+const BUFFER_FRAMES: f64 = 2.5;
+
+// Number of samples stored directly in the audio device buffers
+#[cfg(not(target_arch = "wasm32"))]
+const DEVICE_BUFFER: usize = 64;
+
+#[cfg(target_arch = "wasm32")]
+const DEVICE_BUFFER: usize = 256;
 
 #[derive(Debug)]
 pub enum Error {
@@ -69,21 +82,17 @@ impl From<cpal::PlayStreamError> for Error {
     }
 }
 
-pub struct CpalAudio<P: Parker> {
+pub struct CpalAudio {
     _host: cpal::Host,
     _device: cpal::Device,
     stream: cpal::Stream,
     format: cpal::StreamConfig,
     volume: Arc<AtomicU32>,
-    _marker: std::marker::PhantomData<P>,
 }
 
-impl<P: Parker> CpalAudio<P> {
-    pub fn new(
-        parker: P,
-        refresh_rate: f64,
-        device_buffer: usize,
-    ) -> Result<(CpalAudio<P>, P, SamplesProducer), Error> {
+impl CpalAudio {
+    pub fn new(refresh_rate: f64) -> Result<(CpalAudio, SamplesSync, SamplesProducer), Error> {
+        let device_buffer = DEVICE_BUFFER;
         let allowed_sample_rates = [
             cpal::SampleRate(48000),
             cpal::SampleRate(44100),
@@ -188,9 +197,8 @@ impl<P: Parker> CpalAudio<P> {
         let channels = format.channels as usize;
 
         let (tx, rx) = create_ring_buffer(best_match.sample_rate.0 as usize);
-        let samples = SamplesIterator::new(rx);
-
-        let unparker = parker.unparker();
+        let samples_sync = SamplesSync::new(samples_min_len);
+        let samples = SamplesIterator::new(rx, samples_sync.tracker());
 
         let host_id = host.id();
         let volume = Arc::new(AtomicU32::new(u32::MAX));
@@ -199,41 +207,27 @@ impl<P: Parker> CpalAudio<P> {
         let stream = match best_match.data_type {
             cpal::SampleFormat::I16 => device.build_output_stream(
                 &format,
-                output_callback::<i16, _>(
-                    samples,
-                    samples_min_len,
-                    channels,
-                    volume.clone(),
-                    unparker,
-                ),
+                output_callback::<i16>(samples, channels, volume.clone()),
                 err_handler,
                 None,
             )?,
             cpal::SampleFormat::U16 => device.build_output_stream(
                 &format,
-                output_callback::<u16, _>(
-                    samples,
-                    samples_min_len,
-                    channels,
-                    volume.clone(),
-                    unparker,
-                ),
+                output_callback::<u16>(samples, channels, volume.clone()),
                 err_handler,
                 None,
             )?,
             cpal::SampleFormat::F32 => device.build_output_stream(
                 &format,
-                output_callback::<f32, _>(
-                    samples,
-                    samples_min_len,
-                    channels,
-                    volume.clone(),
-                    unparker,
-                ),
+                output_callback::<f32>(samples, channels, volume.clone()),
                 err_handler,
                 None,
             )?,
             _ => return Err(Error::NoMatchingOutputConfig),
+        };
+        let producer = SamplesProducer {
+            tx,
+            sync: samples_sync.tracker(),
         };
 
         Ok((
@@ -243,20 +237,17 @@ impl<P: Parker> CpalAudio<P> {
                 stream,
                 format,
                 volume,
-                _marker: Default::default(),
             },
-            parker,
-            SamplesProducer { tx },
+            samples_sync,
+            producer,
         ))
     }
 }
 
-fn output_callback<S: Sample + FromSample<i16>, U: Unparker>(
+fn output_callback<S: Sample + FromSample<i16>>(
     mut sample_source: SamplesIterator<i16>,
-    samples_min_len: usize,
     channels: usize,
     volume: Arc<AtomicU32>,
-    mut unparker: U,
 ) -> impl FnMut(&mut [S], &OutputCallbackInfo) + Send + 'static {
     move |buffer: &mut [S], _| {
         let volume = volume.load(Ordering::Relaxed) as f64 / u32::MAX as f64;
@@ -268,17 +259,10 @@ fn output_callback<S: Sample + FromSample<i16>, U: Unparker>(
                 *out = s;
             }
         }
-
-        if sample_source.len() < samples_min_len {
-            if !sample_source.pending_request() {
-                sample_source.request_samples();
-                unparker.unpark();
-            }
-        }
     }
 }
 
-impl<P: Parker> Audio for CpalAudio<P> {
+impl Audio for CpalAudio {
     fn sample_rate(&self) -> u32 {
         let cpal::SampleRate(rate) = self.format.sample_rate;
         rate
@@ -306,48 +290,29 @@ impl<P: Parker> Audio for CpalAudio<P> {
     }
 }
 
-pub trait Parker {
-    type Unparker: Unparker;
-
-    fn unparker(&self) -> Self::Unparker;
-}
-
-pub trait Unparker: Send + 'static {
-    fn unpark(&mut self);
-}
-
 struct SamplesIterator<T> {
     rx: Consumer<T>,
     buf: VecDeque<T>,
     pending_req: bool,
     last_sample: T,
+    sync: SamplesTracker,
 }
 
 impl<T: Default + Copy> SamplesIterator<T> {
-    fn new(rx: Consumer<T>) -> SamplesIterator<T> {
+    fn new(rx: Consumer<T>, sync: SamplesTracker) -> SamplesIterator<T> {
         SamplesIterator {
             rx,
             buf: VecDeque::new(),
             pending_req: false,
             last_sample: T::default(),
+            sync,
         }
-    }
-
-    fn request_samples(&mut self) {
-        self.pending_req = true;
-    }
-
-    fn pending_request(&self) -> bool {
-        self.pending_req
-    }
-
-    fn len(&self) -> usize {
-        self.buf.len()
     }
 }
 
 pub struct SamplesProducer {
     tx: Producer<i16>,
+    sync: SamplesTracker,
 }
 
 impl SamplesProducer {
@@ -362,6 +327,7 @@ impl SamplesProducer {
             },
             Some(samples.len()),
         );
+        self.sync.set_avail(self.tx.available());
     }
 }
 
@@ -377,6 +343,7 @@ impl<T: Copy> Iterator for SamplesIterator<T> {
             },
             None,
         );
+        self.sync.set_avail(self.buf.len());
 
         if let Some(sample) = self.buf.pop_front() {
             self.last_sample = sample;
@@ -387,12 +354,12 @@ impl<T: Copy> Iterator for SamplesIterator<T> {
     }
 }
 
-pub enum AudioDevices<P: Parker> {
-    Cpal(CpalAudio<P>),
+pub enum AudioDevices {
+    Cpal(CpalAudio),
     Null(Null),
 }
 
-impl<P: Parker> Audio for AudioDevices<P> {
+impl Audio for AudioDevices {
     fn sample_rate(&self) -> u32 {
         match self {
             AudioDevices::Cpal(a) => a.sample_rate(),
@@ -422,14 +389,74 @@ impl<P: Parker> Audio for AudioDevices<P> {
     }
 }
 
-impl<P: Parker> From<CpalAudio<P>> for AudioDevices<P> {
-    fn from(value: CpalAudio<P>) -> Self {
+impl From<CpalAudio> for AudioDevices {
+    fn from(value: CpalAudio) -> Self {
         AudioDevices::Cpal(value)
     }
 }
 
-impl<P: Parker> From<Null> for AudioDevices<P> {
+impl From<Null> for AudioDevices {
     fn from(value: Null) -> Self {
         AudioDevices::Null(value)
     }
+}
+
+#[derive(Debug)]
+pub struct SamplesSync {
+    min: usize,
+    avail: Arc<AtomicUsize>,
+    parker: Parker,
+}
+
+impl SamplesSync {
+    pub fn new(min: usize) -> Self {
+        let parker = Parker::new();
+        Self {
+            min,
+            avail: Arc::new(AtomicUsize::new(0)),
+            parker,
+        }
+    }
+
+    fn tracker(&self) -> SamplesTracker {
+        SamplesTracker {
+            avail: self.avail.clone(),
+            unparker: self.parker.unparker().clone(),
+        }
+    }
+
+    pub fn need_samples(&self) -> bool {
+        let avail = self.avail.load(Ordering::Relaxed);
+        self.min > avail
+    }
+
+    pub fn wait_for_need_samples(&self) {
+        loop {
+            if self.need_samples() {
+                break;
+            }
+            self.parker.park();
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SamplesTracker {
+    avail: Arc<AtomicUsize>,
+    unparker: Unparker,
+}
+
+impl SamplesTracker {
+    fn set_avail(&self, avail: usize) {
+        self.avail.store(avail, Ordering::Relaxed);
+        self.unpark();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn unpark(&self) {
+        self.unparker.unpark();
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn unpark(&self) {}
 }

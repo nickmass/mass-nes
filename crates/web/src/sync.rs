@@ -1,4 +1,5 @@
-use crossbeam::sync::{Parker, Unparker};
+use ui::sync::FrameSync;
+use ui::{audio::SamplesSync, sync::EmuSync};
 use wasm_bindgen::prelude::*;
 use web_sys::{js_sys::Array, wasm_bindgen};
 use web_worker::WorkerSpawn;
@@ -6,67 +7,40 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::app::UserEvent;
 
-pub trait FrameSync {
-    fn sync_frame(&mut self);
-}
-
-pub struct CpalSync {
-    parker: Parker,
-}
-
-impl CpalSync {
-    pub fn new() -> Self {
-        Self {
-            parker: Parker::new(),
-        }
-    }
-}
-
-impl ui::audio::Parker for CpalSync {
-    type Unparker = CpalUnparker;
-
-    fn unparker(&self) -> Self::Unparker {
-        CpalUnparker(self.parker.unparker().clone())
-    }
-}
-
-pub struct CpalUnparker(Unparker);
-
-impl ui::audio::Unparker for CpalUnparker {
-    fn unpark(&mut self) {
-        self.0.unpark()
-    }
-}
-
-impl FrameSync for CpalSync {
-    fn sync_frame(&mut self) {
-        self.parker.park()
-    }
-}
-
-pub struct SyncSpawner<T> {
-    sync: T,
+pub struct SyncSpawner {
+    audio_sync: SamplesSync,
+    emu_sync: EmuSync,
     proxy: EventLoopProxy<UserEvent>,
 }
 
-impl<T> SyncSpawner<T> {
-    pub fn new(sync: T, proxy: EventLoopProxy<UserEvent>) -> Self {
-        Self { sync, proxy }
+impl SyncSpawner {
+    pub fn new(
+        audio_sync: SamplesSync,
+        emu_sync: EmuSync,
+        proxy: EventLoopProxy<UserEvent>,
+    ) -> Self {
+        Self {
+            audio_sync,
+            emu_sync,
+            proxy,
+        }
     }
 }
 
 #[wasm_bindgen]
 pub async fn sync_worker(ptr: u32, transferables: Array) {
-    web_worker::worker::<SyncSpawner<CpalSync>>(ptr, transferables).await
+    web_worker::worker::<SyncSpawner>(ptr, transferables).await
 }
 
-impl<T: FrameSync + Send + 'static> WorkerSpawn for SyncSpawner<T> {
+impl WorkerSpawn for SyncSpawner {
     const ENTRY_POINT: &'static str = stringify!(sync_worker);
 
     async fn run(mut self, _transferables: Array) {
         loop {
-            self.sync.sync_frame();
-            let _ = self.proxy.send_event(UserEvent::Sync);
+            self.audio_sync.sync_frame();
+            if !self.emu_sync.request_run() {
+                let _ = self.proxy.send_event(UserEvent::Sync);
+            }
         }
     }
 }

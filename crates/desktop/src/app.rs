@@ -1,5 +1,6 @@
 use glium::glutin::config::ConfigTemplateBuilder;
 use glium::winit;
+use ui::sync::EmuSync;
 use winit::keyboard::PhysicalKey;
 
 use nes::UserInput;
@@ -7,9 +8,9 @@ use ui::audio::Audio;
 use ui::filters::Filter;
 use ui::gamepad::{GamepadEvent, GilrsInput};
 use ui::input::InputMap;
+use ui::sync::FrameSync;
 
 use super::gfx::{Gfx, GfxBackBuffer, GliumContext};
-use super::sync::FrameSync;
 
 pub enum UserEvent {
     Frame,
@@ -40,6 +41,7 @@ impl From<UserInput> for EmulatorInput {
 pub struct App<F, A, S> {
     audio: A,
     sync: Option<S>,
+    emu_sync: EmuSync,
     gfx: Gfx<F>,
     gamepad: Option<GilrsInput<winit::event_loop::EventLoopProxy<UserEvent>>>,
     window: winit::window::Window,
@@ -79,6 +81,7 @@ impl<F: Filter<GliumContext>, A: Audio, S: FrameSync> App<F, A, S> {
         Self {
             audio,
             sync: Some(sync),
+            emu_sync: EmuSync::new(),
             window,
             gfx,
             back_buffer,
@@ -106,18 +109,22 @@ impl<F: Filter<GliumContext>, A: Audio, S: FrameSync> App<F, A, S> {
         let (tx, rx) = std::sync::mpsc::channel();
 
         self.input_tx = Some(tx);
+        let emu_sync = self.emu_sync.clone();
 
-        NesInputs { rx }
+        NesInputs { rx, emu_sync }
     }
 
     pub fn run(mut self) -> ! {
         if let Some(mut sync) = self.sync.take() {
             let sync_proxy = self.proxy();
+            let emu_sync = self.emu_sync.clone();
             std::thread::Builder::new()
                 .name("sync".into())
                 .spawn(move || loop {
                     sync.sync_frame();
-                    let _ = sync_proxy.send_event(UserEvent::Sync);
+                    if !emu_sync.request_run() {
+                        let _ = sync_proxy.send_event(UserEvent::Sync);
+                    }
                 })
                 .unwrap();
         } else {
@@ -253,11 +260,16 @@ impl<F: Filter<GliumContext>, A: Audio, S: FrameSync>
 }
 
 pub struct NesInputs {
+    emu_sync: EmuSync,
     rx: std::sync::mpsc::Receiver<EmulatorInput>,
 }
 
 impl NesInputs {
     pub fn inputs(self) -> impl Iterator<Item = EmulatorInput> {
         self.rx.into_iter()
+    }
+
+    pub fn sync(&self) -> EmuSync {
+        self.emu_sync.clone()
     }
 }

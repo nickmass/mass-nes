@@ -5,7 +5,7 @@ use web_sys::{
 };
 use web_worker::WorkerSpawn;
 
-use ui::audio::SamplesProducer;
+use ui::{audio::SamplesProducer, sync::EmuSync};
 
 use crate::{
     app::{EmulatorInput, NesInputs},
@@ -17,6 +17,7 @@ pub struct MachineSpawner {
     pub sample_rate: u32,
     back_buffer: GfxBackBuffer,
     samples_producer: SamplesProducer,
+    emu_sync: EmuSync,
     nes_inputs: NesInputs,
 }
 
@@ -26,6 +27,7 @@ impl MachineSpawner {
         sample_rate: u32,
         back_buffer: GfxBackBuffer,
         samples_producer: SamplesProducer,
+        emu_sync: EmuSync,
         nes_inputs: NesInputs,
     ) -> Self {
         Self {
@@ -34,6 +36,7 @@ impl MachineSpawner {
             back_buffer,
             samples_producer,
             nes_inputs,
+            emu_sync,
         }
     }
 }
@@ -60,6 +63,7 @@ struct MachineRunner {
     back_buffer: GfxBackBuffer,
     audio_buffer: Vec<i16>,
     samples_producer: SamplesProducer,
+    emu_sync: EmuSync,
     nes_inputs: Option<NesInputs>,
 }
 
@@ -71,6 +75,7 @@ impl MachineRunner {
             nes_inputs,
             back_buffer,
             samples_producer,
+            emu_sync,
         } = channel;
 
         let mut blip = blip_buf_rs::Blip::new(sample_rate / 30);
@@ -88,6 +93,7 @@ impl MachineRunner {
             back_buffer,
             audio_buffer: vec![0; 1024],
             samples_producer,
+            emu_sync,
         }
     }
 
@@ -117,29 +123,32 @@ impl MachineRunner {
             EmulatorInput::UserInput(input) => {
                 if let Some(machine) = self.machine.as_mut() {
                     machine.handle_input(input);
-                    machine.run();
 
-                    let samples = machine.get_audio();
-                    let count = samples.len();
+                    if self.emu_sync.run() {
+                        machine.run();
 
-                    for (i, v) in samples.iter().enumerate() {
-                        self.blip.add_delta(i as u32, *v as i32 - self.blip_delta);
-                        self.blip_delta = *v as i32;
+                        let samples = machine.get_audio();
+                        let count = samples.len();
+
+                        for (i, v) in samples.iter().enumerate() {
+                            self.blip.add_delta(i as u32, *v as i32 - self.blip_delta);
+                            self.blip_delta = *v as i32;
+                        }
+                        self.blip.end_frame(count as u32);
+
+                        while self.blip.samples_avail() > 0 {
+                            let count = self.blip.read_samples(&mut self.audio_buffer, 1024, false)
+                                as usize;
+                            self.samples_producer
+                                .add_samples(&self.audio_buffer[..count]);
+                        }
+
+                        self.back_buffer
+                            .update(|frame| {
+                                frame.copy_from_slice(machine.get_screen());
+                            })
+                            .await;
                     }
-                    self.blip.end_frame(count as u32);
-
-                    while self.blip.samples_avail() > 0 {
-                        let count =
-                            self.blip.read_samples(&mut self.audio_buffer, 1024, false) as usize;
-                        self.samples_producer
-                            .add_samples(&self.audio_buffer[..count]);
-                    }
-
-                    self.back_buffer
-                        .update(|frame| {
-                            frame.copy_from_slice(machine.get_screen());
-                        })
-                        .await;
                 }
             }
         }

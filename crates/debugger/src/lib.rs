@@ -1,5 +1,4 @@
 mod app;
-mod audio;
 mod cpu_6502;
 mod debug_state;
 mod gfx;
