@@ -18,7 +18,9 @@ pub trait Spawn: Sized + Send + 'static {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn spawn(self) {
-        std::thread::spawn(move || self.run());
+        let _ = std::thread::Builder::new()
+            .name(Self::NAME.into())
+            .spawn(move || self.run());
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -116,7 +118,7 @@ impl Spawn for GamepadSpawner {
 
     fn run(mut self) {
         loop {
-            self.gamepad.poll();
+            self.gamepad.poll_blocking();
         }
     }
 }

@@ -200,10 +200,21 @@ impl Program {
     fn reset_texture_unit(&self) {
         self.texture_unit.set(0);
     }
+
+    pub fn delete(self, ctx: &GlowContext) {
+        unsafe {
+            if let Some(vao) = self.vao {
+                ctx.delete_vertex_array(vao);
+            }
+            ctx.delete_program(self.program);
+        }
+    }
 }
 
 pub trait AsUniform {
     fn bind(&self, ctx: &GlowContext, program: &Program, location: Option<&UniformLocation>);
+
+    fn delete(&self, _ctx: &GlowContext) {}
 }
 
 impl AsUniform for (f32, f32) {
@@ -223,21 +234,33 @@ impl AsUniform for Texture {
             ctx.uniform_1_i32(location, texture_unit as i32);
         }
     }
+
+    fn delete(&self, ctx: &GlowContext) {
+        unsafe {
+            ctx.delete_texture(self.texture);
+        }
+    }
 }
 
 impl AsUniform for Box<dyn AsUniform> {
     fn bind(&self, ctx: &GlowContext, program: &Program, location: Option<&UniformLocation>) {
         (**self).bind(ctx, program, location)
     }
+
+    fn delete(&self, ctx: &GlowContext) {
+        (**self).delete(ctx);
+    }
 }
 
 pub struct Uniforms {
+    ctx: GlowContext,
     map: HashMap<&'static str, Box<dyn AsUniform>>,
 }
 
 impl Uniforms {
-    pub fn new() -> Self {
+    pub fn new(ctx: &GlowContext) -> Self {
         Self {
+            ctx: ctx.clone(),
             map: HashMap::new(),
         }
     }
@@ -257,6 +280,14 @@ impl Uniforms {
                     tracing::warn!("uniform location for '{name}' not found.");
                 }
             }
+        }
+    }
+}
+
+impl Drop for Uniforms {
+    fn drop(&mut self) {
+        for v in self.map.values() {
+            v.delete(&self.ctx);
         }
     }
 }

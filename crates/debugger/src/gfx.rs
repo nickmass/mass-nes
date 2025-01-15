@@ -114,7 +114,6 @@ impl Gfx {
 
         if let Some(selected_filter) = self.selected_filter {
             if Some(selected_filter) != self.current_filter {
-                let ctx = GlowContext(painter.gl().clone());
                 let ntsc_setup = ui::filters::NesNtscSetup::composite();
 
                 let filter: Box<dyn SyncFilter> = match selected_filter {
@@ -124,22 +123,22 @@ impl Gfx {
                     Filter::Ntsc => Box::new(ui::filters::NtscFilter::new(&ntsc_setup)),
                 };
 
-                let program = match gl::Program::new(
-                    &ctx,
-                    filter.vertex_shader(),
-                    filter.fragment_shader(),
-                ) {
-                    Ok(p) => Some(p),
+                match gl::Program::new(&ctx, filter.vertex_shader(), filter.fragment_shader()) {
+                    Ok(new_program) => {
+                        let old_program = self.program.take();
+                        if let Some(old_program) = old_program {
+                            old_program.delete(&ctx);
+                        }
+
+                        self.program = Some(new_program);
+                        self.filter = Some(filter);
+                        self.current_filter = self.selected_filter;
+                    }
                     Err(e) => {
                         tracing::error!("unable to compile filter: {e}");
                         self.selected_filter = None;
-                        None
                     }
-                };
-
-                self.filter = Some(filter);
-                self.program = program;
-                self.current_filter = self.selected_filter;
+                }
             }
         }
 
@@ -214,7 +213,7 @@ impl FilterContext for GlowContext {
     type Texture = gl::Texture;
 
     fn create_uniforms(&self) -> Self::Uniforms {
-        gl::Uniforms::new()
+        gl::Uniforms::new(self)
     }
 
     fn create_texture(&self, params: ui::filters::TextureParams) -> Self::Texture {

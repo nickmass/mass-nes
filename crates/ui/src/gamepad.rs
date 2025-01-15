@@ -1,7 +1,7 @@
 use std::sync::mpsc::{SendError, Sender, SyncSender};
 
 pub use gilrs;
-use gilrs::{EventType, Gilrs};
+use gilrs::{Event, EventType, Gilrs};
 use winit::event::ElementState;
 use winit::event_loop::{EventLoopClosed, EventLoopProxy};
 
@@ -21,32 +21,47 @@ impl<P: GamepadChannel> GilrsInput<P> {
         })
     }
 
+    pub fn poll_blocking(&mut self) {
+        while let Some(ev) = self.gilrs.next_event_blocking(None) {
+            self.process(ev);
+            if self.shutdown {
+                break;
+            }
+        }
+    }
     pub fn poll(&mut self) {
         while let Some(ev) = self.gilrs.next_event() {
-            let event = match ev.event {
-                EventType::ButtonPressed(button, _) => GamepadEvent::Button {
-                    gamepad_id: ev.id,
-                    state: ElementState::Pressed,
-                    button,
-                },
-                EventType::ButtonReleased(button, _) => GamepadEvent::Button {
-                    gamepad_id: ev.id,
-                    state: ElementState::Released,
-                    button,
-                },
-                EventType::AxisChanged(axis, value, _) => GamepadEvent::Axis {
-                    gamepad_id: ev.id,
-                    axis,
-                    value,
-                },
-                EventType::Connected => GamepadEvent::Connected { gamepad_id: ev.id },
-                EventType::Disconnected => GamepadEvent::Disconnected { gamepad_id: ev.id },
-                _ => return,
-            };
-
-            if let Err(_) = self.proxy.send_event(event.into()) {
-                self.shutdown = true;
+            self.process(ev);
+            if self.shutdown {
+                break;
             }
+        }
+    }
+
+    fn process(&mut self, ev: Event) {
+        let event = match ev.event {
+            EventType::ButtonPressed(button, _) => GamepadEvent::Button {
+                gamepad_id: ev.id,
+                state: ElementState::Pressed,
+                button,
+            },
+            EventType::ButtonReleased(button, _) => GamepadEvent::Button {
+                gamepad_id: ev.id,
+                state: ElementState::Released,
+                button,
+            },
+            EventType::AxisChanged(axis, value, _) => GamepadEvent::Axis {
+                gamepad_id: ev.id,
+                axis,
+                value,
+            },
+            EventType::Connected => GamepadEvent::Connected { gamepad_id: ev.id },
+            EventType::Disconnected => GamepadEvent::Disconnected { gamepad_id: ev.id },
+            _ => return,
+        };
+
+        if let Err(_) = self.proxy.send_event(event.into()) {
+            self.shutdown = true;
         }
     }
 }
