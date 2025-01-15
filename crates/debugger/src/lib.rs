@@ -5,6 +5,7 @@ mod debug_state;
 mod gfx;
 mod gl;
 mod runner;
+mod spawner;
 mod widgets;
 
 pub use app::DebuggerApp;

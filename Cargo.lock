@@ -1248,10 +1248,13 @@ dependencies = [
  "bytemuck",
  "crossbeam",
  "eframe",
+ "futures",
+ "gloo",
  "nes",
  "rfd",
  "ron",
  "serde",
+ "serde_json",
  "tracing",
  "tracing-subscriber",
  "tracing-tracy",
@@ -1262,6 +1265,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-tracing",
  "web-sys",
+ "web-worker",
 ]
 
 [[package]]
@@ -4513,6 +4517,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-tracing",
  "web-sys",
+ "web-worker",
  "winit",
 ]
 
@@ -4534,6 +4539,14 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "web-worker"
+version = "0.1.2"
+dependencies = [
+ "futures",
+ "web-sys",
 ]
 
 [[package]]

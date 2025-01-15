@@ -26,6 +26,7 @@ tracing = { version = "0.1.40" }
 wasm-tracing = "1.0"
 direct_ring_buffer = "0.2"
 crossbeam = "0.8.4"
+web-worker = { path = "../web-worker" }
 
 [dependencies.web-sys]
 version = "0.3"

@@ -1,4 +1,4 @@
-import init, * as wasm from "./pkg/web.js";
+import init, * as wasm from "./pkg/debugger.js";
 
 let finished = false;
 onmessage = async function (event) {

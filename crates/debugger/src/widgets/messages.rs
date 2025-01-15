@@ -1,6 +1,7 @@
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex, MutexGuard},
+    time::Duration,
 };
 
 use crate::egui::{self, Color32};
@@ -29,7 +30,7 @@ impl MessageStore {
 }
 
 pub struct MessageStoreInner {
-    start: (),
+    start: Timestamp,
     capacity: usize,
     messages: VecDeque<Message>,
 }
@@ -37,7 +38,7 @@ pub struct MessageStoreInner {
 impl MessageStoreInner {
     fn new(capacity: usize) -> Self {
         Self {
-            start: (),
+            start: Timestamp::now(),
             capacity,
             messages: VecDeque::with_capacity(capacity),
         }
@@ -61,7 +62,7 @@ impl MessageStoreInner {
 
 #[derive(Debug, Clone)]
 pub struct Message {
-    pub time: (),
+    pub time: Timestamp,
     pub level: tracing::Level,
     pub message: String,
 }
@@ -87,8 +88,7 @@ impl Messages {
             egui::ScrollArea::vertical().show_rows(ui, line_height, store.len(), |ui, range| {
                 for msg in range.filter_map(|i| store.get(i)) {
                     ui.horizontal(|ui| {
-                        //let elapsed = DisplayDuration(msg.time.duration_since(store.start));
-                        let elapsed = "";
+                        let elapsed = DisplayDuration(msg.time.duration_since(store.start));
                         let level =
                             egui::RichText::new(msg.level.as_str()).color(level_color(msg.level));
 
@@ -120,7 +120,7 @@ fn level_color(level: tracing::Level) -> Color32 {
     }
 }
 
-struct DisplayDuration(std::time::Duration);
+struct DisplayDuration(Duration);
 
 impl std::fmt::Display for DisplayDuration {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -136,17 +136,15 @@ impl std::fmt::Display for DisplayDuration {
 
 struct MessageWriter {
     level: tracing::Level,
-    time: (),
+    time: Timestamp,
     message: String,
 }
 
 impl MessageWriter {
     fn new(level: tracing::Level) -> Self {
-        #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str("hi three"));
         Self {
             level,
-            time: (),
+            time: Timestamp::now(),
             message: String::new(),
         }
     }
@@ -197,16 +195,62 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for EguiMessageLayer {
         _ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
         let mut writer = MessageWriter::new(event.metadata().level().clone());
-
         event.record(&mut writer);
 
-        #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str("hi one"));
         let Some(mut store) = self.store.try_lock() else {
             return;
         };
-        #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str("hi two"));
+
         store.push(writer.into());
+    }
+}
+
+use platform::Timestamp;
+
+#[cfg(not(target_arch = "wasm32"))]
+use desktop as platform;
+#[cfg(target_arch = "wasm32")]
+use web as platform;
+
+#[cfg(not(target_arch = "wasm32"))]
+mod desktop {
+    #[derive(Copy, Debug, Clone)]
+    pub struct Timestamp(std::time::Instant);
+
+    impl Timestamp {
+        pub fn now() -> Self {
+            Self(std::time::Instant::now())
+        }
+
+        pub fn duration_since(&self, Timestamp(start): Timestamp) -> std::time::Duration {
+            self.0.duration_since(start)
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+mod web {
+    use wasm_bindgen::prelude::*;
+    use web_sys::{js_sys, WorkerGlobalScope};
+    #[derive(Copy, Debug, Clone)]
+    pub struct Timestamp(f64);
+
+    impl Timestamp {
+        pub fn now() -> Self {
+            let perf = if let Some(window) = web_sys::window() {
+                window.performance().unwrap_throw()
+            } else if let Some(worker) = js_sys::global().dyn_into::<WorkerGlobalScope>().ok() {
+                worker.performance().unwrap_throw()
+            } else {
+                panic!("must have window")
+            };
+            let now = perf.now();
+            Self(now)
+        }
+
+        pub fn duration_since(&self, Timestamp(start): Timestamp) -> std::time::Duration {
+            let ms = self.0 - start;
+            std::time::Duration::from_secs_f64(ms / 1000.0)
+        }
     }
 }

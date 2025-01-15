@@ -1,7 +1,14 @@
+#[cfg(target_arch = "wasm32")]
+use crate as debugger;
+use tracing::Level;
+use tracing_subscriber::{filter, layer::SubscriberExt, Layer};
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+use debugger::{DebuggerApp, EguiMessageLayer, MessageStore};
+
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
-    use debugger::{DebuggerApp, EguiMessageLayer, MessageStore};
-
     let message_store = MessageStore::new(10_000);
     init_tracing(message_store.clone());
 
@@ -16,50 +23,13 @@ fn main() {
         Box::new(|cc| Ok(Box::new(DebuggerApp::new(cc, message_store)?))),
     )
     .unwrap();
-
-    fn init_tracing(message_store: MessageStore) {
-        use tracing::Level;
-        use tracing_subscriber::{filter, layer::SubscriberExt, Layer};
-
-        let tracy = tracing_tracy::TracyLayer::default().with_filter(
-            filter::Targets::new().with_targets([
-                ("debugger", Level::TRACE),
-                ("nes", Level::TRACE),
-                ("ui", Level::TRACE),
-            ]),
-        );
-        let log = tracing_subscriber::fmt::layer().with_filter(filter::LevelFilter::DEBUG);
-        let messages = EguiMessageLayer::new(message_store).with_filter(
-            filter::Targets::new().with_targets([
-                ("debugger", Level::TRACE),
-                ("nes", Level::TRACE),
-                ("ui", Level::TRACE),
-            ]),
-        );
-
-        tracing::subscriber::set_global_default(
-            tracing_subscriber::registry()
-                .with(tracy)
-                .with(log)
-                .with(messages),
-        )
-        .expect("init tracing");
-    }
 }
 
 #[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen(start)]
-fn main() {
-    web_sys::console::log_1(&JsValue::from_str("hi"));
-
-    use crate::{DebuggerApp, EguiMessageLayer, MessageStore};
-
+#[wasm_bindgen]
+pub fn main() {
     let message_store = MessageStore::new(10_000);
-    web_sys::console::log_1(&JsValue::from_str("two"));
     init_tracing(message_store.clone());
-    tracing::error!("tracing init");
     let web_options = eframe::WebOptions::default();
 
     wasm_bindgen_futures::spawn_local(async {
@@ -87,26 +57,47 @@ fn main() {
             _ => (),
         }
     });
+}
 
-    fn init_tracing(message_store: MessageStore) {
-        use tracing::Level;
-        use tracing_subscriber::{filter, layer::SubscriberExt, Layer};
+#[cfg(not(target_arch = "wasm32"))]
+fn init_tracing(message_store: MessageStore) {
+    let log = tracing_subscriber::fmt::layer().with_filter(filter::LevelFilter::DEBUG);
+    let tracy =
+        tracing_tracy::TracyLayer::default().with_filter(filter::Targets::new().with_targets([
+            ("debugger", Level::TRACE),
+            ("nes", Level::TRACE),
+            ("ui", Level::TRACE),
+        ]));
 
-        web_sys::console::log_1(&JsValue::from_str("1"));
-        let log = wasm_tracing::WasmLayer::default();
-        let messages = EguiMessageLayer::new(message_store).with_filter(
-            filter::Targets::new().with_targets([
-                ("debugger", Level::TRACE),
-                ("nes", Level::TRACE),
-                ("ui", Level::TRACE),
-            ]),
-        );
-        web_sys::console::log_1(&JsValue::from_str("2"));
+    let messages =
+        EguiMessageLayer::new(message_store).with_filter(filter::Targets::new().with_targets([
+            ("debugger", Level::TRACE),
+            ("nes", Level::TRACE),
+            ("ui", Level::TRACE),
+        ]));
 
-        tracing::subscriber::set_global_default(
-            tracing_subscriber::registry().with(log).with(messages),
-        )
-        .expect("init tracing");
-        web_sys::console::log_1(&JsValue::from_str("3"));
-    }
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::registry()
+            .with(tracy)
+            .with(log)
+            .with(messages),
+    )
+    .expect("init tracing");
+}
+
+#[cfg(target_arch = "wasm32")]
+fn init_tracing(message_store: MessageStore) {
+    let messages =
+        EguiMessageLayer::new(message_store).with_filter(filter::Targets::new().with_targets([
+            ("debugger", Level::TRACE),
+            ("nes", Level::TRACE),
+            ("ui", Level::TRACE),
+        ]));
+
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::registry()
+            .with(wasm_tracing::WasmLayer::default())
+            .with(messages),
+    )
+    .expect("init tracing");
 }

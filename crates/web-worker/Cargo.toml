@@ -1,0 +1,19 @@
+[package]
+name = "web-worker"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+futures = "0.3"
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+    "WorkerGlobalScope",
+    "Worker",
+    "WorkerType",
+    "WorkerOptions",
+    "DedicatedWorkerGlobalScope",
+]

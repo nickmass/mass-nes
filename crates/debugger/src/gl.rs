@@ -53,7 +53,6 @@ pub trait Vertex: bytemuck::Pod {
 }
 
 pub struct VertexBuffer<V> {
-    ctx: GlowContext,
     buffer: Buffer,
     poly_type: Polygon,
     count: i32,
@@ -74,7 +73,6 @@ impl<V: Vertex> VertexBuffer<V> {
             ctx.bind_buffer(glow::ARRAY_BUFFER, None);
 
             Ok(Self {
-                ctx,
                 buffer,
                 poly_type,
                 count: data.len() as i32,
@@ -83,40 +81,30 @@ impl<V: Vertex> VertexBuffer<V> {
         }
     }
 
-    fn enable_attrs(&self, program: &glow::Program) {
+    fn enable_attrs(&self, ctx: &GlowContext, program: &glow::Program) {
         unsafe {
             let stride = V::ATTRIBUTES.iter().map(|a| a.1.size()).sum();
             let mut offset = 0;
             for (name, atype) in V::ATTRIBUTES {
-                let Some(location) = self.ctx.get_attrib_location(*program, name) else {
+                let Some(location) = ctx.get_attrib_location(*program, name) else {
                     tracing::warn!("attribute location not found for '{name}'");
                     continue;
                 };
-                atype.layout(&self.ctx, location, stride, offset);
-                atype.enable(&self.ctx, location);
+                atype.layout(ctx, location, stride, offset);
+                atype.enable(ctx, location);
                 offset += atype.size();
             }
         }
     }
 
-    fn draw(&self) {
+    fn draw(&self, ctx: &GlowContext) {
         unsafe {
-            self.ctx
-                .draw_arrays(self.poly_type.as_gl_type(), 0, self.count);
-        }
-    }
-}
-
-impl<V> Drop for VertexBuffer<V> {
-    fn drop(&mut self) {
-        unsafe {
-            self.ctx.delete_buffer(self.buffer);
+            ctx.draw_arrays(self.poly_type.as_gl_type(), 0, self.count);
         }
     }
 }
 
 pub struct Program {
-    ctx: GlowContext,
     texture_unit: Cell<u32>,
     program: glow::Program,
     vao: Option<VertexArray>,
@@ -166,7 +154,6 @@ impl Program {
             ctx.delete_shader(frag_shader);
 
             Ok(Self {
-                ctx,
                 program,
                 vao: None,
                 texture_unit: Cell::new(0),
@@ -174,28 +161,32 @@ impl Program {
         }
     }
 
-    fn create_vao<V: Vertex>(&mut self, vertex_buffer: &VertexBuffer<V>) {
+    fn create_vao<V: Vertex>(&mut self, ctx: &GlowContext, vertex_buffer: &VertexBuffer<V>) {
         unsafe {
-            let vao = self.ctx.create_vertex_array().unwrap();
-            self.ctx
-                .bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer.buffer));
-            self.ctx.bind_vertex_array(Some(vao));
-            vertex_buffer.enable_attrs(&self.program);
-            self.vao = Some(vao);
-            self.ctx.bind_buffer(glow::ARRAY_BUFFER, None);
+            let vao = ctx.create_vertex_array().ok();
+            ctx.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer.buffer));
+            ctx.bind_vertex_array(vao);
+            vertex_buffer.enable_attrs(ctx, &self.program);
+            self.vao = vao;
+            ctx.bind_buffer(glow::ARRAY_BUFFER, None);
         }
     }
 
-    pub fn draw<V: Vertex>(&mut self, vertex_buffer: &VertexBuffer<V>, uniforms: &Uniforms) {
+    pub fn draw<V: Vertex>(
+        &mut self,
+        ctx: &GlowContext,
+        vertex_buffer: &VertexBuffer<V>,
+        uniforms: &Uniforms,
+    ) {
         unsafe {
             if let Some(vao) = self.vao.as_ref() {
-                self.ctx.bind_vertex_array(Some(*vao));
+                ctx.bind_vertex_array(Some(*vao));
             } else {
-                self.create_vao(vertex_buffer);
+                self.create_vao(ctx, vertex_buffer);
             }
-            self.ctx.use_program(Some(self.program));
-            uniforms.bind(&self.ctx, self);
-            vertex_buffer.draw();
+            ctx.use_program(Some(self.program));
+            uniforms.bind(ctx, self);
+            vertex_buffer.draw(ctx);
             self.reset_texture_unit();
         }
     }
@@ -208,17 +199,6 @@ impl Program {
 
     fn reset_texture_unit(&self) {
         self.texture_unit.set(0);
-    }
-}
-
-impl Drop for Program {
-    fn drop(&mut self) {
-        unsafe {
-            if let Some(vao) = self.vao.take() {
-                self.ctx.delete_vertex_array(vao);
-            }
-            self.ctx.delete_program(self.program);
-        }
     }
 }
 
@@ -328,7 +308,6 @@ impl Into<i32> for TextureFilter {
 }
 
 pub struct Texture {
-    ctx: GlowContext,
     texture: glow::Texture,
 }
 
@@ -341,7 +320,6 @@ impl Texture {
         pixels: &[u8],
     ) -> Result<Self, String> {
         unsafe {
-            let ctx = ctx.clone();
             let texture = ctx.create_texture()?;
             ctx.bind_texture(glow::TEXTURE_2D, Some(texture));
             ctx.tex_image_2d(
@@ -377,35 +355,25 @@ impl Texture {
                 glow::NEAREST as i32,
             );
 
-            Ok(Self { ctx, texture })
+            Ok(Self { texture })
         }
     }
 
-    pub fn with_min_filter(self, filter: TextureFilter) -> Texture {
+    pub fn with_min_filter(self, ctx: &GlowContext, filter: TextureFilter) -> Texture {
         unsafe {
-            self.ctx.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-            self.ctx
-                .tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, filter.into());
+            ctx.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+            ctx.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, filter.into());
 
             self
         }
     }
 
-    pub fn with_mag_filter(self, filter: TextureFilter) -> Texture {
+    pub fn with_mag_filter(self, ctx: &GlowContext, filter: TextureFilter) -> Texture {
         unsafe {
-            self.ctx.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-            self.ctx
-                .tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, filter.into());
+            ctx.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+            ctx.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, filter.into());
 
             self
-        }
-    }
-}
-
-impl Drop for Texture {
-    fn drop(&mut self) {
-        unsafe {
-            self.ctx.delete_texture(self.texture);
         }
     }
 }

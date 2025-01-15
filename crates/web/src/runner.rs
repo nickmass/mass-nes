@@ -3,13 +3,13 @@ use web_sys::{
     js_sys::Array,
     wasm_bindgen::{self, prelude::*},
 };
+use web_worker::WorkerSpawn;
 
 use ui::audio::SamplesProducer;
 
 use crate::{
     app::{EmulatorInput, NesInputs},
     gfx::GfxBackBuffer,
-    worker::WorkerSpawn,
 };
 
 pub struct MachineSpawner {
@@ -40,7 +40,7 @@ impl MachineSpawner {
 
 #[wasm_bindgen]
 pub async fn machine_worker(ptr: u32, transferables: Array) {
-    crate::worker::worker::<MachineSpawner>(ptr, transferables).await
+    web_worker::worker::<MachineSpawner>(ptr, transferables).await
 }
 
 impl WorkerSpawn for MachineSpawner {

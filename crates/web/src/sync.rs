@@ -1,9 +1,10 @@
 use crossbeam::sync::{Parker, Unparker};
 use wasm_bindgen::prelude::*;
 use web_sys::{js_sys::Array, wasm_bindgen};
+use web_worker::WorkerSpawn;
 use winit::event_loop::EventLoopProxy;
 
-use crate::{app::UserEvent, worker::WorkerSpawn};
+use crate::app::UserEvent;
 
 pub trait FrameSync {
     fn sync_frame(&mut self);
@@ -56,7 +57,7 @@ impl<T> SyncSpawner<T> {
 
 #[wasm_bindgen]
 pub async fn sync_worker(ptr: u32, transferables: Array) {
-    crate::worker::worker::<SyncSpawner<CpalSync>>(ptr, transferables).await
+    web_worker::worker::<SyncSpawner<CpalSync>>(ptr, transferables).await
 }
 
 impl<T: FrameSync + Send + 'static> WorkerSpawn for SyncSpawner<T> {

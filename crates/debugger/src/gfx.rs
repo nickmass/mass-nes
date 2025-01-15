@@ -1,8 +1,4 @@
-use eframe::{
-    egui::{self, PaintCallbackInfo},
-    egui_glow::Painter,
-    glow,
-};
+use eframe::{egui::PaintCallbackInfo, egui_glow::Painter, glow};
 use glow::HasContext;
 use serde::{Deserialize, Serialize};
 
@@ -154,23 +150,23 @@ impl Gfx {
         let view = paint_info.viewport_in_pixels();
         let size = (view.width_px as f64, view.height_px as f64);
         let uniforms = filter.process(&ctx, size, &self.frame);
-        program.draw(&self.vertex_buffer, &uniforms);
+        program.draw(&ctx, &self.vertex_buffer, &uniforms);
         self.tracy.frame(&self.frame);
     }
 }
 
 #[derive(Clone)]
 pub struct GfxBackBuffer {
-    ctx: egui::Context,
+    repaint: Repainter,
     updated: Arc<AtomicBool>,
     frame: Arc<Mutex<Vec<u16>>>,
 }
 
 impl GfxBackBuffer {
-    pub fn new(ctx: egui::Context) -> Self {
+    pub fn new(repaint: Repainter) -> Self {
         let frame = Arc::new(Mutex::new(vec![0; 256 * 240]));
         Self {
-            ctx,
+            repaint,
             frame,
             updated: Arc::new(AtomicBool::new(false)),
         }
@@ -181,13 +177,15 @@ impl GfxBackBuffer {
             let mut frame = self.frame.lock().unwrap();
             func(&mut frame);
             self.updated.store(true, Ordering::Relaxed);
-            self.ctx.request_repaint();
+            self.repaint.request();
         }
     }
 
     pub fn attempt_swap(&self, other: &mut Vec<u16>) {
         if self.updated.load(Ordering::Relaxed) {
-            let mut frame = self.frame.lock().unwrap();
+            let Some(mut frame) = self.frame.try_lock().ok() else {
+                return;
+            };
             std::mem::swap(&mut *frame, other);
             self.updated.store(false, Ordering::Relaxed);
         }
@@ -239,8 +237,8 @@ impl FilterContext for GlowContext {
             params.pixels,
         )
         .unwrap()
-        .with_mag_filter(filter)
-        .with_min_filter(filter)
+        .with_mag_filter(&self, filter)
+        .with_min_filter(&self, filter)
     }
 }
 
@@ -254,15 +252,33 @@ impl FilterUniforms<GlowContext> for gl::Uniforms {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-use desktop::Tracy;
+pub use platform::Repainter;
+use platform::Tracy;
 
+#[cfg(not(target_arch = "wasm32"))]
+use desktop as platform;
 #[cfg(target_arch = "wasm32")]
-use web::Tracy;
+use web as platform;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod desktop {
+    use eframe::egui;
     use tracy_ext::TracyExt;
+
+    #[derive(Clone)]
+    pub struct Repainter {
+        ctx: egui::Context,
+    }
+
+    impl Repainter {
+        pub fn new(ctx: egui::Context) -> Self {
+            Self { ctx }
+        }
+
+        pub fn request(&mut self) {
+            self.ctx.request_repaint();
+        }
+    }
 
     pub struct Tracy {
         palette: Box<[u8]>,
@@ -324,6 +340,35 @@ mod desktop {
 
 #[cfg(target_arch = "wasm32")]
 mod web {
+    use eframe::egui;
+    use futures::channel::mpsc::{channel, Sender};
+    use futures::StreamExt;
+
+    #[derive(Clone)]
+    pub struct Repainter {
+        tx: Sender<()>,
+    }
+
+    impl Repainter {
+        pub fn new(ctx: egui::Context) -> Self {
+            let (tx, mut rx) = channel(2);
+            let paint = async move {
+                loop {
+                    rx.next().await;
+                    ctx.request_repaint();
+                }
+            };
+
+            wasm_bindgen_futures::spawn_local(paint);
+
+            Self { tx }
+        }
+
+        pub fn request(&mut self) {
+            let _ = self.tx.try_send(());
+        }
+    }
+
     pub struct Tracy;
 
     impl Tracy {

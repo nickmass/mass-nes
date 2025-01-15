@@ -6,7 +6,7 @@ use nes::UserInput;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use ui::{
-    audio::{Audio, CpalAudio, SamplesProducer},
+    audio::{Audio, CpalAudio},
     filters::NesNtscSetup,
     gamepad::{GamepadChannel, GamepadEvent, GilrsInput},
     input::{InputMap, InputType},
@@ -20,12 +20,16 @@ use std::{
     },
 };
 
-use crate::audio::{CpalSync, FrameSync};
 use crate::debug_state::{DebugSwapState, DebugUiState, Palette};
+use crate::egui;
 use crate::gfx::{Filter, Gfx, GfxBackBuffer};
 use crate::runner::{DebugRequest, EmulatorInput};
 use crate::widgets::*;
-use crate::{egui, egui_glow};
+use crate::{
+    audio::CpalSync,
+    gfx::Repainter,
+    spawner::{GamepadSpawner, MachineSpawner, Spawn, SyncSpawner},
+};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 enum Region {
@@ -105,6 +109,7 @@ pub struct DebuggerApp {
     code_viewer: CodeViewer,
     breakpoints: Breakpoints,
     first_update: bool,
+    help: Help,
 }
 
 impl DebuggerApp {
@@ -116,12 +121,12 @@ impl DebuggerApp {
         let palette = ntsc_setup.generate_palette();
 
         let gl = cc.gl.as_ref().expect("require glow opengl context").clone();
-        let back_buffer = GfxBackBuffer::new(cc.egui_ctx.clone());
+        let app_events = AppEvents::new();
+        let back_buffer = GfxBackBuffer::new(Repainter::new(cc.egui_ctx.clone()));
         let gfx = Gfx::new(gl, back_buffer.clone(), &palette)?;
         let nes_screen = NesScreen::new(gfx);
         let palette = Palette::new(palette);
 
-        let app_events = AppEvents::new();
         let input = SharedInput::new();
         let last_input = input.state();
         let (emu_control, emu_commands) = EmulatorControl::new();
@@ -132,24 +137,33 @@ impl DebuggerApp {
         let nt_viewer = NametableViewer::new();
         let sprite_viewer = SpriteViewer::new();
         let messages = Messages::new(message_store);
+        let help = Help::new(app_events.create_proxy(), emu_control.clone());
 
         let (mut audio, sync, samples) =
             CpalAudio::new(CpalSync::new(), nes::Region::Ntsc.refresh_rate(), 64).unwrap();
+        audio.pause();
 
-        /*
-        spawn_sync_thread(input.clone(), emu_control.clone(), sync);
+        let sync = SyncSpawner {
+            input: input.clone(),
+            emu_control: emu_control.clone(),
+            sync,
+        };
+        sync.spawn();
 
-        spawn_machine_thread(
+        let machine = MachineSpawner {
             emu_commands,
             back_buffer,
             samples,
-            audio.sample_rate(),
-            debug_swap,
-        );
-        audio.pause();
+            sample_rate: audio.sample_rate(),
+            debug: debug_swap,
+        };
+        machine.spawn();
 
-        spawn_gamepad_thread(gamepad_channel);
-        */
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(gamepad) = gamepad_channel {
+            let gamepad = GamepadSpawner { gamepad };
+            gamepad.spawn();
+        }
 
         let state = if let Some(storage) = cc.storage {
             storage
@@ -179,6 +193,7 @@ impl DebuggerApp {
             code_viewer: CodeViewer::new(),
             breakpoints: Breakpoints::new(),
             recents: Recents::new(&[], 10),
+            help,
         };
 
         app.hydrate();
@@ -278,7 +293,9 @@ impl DebuggerApp {
             }
             AppEvent::Gamepad(gamepad) => match gamepad {
                 GamepadEvent::Button { state, button, .. } => {
-                    let mut input = self.input.input_map.lock().unwrap();
+                    let Some(mut input) = self.input.input_map.try_lock().ok() else {
+                        return;
+                    };
                     if state.is_pressed() {
                         input.press(button);
                     } else {
@@ -286,7 +303,9 @@ impl DebuggerApp {
                     }
                 }
                 GamepadEvent::Axis { axis, value, .. } => {
-                    let mut input = self.input.input_map.lock().unwrap();
+                    let Some(mut input) = self.input.input_map.try_lock().ok() else {
+                        return;
+                    };
                     input.axis(axis, value);
                 }
                 _ => (),
@@ -450,6 +469,8 @@ impl eframe::App for DebuggerApp {
             self.nes_screen.show(&ctx);
         }
 
+        self.help.show(&ctx);
+
         if self.state.show_code {
             let mut paused = self.pause;
             if self
@@ -523,60 +544,11 @@ impl eframe::App for DebuggerApp {
             }
         });
 
-        self.input.update(input_iter);
-        let state = self.input.state();
-        self.handle_input(state);
+        if let Some(state) = self.input.update(input_iter) {
+            self.handle_input(state);
+        }
     }
 }
-
-fn spawn_machine_thread(
-    emu_commands: EmulatorCommands,
-    back_buffer: GfxBackBuffer,
-    samples: SamplesProducer,
-    sample_rate: u32,
-    debug: DebugSwapState,
-) {
-    std::thread::spawn(move || {
-        let runner = crate::runner::Runner::new(
-            emu_commands,
-            back_buffer,
-            Some(samples),
-            sample_rate,
-            debug,
-        );
-        runner.run()
-    });
-}
-
-fn spawn_sync_thread(input: SharedInput, emu_control: EmulatorControl, mut sync: CpalSync) {
-    std::thread::spawn(move || loop {
-        sync.sync_frame();
-        let input = input.state();
-        emu_control.player_one(input.controller);
-        emu_control.sync();
-        if input.rewind {
-            emu_control.rewind();
-        }
-        if input.power {
-            emu_control.power();
-        }
-        if input.reset {
-            emu_control.reset();
-        }
-    });
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn spawn_gamepad_thread(gamepad_channel: Option<GilrsInput<AppEventsProxy>>) {
-    if let Some(mut gamepad) = gamepad_channel {
-        std::thread::spawn(move || loop {
-            gamepad.poll();
-        });
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn spawn_gamepad_thread(gamepad_channel: Option<GilrsInput<AppEventsProxy>>) {}
 
 #[derive(Debug, Clone)]
 pub enum AppEvent {
@@ -718,8 +690,11 @@ impl SharedInput {
         }
     }
 
-    pub fn update<I: Iterator<Item = Input<K>>, K: Into<InputType>>(&self, inputs: I) {
-        let mut input_map = self.input_map.lock().unwrap();
+    pub fn update<I: Iterator<Item = Input<K>>, K: Into<InputType>>(
+        &self,
+        inputs: I,
+    ) -> Option<InputState> {
+        let mut input_map = self.input_map.try_lock().ok()?;
 
         for input in inputs {
             if input.pressed {
@@ -728,6 +703,18 @@ impl SharedInput {
                 input_map.release(input.key);
             }
         }
+
+        let state = InputState {
+            controller: input_map.controller(),
+            rewind: input_map.rewind(),
+            power: input_map.power(),
+            reset: input_map.reset(),
+            pause: input_map.pause(),
+            step_forward: input_map.step_forward(),
+            step_backward: input_map.step_backward(),
+        };
+
+        Some(state)
     }
 
     pub fn state(&self) -> InputState {

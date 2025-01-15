@@ -12,7 +12,6 @@ mod gl;
 mod offscreen_gfx;
 mod runner;
 mod sync;
-mod worker;
 
 use app::UserEvent;
 
@@ -48,7 +47,7 @@ impl Emulator {
         let mut app = app::App::new(gfx_worker, audio, canvas)?;
 
         let sync_spawner = sync::SyncSpawner::new(sync, app.proxy());
-        worker::spawn_worker(sync_spawner).await?;
+        web_worker::spawn_worker(sync_spawner).await?;
 
         let nes_inputs = app.nes_io();
 
@@ -59,7 +58,7 @@ impl Emulator {
             samples_producer,
             nes_inputs,
         );
-        worker::spawn_worker(machine_spawner).await?;
+        web_worker::spawn_worker(machine_spawner).await?;
 
         let proxy = app.proxy();
         app.run();
