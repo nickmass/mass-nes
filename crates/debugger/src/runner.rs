@@ -5,8 +5,60 @@ use nes::{Cartridge, Machine, MachineState, Region, RunResult, UserInput};
 use tracing::instrument;
 use ui::audio::SamplesSender;
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum Playback {
+    Normal,
+    Rewind,
+    StepForward,
+    StepBackward,
+    FastForward,
+}
+
+impl Playback {
+    fn save_state(&self) -> bool {
+        match self {
+            Playback::Rewind | Playback::StepBackward => false,
+            _ => true,
+        }
+    }
+
+    fn reverse_audio(&self) -> bool {
+        match self {
+            Playback::Rewind | Playback::StepBackward => true,
+            _ => false,
+        }
+    }
+
+    fn update_audio(&self) -> bool {
+        match self {
+            Playback::StepForward | Playback::StepBackward | Playback::FastForward => false,
+            _ => true,
+        }
+    }
+
+    fn skip_step(&self) -> bool {
+        match self {
+            Playback::StepForward | Playback::StepBackward => true,
+            _ => false,
+        }
+    }
+
+    fn skip_sleep(&self) -> bool {
+        match self {
+            Playback::FastForward | Playback::StepForward | Playback::StepBackward => true,
+            _ => false,
+        }
+    }
+
+    fn frame_freq(&self) -> usize {
+        match self {
+            Playback::FastForward => 2,
+            _ => 1,
+        }
+    }
+}
+
 #[derive(Debug)]
-#[allow(unused)]
 pub enum EmulatorInput {
     Nes(UserInput),
     Rewind,
@@ -16,6 +68,7 @@ pub enum EmulatorInput {
     DebugRequest(DebugRequest),
     StepBack,
     StepForward,
+    FastForward,
 }
 
 #[derive(Debug)]
@@ -60,6 +113,15 @@ impl Runner {
     ) -> Self {
         let blip = blip_buf_rs::Blip::new(sample_rate / 30);
 
+        let save_store = SaveStore::builder()
+            .add(1, 600)
+            .add(2, 3600)
+            .add(2, 600)
+            .add(2, 600)
+            .add(2, 10000)
+            .add(2, 10000)
+            .build();
+
         Self {
             machine: None,
             back_buffer,
@@ -70,7 +132,7 @@ impl Runner {
             blip_delta: 0,
             audio_buffer: vec![0; 1024],
             save_states: vec![None; 10],
-            save_store: SaveStore::new(32000, 5),
+            save_store,
             frame: 0,
             total_frames: 0,
             debug,
@@ -92,6 +154,7 @@ impl Runner {
         };
 
         loop {
+            let mut playback = Playback::Normal;
             for input in commands.try_commands() {
                 match input {
                     EmulatorInput::Nes(input) => {
@@ -119,6 +182,7 @@ impl Runner {
                             if let Some((frame, data)) = self.save_store.pop() {
                                 self.frame = frame;
                                 machine.restore_state(&data);
+                                playback = Playback::Rewind;
                             }
                         }
                     }
@@ -127,12 +191,14 @@ impl Runner {
                             if let Some((frame, data)) = self.save_store.pop() {
                                 self.frame = frame;
                                 machine.restore_state(&data);
+                                playback = Playback::StepBackward;
+                                self.step(playback);
                             }
                         }
-                        self.step();
                     }
                     EmulatorInput::StepForward => {
-                        self.step();
+                        playback = Playback::StepForward;
+                        self.step(playback);
                     }
                     EmulatorInput::LoadCartridge(region, rom) => {
                         let mut rom = std::io::Cursor::new(rom);
@@ -149,20 +215,28 @@ impl Runner {
                     EmulatorInput::DebugRequest(req) => {
                         self.debug_request = req;
                     }
+                    EmulatorInput::FastForward => {
+                        playback = Playback::FastForward;
+                    }
                 }
             }
 
-            if self.samples_tx.wants_samples() {
-                self.step();
+            if !playback.skip_step() && self.samples_tx.wants_samples() {
+                self.step(playback);
             }
 
-            std::thread::sleep(Duration::from_millis(1));
+            if !playback.skip_sleep() {
+                std::thread::sleep(Duration::from_millis(1));
+            }
         }
     }
 
     #[instrument(skip_all)]
-    fn step(&mut self) {
+    fn step(&mut self, playback: Playback) {
         if let Some(machine) = self.machine.as_mut() {
+            if playback.save_state() {
+                self.save_store.push(self.frame, || machine.save_state());
+            }
             match machine.run_with_breakpoints(|s: &MachineState| {
                 if let Some(addr) = s.cpu.instruction_addr {
                     self.debug_request.breakpoints.is_set(addr)
@@ -173,10 +247,11 @@ impl Runner {
                 RunResult::Frame => {
                     self.frame += 1;
                     self.total_frames += 1;
-                    self.save_store.push(self.frame, || machine.save_state());
 
-                    self.update_audio();
-                    self.update_frame();
+                    self.update_audio(playback);
+                    if self.frame % playback.frame_freq() == 0 || true {
+                        self.update_frame();
+                    }
                     self.update_debug(false);
                 }
                 RunResult::Breakpoint => {
@@ -190,19 +265,29 @@ impl Runner {
     }
 
     #[instrument(skip_all)]
-    fn update_audio(&mut self) {
+    fn update_audio(&mut self, playback: Playback) {
         if let Some(machine) = self.machine.as_mut() {
             let samples = machine.get_audio();
             let count = samples.len();
 
-            for (i, v) in samples.iter().enumerate() {
-                self.blip.add_delta(i as u32, *v as i32 - self.blip_delta);
-                self.blip_delta = *v as i32;
+            if playback.reverse_audio() {
+                for (i, v) in samples.iter().rev().enumerate() {
+                    self.blip.add_delta(i as u32, *v as i32 - self.blip_delta);
+                    self.blip_delta = *v as i32;
+                }
+            } else {
+                for (i, v) in samples.iter().enumerate() {
+                    self.blip.add_delta(i as u32, *v as i32 - self.blip_delta);
+                    self.blip_delta = *v as i32;
+                }
             }
             self.blip.end_frame(count as u32);
+
             while self.blip.samples_avail() > 0 {
                 let count = self.blip.read_samples(&mut self.audio_buffer, 1024, false) as usize;
-                self.samples_tx.add_samples(&self.audio_buffer[..count]);
+                if playback.update_audio() {
+                    self.samples_tx.add_samples(&self.audio_buffer[..count]);
+                }
             }
         }
     }
@@ -265,18 +350,83 @@ impl Runner {
     }
 }
 
+struct SaveStoreBuilder {
+    divisor: usize,
+    generations: Vec<SaveStoreGeneration>,
+}
+
+impl SaveStoreBuilder {
+    fn add(mut self, divisor: usize, capacity: usize) -> Self {
+        self.divisor *= divisor;
+        self.generations
+            .push(SaveStoreGeneration::new(capacity, self.divisor));
+        self
+    }
+
+    fn build(self) -> SaveStore {
+        SaveStore {
+            generations: self.generations,
+        }
+    }
+}
+
 struct SaveStore {
-    limit: usize,
-    freq: usize,
-    saves: VecDeque<(usize, nes::SaveData)>,
+    generations: Vec<SaveStoreGeneration>,
 }
 
 impl SaveStore {
-    fn new(limit: usize, freq: usize) -> Self {
+    fn builder() -> SaveStoreBuilder {
+        SaveStoreBuilder {
+            divisor: 1,
+            generations: Vec::new(),
+        }
+    }
+
+    fn pop(&mut self) -> Option<(usize, nes::SaveData)> {
+        for gen in self.generations.iter_mut() {
+            if let Some(state) = gen.pop() {
+                return Some(state);
+            }
+        }
+
+        None
+    }
+
+    fn push<F: FnOnce() -> nes::SaveData>(&mut self, frame: usize, func: F) {
+        let mut carry_over = None;
+        let mut func = Some(func);
+        for gen in self.generations.iter_mut() {
+            if let Some(func) = func.take() {
+                carry_over = gen.push(frame, func);
+            } else if let Some((frame, data)) = carry_over {
+                carry_over = gen.push(frame, || data);
+            }
+
+            if carry_over.is_none() {
+                break;
+            }
+        }
+    }
+
+    fn clear(&mut self) {
+        for gen in self.generations.iter_mut() {
+            gen.clear();
+        }
+    }
+}
+
+struct SaveStoreGeneration {
+    capacity: usize,
+    divisor: usize,
+    saves: VecDeque<(usize, nes::SaveData)>,
+}
+
+impl SaveStoreGeneration {
+    fn new(capacity: usize, divisor: usize) -> Self {
         Self {
-            limit,
-            freq,
-            saves: VecDeque::new(),
+            capacity,
+            divisor,
+            saves: VecDeque::with_capacity(capacity),
         }
     }
 
@@ -284,18 +434,26 @@ impl SaveStore {
         self.saves.pop_back()
     }
 
-    fn push<F: FnOnce() -> nes::SaveData>(&mut self, frame: usize, func: F) {
-        if frame % self.freq != 0 {
-            return;
+    fn push<F: FnOnce() -> nes::SaveData>(
+        &mut self,
+        frame: usize,
+        func: F,
+    ) -> Option<(usize, nes::SaveData)> {
+        if frame % self.divisor != 0 {
+            return None;
         }
 
         let data = func();
 
-        if self.saves.len() == self.limit {
-            self.saves.pop_front();
-        }
+        let excess = if self.saves.len() == self.capacity {
+            self.saves.pop_front()
+        } else {
+            None
+        };
 
         self.saves.push_back((frame, data));
+
+        excess
     }
 
     fn clear(&mut self) {

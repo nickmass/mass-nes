@@ -9,6 +9,8 @@ use crate::{
 };
 use egui::Vec2;
 
+use super::{Message, PopupMessage};
+
 const SCREEN_INTERACT: &'static str = "screen_interact";
 
 struct Size {
@@ -39,6 +41,7 @@ impl Size {
 pub struct NesScreen {
     size: Arc<Size>,
     gfx: Arc<Mutex<Gfx>>,
+    popup: PopupMessage,
 }
 
 impl NesScreen {
@@ -46,11 +49,12 @@ impl NesScreen {
         let gfx = Arc::new(Mutex::new(gfx));
         let (width, height) = gfx.lock().unwrap().filter_dimensions();
         let size = Arc::new(Size::new(width, height));
+        let popup = PopupMessage::new();
 
-        Self { gfx, size }
+        Self { gfx, size, popup }
     }
 
-    fn paint(&self, ui: &mut egui::Ui) {
+    fn paint(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         let avail = ui.available_size();
         let size = self.size.as_vec();
         let ratio = avail / size;
@@ -76,6 +80,21 @@ impl NesScreen {
         };
 
         ui.painter().add(callback);
+
+        if self.popup.has_message() {
+            egui::Area::new(egui::Id::new("popup_text"))
+                .fixed_pos(rect.left_top())
+                .default_size(rect.size())
+                .fade_in(true)
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    egui::Frame::popup(ui.style())
+                        .outer_margin(5.0)
+                        .show(ui, |ui| {
+                            self.popup.show(ui);
+                        });
+                });
+        }
     }
 
     pub fn filter(&mut self, filter: Filter) {
@@ -105,7 +124,7 @@ impl NesScreen {
             escape: false,
         };
         let res = egui::Frame::none().show(ui, |ui| {
-            self.paint(ui);
+            self.paint(ctx, ui);
 
             let res = ui.interact(ui.min_rect(), SCREEN_INTERACT.into(), egui::Sense::click());
 
@@ -114,10 +133,17 @@ impl NesScreen {
             }
 
             ui.memory_mut(|m| m.set_focus_lock_filter(SCREEN_INTERACT.into(), focus_filter));
-
             res
         });
 
         res.inner
+    }
+
+    pub fn set_message(&mut self, message: Message) {
+        self.popup.set_message(message);
+    }
+
+    pub fn has_message(&self) -> bool {
+        self.popup.has_message()
     }
 }

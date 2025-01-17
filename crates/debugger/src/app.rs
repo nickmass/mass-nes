@@ -249,26 +249,48 @@ impl<A: Audio> DebuggerApp<A> {
             self.pause = true;
             self.handle_pause();
             self.emu_control.step_back();
+            self.nes_screen.set_message(Message::StepBack);
         }
 
         if !self.last_input.step_forward && input_state.step_forward {
             self.pause = true;
             self.handle_pause();
             self.emu_control.step_forward();
+            self.nes_screen.set_message(Message::StepForward);
         }
 
         self.emu_control.player_one(input_state.controller);
+
+        if let Some(slot) = input_state.save_state {
+            self.emu_control.save_state(slot);
+            self.nes_screen.set_message(Message::SaveState(slot));
+        }
+        if let Some(slot) = input_state.restore_state {
+            self.emu_control.restore_state(slot);
+            self.nes_screen.set_message(Message::RestoreState(slot));
+        }
+        if input_state.fast_forward {
+            self.emu_control.fast_forward();
+            self.nes_screen.set_message(Message::FastForward);
+        }
         if input_state.rewind {
             self.emu_control.rewind();
+            self.nes_screen.set_message(Message::Rewind);
         }
         if input_state.power {
             self.emu_control.power();
+            self.nes_screen.set_message(Message::Power);
         }
         if input_state.reset {
             self.emu_control.reset();
+            self.nes_screen.set_message(Message::Reset);
         }
 
         self.last_input = input_state;
+
+        if !self.nes_screen.has_message() && self.pause {
+            self.nes_screen.set_message(Message::Pause);
+        }
     }
 
     fn handle_pause(&mut self) {
@@ -663,6 +685,18 @@ impl EmulatorControl {
     pub fn debug_request(&self, debug: DebugRequest) {
         let _ = self.tx.send(EmulatorInput::DebugRequest(debug));
     }
+
+    pub fn fast_forward(&self) {
+        let _ = self.tx.send(EmulatorInput::FastForward);
+    }
+
+    pub fn restore_state(&self, slot: u8) {
+        let _ = self.tx.send(EmulatorInput::RestoreState(slot as u32));
+    }
+
+    pub fn save_state(&self, slot: u8) {
+        let _ = self.tx.send(EmulatorInput::SaveState(slot as u32));
+    }
 }
 
 pub struct EmulatorCommands {
@@ -688,6 +722,9 @@ pub struct InputState {
     pub pause: bool,
     pub step_forward: bool,
     pub step_backward: bool,
+    pub save_state: Option<u8>,
+    pub restore_state: Option<u8>,
+    fast_forward: bool,
 }
 
 #[derive(Clone)]
@@ -724,6 +761,9 @@ impl SharedInput {
             pause: input_map.pause(),
             step_forward: input_map.step_forward(),
             step_backward: input_map.step_backward(),
+            save_state: input_map.save_state(),
+            restore_state: input_map.restore_state(),
+            fast_forward: input_map.fast_forward(),
         };
 
         Some(state)
@@ -740,6 +780,9 @@ impl SharedInput {
             pause: input_map.pause(),
             step_forward: input_map.step_forward(),
             step_backward: input_map.step_backward(),
+            save_state: input_map.save_state(),
+            restore_state: input_map.restore_state(),
+            fast_forward: input_map.fast_forward(),
         }
     }
 }

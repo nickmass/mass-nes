@@ -139,6 +139,12 @@ impl InputMap {
         self.is_pressed(KeyCode::Tab) | self.is_pressed(Button::LeftTrigger)
     }
 
+    pub fn fast_forward(&self) -> bool {
+        self.is_pressed(KeyCode::Backquote)
+            | self.is_pressed(KeyCode::ShiftLeft)
+            | self.is_pressed(Button::RightTrigger)
+    }
+
     pub fn pause(&self) -> bool {
         self.is_pressed(KeyCode::Space)
     }
@@ -202,6 +208,7 @@ impl From<egui::Key> for InputType {
             Key::Quote => KeyCode::Quote,
             Key::OpenBracket => KeyCode::BracketLeft,
             Key::CloseBracket => KeyCode::BracketRight,
+            Key::Backtick => KeyCode::Backquote,
             Key::Num0 => KeyCode::Digit0,
             Key::Num1 => KeyCode::Digit1,
             Key::Num2 => KeyCode::Digit2,

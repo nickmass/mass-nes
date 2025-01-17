@@ -362,7 +362,7 @@ impl Texture {
                 0,
                 format.format(),
                 format.ty(),
-                Some(pixels),
+                glow::PixelUnpackData::Slice(Some(pixels)),
             );
 
             ctx.tex_parameter_i32(

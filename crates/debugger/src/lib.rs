@@ -3,6 +3,7 @@ mod cpu_6502;
 mod debug_state;
 mod gfx;
 mod gl;
+mod platform;
 mod runner;
 mod spawner;
 mod widgets;
