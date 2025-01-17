@@ -18,7 +18,7 @@ impl Null {
         let pause = Pause::new();
         let sample_rate = 48000;
 
-        let (tx, mut rx) = samples_channel(sample_rate as usize, 256);
+        let (tx, mut rx) = samples_channel(sample_rate as usize, 1024);
 
         let inner_pause = pause.clone();
 
@@ -30,15 +30,17 @@ impl Null {
             loop {
                 if !pause.is_paused() {
                     dur += now.elapsed();
+                    now = Instant::now();
                     let millis = dur.as_millis() as u64;
                     dur -= Duration::from_millis(millis);
 
                     let target_samples = samples_per_ms * millis;
 
                     for _ in (0..target_samples).zip(&mut rx) {}
+                } else {
+                    now = Instant::now();
                 }
 
-                now = Instant::now();
                 std::thread::sleep(Duration::from_millis(1));
             }
         });

@@ -1,6 +1,8 @@
 ### Mass NES
-A very basic NES Emulator written in Rust
+A NES Emulator written in Rust
 
-![Demo](https://raw.githubusercontent.com/nickmass/mass-nes/master/demo.png)
+Web based player here: <https://nickmass.com/emu/index.html>
 
-Web based demo here: <https://nickmass.com/emu/index.html>
+Web based debugger here: <https://nickmass.com/emu/debug/index.html>
+
+![Screenshot](https://raw.githubusercontent.com/nickmass/mass-nes/master/screenshot.png)
