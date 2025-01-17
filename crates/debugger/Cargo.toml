@@ -8,6 +8,9 @@ edition.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[build-dependencies]
+ui = { path = "../ui", features = ["egui"] }
+
 [dependencies]
 blip_buf-rs = "0.1"
 bytemuck = "1.18.0"

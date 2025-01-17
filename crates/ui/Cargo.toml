@@ -15,10 +15,21 @@ nes-ntsc-rust = { path = "../nes-ntsc-rust" }
 tracing = "0.1.40"
 direct_ring_buffer = "0.2"
 egui = { version = "0.29.1", optional = true }
-crossbeam = "0.8.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cpal = "0.15"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-cpal = { version = "0.15", features = ["wasm-bindgen"] }
+wasm-bindgen-futures = { version = "0.4" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies.web-sys]
+version = "0.3"
+features = [
+    "console",
+    "AudioContext",
+    "AudioWorklet",
+    "Worklet",
+    "AudioWorkletNodeOptions",
+    "AudioWorkletNode",
+    "AudioDestinationNode",
+]

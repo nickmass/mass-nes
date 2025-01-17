@@ -1,4 +1,3 @@
-use ui::gamepad::GilrsInput;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
@@ -6,11 +5,10 @@ use web_sys::js_sys::Array;
 #[cfg(target_arch = "wasm32")]
 use web_worker::worker;
 
-use crate::app::{AppEventsProxy, EmulatorCommands, EmulatorControl, SharedInput};
+use crate::app::EmulatorCommands;
 use crate::debug_state::DebugSwapState;
 use crate::gfx::GfxBackBuffer;
-use ui::audio::{SamplesProducer, SamplesSync};
-use ui::sync::FrameSync;
+use ui::audio::SamplesSender;
 
 pub trait Spawn: Sized + Send + 'static {
     const NAME: &'static str;
@@ -40,7 +38,7 @@ pub trait Spawn: Sized + Send + 'static {
 pub struct MachineSpawner {
     pub emu_commands: EmulatorCommands,
     pub back_buffer: GfxBackBuffer,
-    pub samples: SamplesProducer,
+    pub samples_tx: SamplesSender,
     pub sample_rate: u32,
     pub debug: DebugSwapState,
 }
@@ -58,60 +56,20 @@ impl Spawn for MachineSpawner {
         let MachineSpawner {
             emu_commands,
             back_buffer,
-            samples,
+            samples_tx,
             sample_rate,
             debug,
         } = self;
 
-        let runner = crate::runner::Runner::new(
-            emu_commands,
-            back_buffer,
-            Some(samples),
-            sample_rate,
-            debug,
-        );
+        let runner =
+            crate::runner::Runner::new(emu_commands, back_buffer, samples_tx, sample_rate, debug);
         runner.run()
     }
 }
 
-pub struct SyncSpawner {
-    pub audio_sync: SamplesSync,
-    pub input: SharedInput,
-    pub emu_control: EmulatorControl,
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub async fn sync_worker(ptr: u32, transferables: Array) {
-    worker::<web::WasmSpawn<SyncSpawner>>(ptr, transferables).await
-}
-
-impl Spawn for SyncSpawner {
-    const NAME: &'static str = stringify!(sync_worker);
-
-    fn run(mut self) {
-        loop {
-            self.audio_sync.sync_frame();
-            if !self.emu_control.pending_run() {
-                let input = self.input.state();
-                self.emu_control.player_one(input.controller);
-                if input.rewind {
-                    self.emu_control.rewind();
-                }
-                if input.power {
-                    self.emu_control.power();
-                }
-                if input.reset {
-                    self.emu_control.reset();
-                }
-            }
-            self.emu_control.request_run();
-        }
-    }
-}
-
+#[cfg(not(target_arch = "wasm32"))]
 pub struct GamepadSpawner {
-    pub gamepad: GilrsInput<AppEventsProxy>,
+    pub gamepad: ui::gamepad::GilrsInput<crate::app::AppEventsProxy>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]

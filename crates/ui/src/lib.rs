@@ -3,4 +3,3 @@ pub mod filters;
 pub mod fm2;
 pub mod gamepad;
 pub mod input;
-pub mod sync;

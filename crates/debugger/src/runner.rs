@@ -1,10 +1,12 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, time::Duration};
 
 use blip_buf_rs::Blip;
 use nes::{Cartridge, Machine, MachineState, Region, RunResult, UserInput};
 use tracing::instrument;
-use ui::audio::SamplesProducer;
+use ui::audio::SamplesSender;
 
+#[derive(Debug)]
+#[allow(unused)]
 pub enum EmulatorInput {
     Nes(UserInput),
     Rewind,
@@ -12,9 +14,11 @@ pub enum EmulatorInput {
     RestoreState(u32),
     LoadCartridge(Region, Vec<u8>),
     DebugRequest(DebugRequest),
-    Sync,
+    StepBack,
+    StepForward,
 }
 
+#[derive(Debug)]
 pub struct DebugRequest {
     pub interval: u64,
     pub cpu_mem: bool,
@@ -33,7 +37,7 @@ pub struct Runner {
     machine: Option<Machine>,
     back_buffer: GfxBackBuffer,
     commands: Option<EmulatorCommands>,
-    samples_producer: Option<SamplesProducer>,
+    samples_tx: SamplesSender,
     sample_rate: u32,
     blip: Blip,
     blip_delta: i32,
@@ -50,7 +54,7 @@ impl Runner {
     pub fn new(
         commands: EmulatorCommands,
         back_buffer: GfxBackBuffer,
-        samples_producer: Option<SamplesProducer>,
+        samples_tx: SamplesSender,
         sample_rate: u32,
         debug: DebugSwapState,
     ) -> Self {
@@ -60,7 +64,7 @@ impl Runner {
             machine: None,
             back_buffer,
             commands: Some(commands),
-            samples_producer,
+            samples_tx,
             sample_rate,
             blip,
             blip_delta: 0,
@@ -87,10 +91,8 @@ impl Runner {
             panic!("nes commands taken");
         };
 
-        let emu_sync = commands.sync();
-
         loop {
-            for input in commands.commands() {
+            for input in commands.try_commands() {
                 match input {
                     EmulatorInput::Nes(input) => {
                         if let Some(machine) = &mut self.machine {
@@ -120,6 +122,18 @@ impl Runner {
                             }
                         }
                     }
+                    EmulatorInput::StepBack => {
+                        if let Some(machine) = &mut self.machine {
+                            if let Some((frame, data)) = self.save_store.pop() {
+                                self.frame = frame;
+                                machine.restore_state(&data);
+                            }
+                        }
+                        self.step();
+                    }
+                    EmulatorInput::StepForward => {
+                        self.step();
+                    }
                     EmulatorInput::LoadCartridge(region, rom) => {
                         let mut rom = std::io::Cursor::new(rom);
                         if let Ok(cart) = Cartridge::load(&mut rom) {
@@ -132,16 +146,17 @@ impl Runner {
                             );
                         }
                     }
-                    EmulatorInput::Sync => {
-                        if emu_sync.run() {
-                            self.step();
-                        }
-                    }
                     EmulatorInput::DebugRequest(req) => {
                         self.debug_request = req;
                     }
                 }
             }
+
+            if self.samples_tx.wants_samples() {
+                self.step();
+            }
+
+            std::thread::sleep(Duration::from_millis(1));
         }
     }
 
@@ -176,9 +191,7 @@ impl Runner {
 
     #[instrument(skip_all)]
     fn update_audio(&mut self) {
-        if let Some((machine, samples_producer)) =
-            self.machine.as_mut().zip(self.samples_producer.as_mut())
-        {
+        if let Some(machine) = self.machine.as_mut() {
             let samples = machine.get_audio();
             let count = samples.len();
 
@@ -189,7 +202,7 @@ impl Runner {
             self.blip.end_frame(count as u32);
             while self.blip.samples_avail() > 0 {
                 let count = self.blip.read_samples(&mut self.audio_buffer, 1024, false) as usize;
-                samples_producer.add_samples(&self.audio_buffer[..count]);
+                self.samples_tx.add_samples(&self.audio_buffer[..count]);
             }
         }
     }

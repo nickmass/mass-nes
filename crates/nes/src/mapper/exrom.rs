@@ -195,7 +195,6 @@ pub struct Exrom {
     chr_bg: MappedMemory,
     chr_vert: MappedMemory,
     exram: MemoryBlock,
-    prg_rom_count: usize,
     prg_ram_count: usize,
     tall_sprites: bool,
     ppu_substitution: bool,
@@ -232,7 +231,6 @@ pub struct Exrom {
 
 impl Exrom {
     pub fn new(cartridge: Cartridge) -> Self {
-        let prg_rom_count = cartridge.prg_rom.len() / (1024 * 8);
         let prg_ram_count = cartridge.prg_ram_bytes / (1024 * 8);
         let prg = if prg_ram_count > 0 {
             MappedMemory::new(
@@ -273,7 +271,6 @@ impl Exrom {
             chr_bg,
             chr_vert,
             exram,
-            prg_rom_count,
             prg_ram_count,
             tall_sprites: false,
             ppu_substitution: false,

@@ -9,6 +9,7 @@ use debugger::{DebuggerApp, EguiMessageLayer, MessageStore};
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
+    use ui::audio::Audio;
     let message_store = MessageStore::new(10_000);
     init_tracing(message_store.clone());
 
@@ -17,10 +18,21 @@ fn main() {
         ..Default::default()
     };
 
+    let (mut audio, samples_tx) =
+        ui::audio::CpalAudio::new(nes::Region::Ntsc.refresh_rate()).unwrap();
+    audio.pause();
+
     eframe::run_native(
         "Mass Emu",
         options,
-        Box::new(|cc| Ok(Box::new(DebuggerApp::new(cc, message_store)?))),
+        Box::new(|cc| {
+            Ok(Box::new(DebuggerApp::new(
+                cc,
+                message_store,
+                audio,
+                samples_tx,
+            )?))
+        }),
     )
     .unwrap();
 }
@@ -34,21 +46,33 @@ pub fn main() {
 
     wasm_bindgen_futures::spawn_local(async {
         let document = web_sys::window()
-            .expect("No window")
+            .expect("no window")
             .document()
-            .expect("No document");
+            .expect("no document");
 
         let canvas = document
             .get_element_by_id("render_canvas")
-            .expect("Failed to find render_canvas")
+            .expect("failed to find render_canvas")
             .dyn_into::<web_sys::HtmlCanvasElement>()
             .expect("render_canvas was not a HtmlCanvasElement");
+
+        let (audio, samples_tx) =
+            ui::audio::BrowserAudio::new("worklet.js", nes::Region::Ntsc.refresh_rate())
+                .await
+                .expect("failed to init audio");
 
         let start_result = eframe::WebRunner::new()
             .start(
                 canvas,
                 web_options,
-                Box::new(|cc| Ok(Box::new(DebuggerApp::new(cc, message_store)?))),
+                Box::new(|cc| {
+                    Ok(Box::new(DebuggerApp::new(
+                        cc,
+                        message_store,
+                        audio,
+                        samples_tx,
+                    )?))
+                }),
             )
             .await;
 

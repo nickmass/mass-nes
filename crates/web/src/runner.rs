@@ -1,11 +1,12 @@
-use futures::StreamExt;
+use std::time::Duration;
+
 use web_sys::{
     js_sys::Array,
     wasm_bindgen::{self, prelude::*},
 };
 use web_worker::WorkerSpawn;
 
-use ui::{audio::SamplesProducer, sync::EmuSync};
+use ui::audio::SamplesSender;
 
 use crate::{
     app::{EmulatorInput, NesInputs},
@@ -16,8 +17,7 @@ pub struct MachineSpawner {
     pub region: nes::Region,
     pub sample_rate: u32,
     back_buffer: GfxBackBuffer,
-    samples_producer: SamplesProducer,
-    emu_sync: EmuSync,
+    samples_tx: SamplesSender,
     nes_inputs: NesInputs,
 }
 
@@ -26,17 +26,15 @@ impl MachineSpawner {
         region: nes::Region,
         sample_rate: u32,
         back_buffer: GfxBackBuffer,
-        samples_producer: SamplesProducer,
-        emu_sync: EmuSync,
+        samples_tx: SamplesSender,
         nes_inputs: NesInputs,
     ) -> Self {
         Self {
             region,
             sample_rate,
             back_buffer,
-            samples_producer,
+            samples_tx,
             nes_inputs,
-            emu_sync,
         }
     }
 }
@@ -51,7 +49,7 @@ impl WorkerSpawn for MachineSpawner {
 
     async fn run(self, _transferables: Array) {
         let runner = MachineRunner::new(self);
-        runner.run().await;
+        runner.run();
     }
 }
 
@@ -62,8 +60,7 @@ struct MachineRunner {
     blip: blip_buf_rs::Blip,
     back_buffer: GfxBackBuffer,
     audio_buffer: Vec<i16>,
-    samples_producer: SamplesProducer,
-    emu_sync: EmuSync,
+    samples_tx: SamplesSender,
     nes_inputs: Option<NesInputs>,
 }
 
@@ -74,8 +71,7 @@ impl MachineRunner {
             sample_rate,
             nes_inputs,
             back_buffer,
-            samples_producer,
-            emu_sync,
+            samples_tx,
         } = channel;
 
         let mut blip = blip_buf_rs::Blip::new(sample_rate / 30);
@@ -92,24 +88,29 @@ impl MachineRunner {
             blip,
             back_buffer,
             audio_buffer: vec![0; 1024],
-            samples_producer,
-            emu_sync,
+            samples_tx,
         }
     }
 
-    pub async fn run(mut self) {
-        let Some(inputs) = self.nes_inputs.take() else {
+    pub fn run(mut self) {
+        let Some(mut inputs) = self.nes_inputs.take() else {
             panic!("no machine_channel inputs");
         };
 
-        let mut inputs = inputs.inputs();
+        loop {
+            for input in inputs.try_recv() {
+                self.handle_input(input);
+            }
 
-        while let Some(input) = inputs.next().await {
-            self.handle_input(input).await;
+            if self.samples_tx.wants_samples() {
+                self.step();
+            }
+
+            std::thread::sleep(Duration::from_millis(1));
         }
     }
 
-    async fn handle_input(&mut self, input: EmulatorInput) {
+    fn handle_input(&mut self, input: EmulatorInput) {
         match input {
             EmulatorInput::Load(rom) => {
                 let mut rom = std::io::Cursor::new(rom);
@@ -123,34 +124,32 @@ impl MachineRunner {
             EmulatorInput::UserInput(input) => {
                 if let Some(machine) = self.machine.as_mut() {
                     machine.handle_input(input);
-
-                    if self.emu_sync.run() {
-                        machine.run();
-
-                        let samples = machine.get_audio();
-                        let count = samples.len();
-
-                        for (i, v) in samples.iter().enumerate() {
-                            self.blip.add_delta(i as u32, *v as i32 - self.blip_delta);
-                            self.blip_delta = *v as i32;
-                        }
-                        self.blip.end_frame(count as u32);
-
-                        while self.blip.samples_avail() > 0 {
-                            let count = self.blip.read_samples(&mut self.audio_buffer, 1024, false)
-                                as usize;
-                            self.samples_producer
-                                .add_samples(&self.audio_buffer[..count]);
-                        }
-
-                        self.back_buffer
-                            .update(|frame| {
-                                frame.copy_from_slice(machine.get_screen());
-                            })
-                            .await;
-                    }
                 }
             }
+        }
+    }
+
+    fn step(&mut self) {
+        if let Some(machine) = self.machine.as_mut() {
+            machine.run();
+
+            let samples = machine.get_audio();
+            let count = samples.len();
+
+            for (i, v) in samples.iter().enumerate() {
+                self.blip.add_delta(i as u32, *v as i32 - self.blip_delta);
+                self.blip_delta = *v as i32;
+            }
+            self.blip.end_frame(count as u32);
+
+            while self.blip.samples_avail() > 0 {
+                let count = self.blip.read_samples(&mut self.audio_buffer, 1024, false) as usize;
+                self.samples_tx.add_samples(&self.audio_buffer[..count]);
+            }
+
+            self.back_buffer.update(|frame| {
+                frame.copy_from_slice(machine.get_screen());
+            });
         }
     }
 }

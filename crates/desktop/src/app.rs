@@ -1,6 +1,5 @@
 use glium::glutin::config::ConfigTemplateBuilder;
 use glium::winit;
-use ui::sync::EmuSync;
 use winit::keyboard::PhysicalKey;
 
 use nes::UserInput;
@@ -8,14 +7,12 @@ use ui::audio::Audio;
 use ui::filters::Filter;
 use ui::gamepad::{GamepadEvent, GilrsInput};
 use ui::input::InputMap;
-use ui::sync::FrameSync;
 
 use super::gfx::{Gfx, GfxBackBuffer, GliumContext};
 
 pub enum UserEvent {
     Frame,
     Gamepad(GamepadEvent),
-    Sync,
 }
 
 impl From<GamepadEvent> for UserEvent {
@@ -38,10 +35,8 @@ impl From<UserInput> for EmulatorInput {
     }
 }
 
-pub struct App<F, A, S> {
+pub struct App<F, A> {
     audio: A,
-    sync: Option<S>,
-    emu_sync: EmuSync,
     gfx: Gfx<F>,
     gamepad: Option<GilrsInput<winit::event_loop::EventLoopProxy<UserEvent>>>,
     window: winit::window::Window,
@@ -52,8 +47,8 @@ pub struct App<F, A, S> {
     pause: bool,
 }
 
-impl<F: Filter<GliumContext>, A: Audio, S: FrameSync> App<F, A, S> {
-    pub fn new(filter: F, audio: A, sync: S) -> Self {
+impl<F: Filter<GliumContext>, A: Audio> App<F, A> {
+    pub fn new(filter: F, audio: A) -> Self {
         let event_loop = winit::event_loop::EventLoop::with_user_event()
             .build()
             .unwrap();
@@ -80,8 +75,6 @@ impl<F: Filter<GliumContext>, A: Audio, S: FrameSync> App<F, A, S> {
 
         Self {
             audio,
-            sync: Some(sync),
-            emu_sync: EmuSync::new(),
             window,
             gfx,
             back_buffer,
@@ -93,44 +86,46 @@ impl<F: Filter<GliumContext>, A: Audio, S: FrameSync> App<F, A, S> {
         }
     }
 
-    fn proxy(&self) -> winit::event_loop::EventLoopProxy<UserEvent> {
-        let Some(event_loop) = self.event_loop.as_ref() else {
-            panic!("no event loop created");
-        };
-
-        event_loop.create_proxy()
-    }
-
     pub fn back_buffer(&self) -> GfxBackBuffer {
         self.back_buffer.clone()
     }
 
     pub fn nes_io(&mut self) -> NesInputs {
         let (tx, rx) = std::sync::mpsc::channel();
-
         self.input_tx = Some(tx);
-        let emu_sync = self.emu_sync.clone();
 
-        NesInputs { rx, emu_sync }
+        NesInputs { rx }
+    }
+
+    fn send_inputs(&self) {
+        if let Some(tx) = self.input_tx.as_ref() {
+            let p1 = self.input.controller();
+
+            if self.input.reset() {
+                let _ = tx.send(UserInput::Reset.into());
+            }
+
+            if self.input.power() {
+                let _ = tx.send(UserInput::Power.into());
+            }
+
+            if let Some(slot) = self.input.save_state() {
+                let _ = tx.send(EmulatorInput::SaveState(slot));
+            }
+
+            if let Some(slot) = self.input.restore_state() {
+                let _ = tx.send(EmulatorInput::RestoreState(slot));
+            }
+
+            if self.input.rewind() {
+                let _ = tx.send(EmulatorInput::Rewind);
+            }
+
+            let _ = tx.send(UserInput::PlayerOne(p1).into());
+        }
     }
 
     pub fn run(mut self) -> ! {
-        if let Some(mut sync) = self.sync.take() {
-            let sync_proxy = self.proxy();
-            let emu_sync = self.emu_sync.clone();
-            std::thread::Builder::new()
-                .name("sync".into())
-                .spawn(move || loop {
-                    sync.sync_frame();
-                    if !emu_sync.request_run() {
-                        let _ = sync_proxy.send_event(UserEvent::Sync);
-                    }
-                })
-                .unwrap();
-        } else {
-            panic!("no frame sync provided");
-        }
-
         if let Some(mut gamepad) = self.gamepad.take() {
             let _ = std::thread::Builder::new()
                 .name("gamepad".into())
@@ -153,8 +148,8 @@ impl<F: Filter<GliumContext>, A: Audio, S: FrameSync> App<F, A, S> {
     }
 }
 
-impl<F: Filter<GliumContext>, A: Audio, S: FrameSync>
-    winit::application::ApplicationHandler<UserEvent> for App<F, A, S>
+impl<F: Filter<GliumContext>, A: Audio> winit::application::ApplicationHandler<UserEvent>
+    for App<F, A>
 {
     fn resumed(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {}
 
@@ -207,6 +202,7 @@ impl<F: Filter<GliumContext>, A: Audio, S: FrameSync>
             }
             _ => (),
         }
+        self.send_inputs();
     }
 
     fn user_event(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop, event: UserEvent) {
@@ -215,33 +211,6 @@ impl<F: Filter<GliumContext>, A: Audio, S: FrameSync>
                 self.gfx.swap();
                 self.window.request_redraw();
             }
-            UserEvent::Sync => {
-                if let Some(tx) = self.input_tx.as_ref() {
-                    let p1 = self.input.controller();
-
-                    if self.input.reset() {
-                        let _ = tx.send(UserInput::Reset.into());
-                    }
-
-                    if self.input.power() {
-                        let _ = tx.send(UserInput::Power.into());
-                    }
-
-                    if let Some(slot) = self.input.save_state() {
-                        let _ = tx.send(EmulatorInput::SaveState(slot));
-                    }
-
-                    if let Some(slot) = self.input.restore_state() {
-                        let _ = tx.send(EmulatorInput::RestoreState(slot));
-                    }
-
-                    if self.input.rewind() {
-                        let _ = tx.send(EmulatorInput::Rewind);
-                    }
-
-                    let _ = tx.send(UserInput::PlayerOne(p1).into());
-                }
-            }
             UserEvent::Gamepad(ev) => match ev {
                 GamepadEvent::Button { state, button, .. } => {
                     if state.is_pressed() {
@@ -249,9 +218,11 @@ impl<F: Filter<GliumContext>, A: Audio, S: FrameSync>
                     } else {
                         self.input.release(button);
                     }
+                    self.send_inputs();
                 }
                 GamepadEvent::Axis { axis, value, .. } => {
                     self.input.axis(axis, value);
+                    self.send_inputs();
                 }
                 _ => (),
             },
@@ -260,16 +231,11 @@ impl<F: Filter<GliumContext>, A: Audio, S: FrameSync>
 }
 
 pub struct NesInputs {
-    emu_sync: EmuSync,
     rx: std::sync::mpsc::Receiver<EmulatorInput>,
 }
 
 impl NesInputs {
-    pub fn inputs(self) -> impl Iterator<Item = EmulatorInput> {
-        self.rx.into_iter()
-    }
-
-    pub fn sync(&self) -> EmuSync {
-        self.emu_sync.clone()
+    pub fn try_inputs(&mut self) -> impl Iterator<Item = EmulatorInput> + '_ {
+        self.rx.try_iter()
     }
 }

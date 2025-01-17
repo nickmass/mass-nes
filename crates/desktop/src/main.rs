@@ -1,9 +1,8 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use nes::{Cartridge, Machine};
 use runner::Runner;
-use ui::audio::{Audio, AudioDevices, CpalAudio, Null, SamplesProducer};
+use ui::audio::{Audio, AudioDevices, CpalAudio, Null, SamplesSender};
 use ui::filters::NesNtscSetup;
-use ui::sync::{NaiveSync, SyncDevices};
 
 use std::{fs::File, path::PathBuf};
 
@@ -32,23 +31,16 @@ fn run(path: PathBuf, region: nes::Region) {
     let filter = ui::filters::NtscFilter::new(&setup);
     //let filter = ui::filters::PalettedFilter::new(setup.generate_palette());
 
-    let (audio, sync, samples_producer) = init_audio(region);
+    let (audio, samples_tx) = init_audio(region);
     let sample_rate = audio.sample_rate();
-    let mut app = App::new(filter, audio, sync);
+    let mut app = App::new(filter, audio);
     let input = app.nes_io();
     let back_buffer = app.back_buffer();
 
     std::thread::Builder::new()
         .name("machine".into())
         .spawn(move || {
-            let runner = Runner::new(
-                cart,
-                region,
-                input,
-                back_buffer,
-                samples_producer,
-                sample_rate,
-            );
+            let runner = Runner::new(cart, region, input, back_buffer, samples_tx, sample_rate);
 
             runner.run()
         })
@@ -70,23 +62,17 @@ fn bench(path: PathBuf, region: nes::Region, mut frames: u32) {
     }
 }
 
-fn init_audio(region: nes::Region) -> (AudioDevices, SyncDevices, Option<SamplesProducer>) {
+fn init_audio(region: nes::Region) -> (AudioDevices, SamplesSender) {
     match CpalAudio::new(region.refresh_rate()) {
-        _ if std::env::var("MASS_NES_NO_AUDIO").is_ok() => (
-            Null.into(),
-            NaiveSync::new(region.refresh_rate()).into(),
-            None,
-        ),
-        Ok((audio, frame_sync, samples_producer)) => {
-            (audio.into(), frame_sync.into(), Some(samples_producer))
+        _ if std::env::var("MASS_NES_NO_AUDIO").is_ok() => {
+            let (audio, tx) = Null::new();
+            (audio.into(), tx)
         }
+        Ok((audio, samples_tx)) => (audio.into(), samples_tx),
         Err(err) => {
             tracing::error!("unable to init audio device: {err:?}");
-            (
-                Null.into(),
-                NaiveSync::new(region.refresh_rate()).into(),
-                None,
-            )
+            let (audio, tx) = Null::new();
+            (audio.into(), tx)
         }
     }
 }

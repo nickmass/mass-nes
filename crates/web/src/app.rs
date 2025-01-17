@@ -1,4 +1,6 @@
-use futures::Stream;
+use std::sync::mpsc::{channel, Receiver, Sender};
+
+use futures::StreamExt;
 use web_sys::wasm_bindgen::JsError;
 use web_sys::HtmlCanvasElement;
 use winit::application::ApplicationHandler;
@@ -17,6 +19,7 @@ use ui::audio::Audio;
 use ui::gamepad::{GamepadEvent, GilrsInput};
 use ui::input::InputMap;
 
+#[derive(Debug)]
 pub enum EmulatorInput {
     UserInput(UserInput),
     Load(Vec<u8>),
@@ -31,7 +34,6 @@ impl From<UserInput> for EmulatorInput {
 pub enum UserEvent {
     Gamepad(GamepadEvent),
     Load(Vec<u8>),
-    Sync,
 }
 
 impl From<GamepadEvent> for UserEvent {
@@ -47,7 +49,7 @@ pub struct App<A> {
     window: Option<Window>,
     event_loop: Option<EventLoop<UserEvent>>,
     input: InputMap,
-    input_tx: Option<futures::channel::mpsc::Sender<EmulatorInput>>,
+    input_tx: Option<Sender<EmulatorInput>>,
     gfx_worker: GfxWorker,
     pause: bool,
 }
@@ -60,6 +62,7 @@ impl<A: Audio + 'static> App<A> {
     ) -> Result<Self, JsError> {
         let event_loop = EventLoop::with_user_event().build()?;
 
+        // Need to poll gamepad
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
 
         let gamepad = GilrsInput::new(event_loop.create_proxy())?;
@@ -86,7 +89,7 @@ impl<A: Audio + 'static> App<A> {
     }
 
     pub fn nes_io(&mut self) -> NesInputs {
-        let (tx, rx) = futures::channel::mpsc::channel(10);
+        let (tx, rx) = channel();
 
         self.input_tx = Some(tx);
 
@@ -97,6 +100,17 @@ impl<A: Audio + 'static> App<A> {
         let Some(event_loop) = self.event_loop.take() else {
             panic!("no event loop created");
         };
+
+        if let Some(mut gamepad) = self.gamepad.take() {
+            let gamepad_poll = async move {
+                let mut stream = gloo::timers::future::IntervalStream::new(1);
+                while let Some(_) = stream.next().await {
+                    gamepad.poll();
+                }
+            };
+
+            wasm_bindgen_futures::spawn_local(gamepad_poll);
+        }
 
         self.run_loop(event_loop)
     }
@@ -116,6 +130,21 @@ impl<A> App<A> {
     fn request_redraw(&self) {
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
+        }
+    }
+
+    fn send_inputs(&self) {
+        if let Some(tx) = self.input_tx.as_ref() {
+            if self.input.reset() {
+                let _ = tx.send(UserInput::Reset.into());
+            }
+
+            if self.input.power() {
+                let _ = tx.send(UserInput::Power.into());
+            }
+
+            let p1 = self.input.controller();
+            let _ = tx.send(UserInput::PlayerOne(p1).into());
         }
     }
 }
@@ -165,6 +194,7 @@ impl<A: Audio> ApplicationHandler<UserEvent> for App<A> {
                             self.audio.play();
                         }
                     }
+                    self.send_inputs();
                 }
             }
             WindowEvent::ScaleFactorChanged {
@@ -182,46 +212,28 @@ impl<A: Audio> ApplicationHandler<UserEvent> for App<A> {
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
-            UserEvent::Sync => {
-                if let Some(tx) = self.input_tx.as_mut() {
-                    let p1 = self.input.controller();
-
-                    if self.input.reset() {
-                        let _ = tx.try_send(UserInput::Reset.into());
+            UserEvent::Gamepad(ev) => {
+                match ev {
+                    GamepadEvent::Button { state, button, .. } => {
+                        if state.is_pressed() {
+                            self.input.press(button);
+                        } else {
+                            self.input.release(button);
+                        }
                     }
-
-                    if self.input.power() {
-                        let _ = tx.try_send(UserInput::Power.into());
+                    GamepadEvent::Axis { axis, value, .. } => {
+                        self.input.axis(axis, value);
                     }
-
-                    let _ = tx.try_send(UserInput::PlayerOne(p1).into());
+                    _ => (),
                 }
+                self.send_inputs();
             }
-            UserEvent::Gamepad(ev) => match ev {
-                GamepadEvent::Button { state, button, .. } => {
-                    if state.is_pressed() {
-                        self.input.press(button);
-                    } else {
-                        self.input.release(button);
-                    }
-                }
-                GamepadEvent::Axis { axis, value, .. } => {
-                    self.input.axis(axis, value);
-                }
-                _ => (),
-            },
             UserEvent::Load(rom) => {
                 if let Some(tx) = self.input_tx.as_mut() {
-                    let _ = tx.try_send(EmulatorInput::Load(rom));
+                    let _ = tx.send(EmulatorInput::Load(rom));
                     self.audio.play();
                 }
             }
-        }
-    }
-
-    fn new_events(&mut self, _event_loop: &ActiveEventLoop, _cause: winit::event::StartCause) {
-        if let Some(gamepad) = self.gamepad.as_mut() {
-            gamepad.poll();
         }
     }
 }
@@ -239,11 +251,11 @@ fn window_attributes(_canvas: HtmlCanvasElement) -> WindowAttributes {
 }
 
 pub struct NesInputs {
-    rx: futures::channel::mpsc::Receiver<EmulatorInput>,
+    rx: Receiver<EmulatorInput>,
 }
 
 impl NesInputs {
-    pub fn inputs(self) -> impl Stream<Item = EmulatorInput> {
-        self.rx
+    pub fn try_recv(&mut self) -> impl Iterator<Item = EmulatorInput> + '_ {
+        self.rx.try_iter()
     }
 }

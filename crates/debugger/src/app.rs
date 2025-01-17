@@ -6,11 +6,10 @@ use nes::UserInput;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use ui::{
-    audio::{Audio, CpalAudio},
+    audio::{Audio, SamplesSender},
     filters::NesNtscSetup,
     gamepad::{GamepadChannel, GamepadEvent, GilrsInput},
     input::{InputMap, InputType},
-    sync::EmuSync,
 };
 
 use std::{
@@ -28,7 +27,7 @@ use crate::runner::{DebugRequest, EmulatorInput};
 use crate::widgets::*;
 use crate::{
     gfx::Repainter,
-    spawner::{GamepadSpawner, MachineSpawner, Spawn, SyncSpawner},
+    spawner::{MachineSpawner, Spawn},
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,11 +90,11 @@ impl Default for UiState {
     }
 }
 
-pub struct DebuggerApp {
+pub struct DebuggerApp<A> {
     app_events: AppEvents,
     input: SharedInput,
     emu_control: EmulatorControl,
-    audio: CpalAudio,
+    audio: A,
     nes_screen: NesScreen,
     recents: Recents,
     last_input: InputState,
@@ -112,10 +111,12 @@ pub struct DebuggerApp {
     help: Help,
 }
 
-impl DebuggerApp {
+impl<A: Audio> DebuggerApp<A> {
     pub fn new(
         cc: &CreationContext,
         message_store: MessageStore,
+        audio: A,
+        samples_tx: SamplesSender,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
         let ntsc_setup = NesNtscSetup::composite();
         let palette = ntsc_setup.generate_palette();
@@ -129,8 +130,7 @@ impl DebuggerApp {
 
         let input = SharedInput::new();
         let last_input = input.state();
-        let emu_sync = EmuSync::new();
-        let (emu_control, emu_commands) = EmulatorControl::new(emu_sync);
+        let (emu_control, emu_commands) = EmulatorControl::new();
         let gamepad_channel = GilrsInput::new(app_events.create_proxy()).ok();
         let debug_swap = DebugSwapState::new();
         let debug = DebugUiState::new(debug_swap.clone(), palette);
@@ -140,21 +140,10 @@ impl DebuggerApp {
         let messages = Messages::new(message_store);
         let help = Help::new(app_events.create_proxy(), emu_control.clone());
 
-        let (mut audio, audio_sync, samples) =
-            CpalAudio::new(nes::Region::Ntsc.refresh_rate()).unwrap();
-        audio.pause();
-
-        let sync = SyncSpawner {
-            input: input.clone(),
-            emu_control: emu_control.clone(),
-            audio_sync,
-        };
-        sync.spawn();
-
         let machine = MachineSpawner {
             emu_commands,
             back_buffer,
-            samples,
+            samples_tx,
             sample_rate: audio.sample_rate(),
             debug: debug_swap,
         };
@@ -162,8 +151,20 @@ impl DebuggerApp {
 
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(gamepad) = gamepad_channel {
-            let gamepad = GamepadSpawner { gamepad };
+            let gamepad = crate::spawner::GamepadSpawner { gamepad };
             gamepad.spawn();
+        }
+        #[cfg(target_arch = "wasm32")]
+        if let Some(mut gamepad) = gamepad_channel {
+            use futures::StreamExt;
+            let gamepad_poll = async move {
+                let mut stream = gloo::timers::future::IntervalStream::new(1);
+                while let Some(_) = stream.next().await {
+                    gamepad.poll();
+                }
+            };
+
+            wasm_bindgen_futures::spawn_local(gamepad_poll);
         }
 
         let state = if let Some(storage) = cc.storage {
@@ -245,18 +246,26 @@ impl DebuggerApp {
         }
 
         if !self.last_input.step_backward && input_state.step_backward {
-            self.emu_control.rewind();
-        } else if self.last_input.step_backward {
             self.pause = true;
             self.handle_pause();
+            self.emu_control.step_back();
         }
 
         if !self.last_input.step_forward && input_state.step_forward {
-            self.pause = false;
-            self.handle_pause();
-        } else if self.last_input.step_forward {
             self.pause = true;
             self.handle_pause();
+            self.emu_control.step_forward();
+        }
+
+        self.emu_control.player_one(input_state.controller);
+        if input_state.rewind {
+            self.emu_control.rewind();
+        }
+        if input_state.power {
+            self.emu_control.power();
+        }
+        if input_state.reset {
+            self.emu_control.reset();
         }
 
         self.last_input = input_state;
@@ -267,7 +276,6 @@ impl DebuggerApp {
             self.audio.pause();
         } else {
             self.audio.play();
-            self.emu_control.sync();
         }
     }
 
@@ -283,7 +291,6 @@ impl DebuggerApp {
                 self.recents.add(path);
                 self.state.recent_files = self.recents.iter().map(|p| p.to_path_buf()).collect();
                 self.audio.play();
-                self.emu_control.sync();
             }
             AppEvent::FocusScreen => {
                 self.nes_screen.focus(ctx);
@@ -345,7 +352,7 @@ impl DebuggerApp {
     }
 }
 
-impl eframe::App for DebuggerApp {
+impl<A: Audio> eframe::App for DebuggerApp<A> {
     #[instrument(skip_all)]
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.debug.breakpoint() {
@@ -614,20 +621,13 @@ impl GamepadChannel for AppEventsProxy {
 
 #[derive(Debug, Clone)]
 pub struct EmulatorControl {
-    emu_sync: EmuSync,
     tx: Sender<EmulatorInput>,
 }
 
 impl EmulatorControl {
-    pub fn new(emu_sync: EmuSync) -> (EmulatorControl, EmulatorCommands) {
+    pub fn new() -> (EmulatorControl, EmulatorCommands) {
         let (tx, rx) = channel();
-        (
-            EmulatorControl {
-                emu_sync: emu_sync.clone(),
-                tx,
-            },
-            EmulatorCommands { emu_sync, rx },
-        )
+        (EmulatorControl { tx }, EmulatorCommands { rx })
     }
 
     pub fn player_one(&self, controller: nes::Controller) {
@@ -640,8 +640,12 @@ impl EmulatorControl {
         let _ = self.tx.send(EmulatorInput::LoadCartridge(region, rom));
     }
 
-    pub fn sync(&self) {
-        let _ = self.tx.send(EmulatorInput::Sync);
+    pub fn step_back(&self) {
+        let _ = self.tx.send(EmulatorInput::StepBack);
+    }
+
+    pub fn step_forward(&self) {
+        let _ = self.tx.send(EmulatorInput::StepForward);
     }
 
     pub fn rewind(&self) {
@@ -659,33 +663,15 @@ impl EmulatorControl {
     pub fn debug_request(&self, debug: DebugRequest) {
         let _ = self.tx.send(EmulatorInput::DebugRequest(debug));
     }
-
-    pub fn pending_run(&self) -> bool {
-        self.emu_sync.pending_run()
-    }
-
-    pub fn request_run(&self) -> bool {
-        if !self.emu_sync.request_run() {
-            self.sync();
-            true
-        } else {
-            false
-        }
-    }
 }
 
 pub struct EmulatorCommands {
-    emu_sync: EmuSync,
     rx: Receiver<EmulatorInput>,
 }
 
 impl EmulatorCommands {
-    pub fn commands(&mut self) -> impl Iterator<Item = EmulatorInput> + '_ {
-        self.rx.iter()
-    }
-
-    pub fn sync(&self) -> EmuSync {
-        self.emu_sync.clone()
+    pub fn try_commands(&mut self) -> impl Iterator<Item = EmulatorInput> + '_ {
+        self.rx.try_iter()
     }
 }
 

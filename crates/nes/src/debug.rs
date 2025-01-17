@@ -473,7 +473,7 @@ pub mod no_debugger {
 
         pub fn write(&self, _addr: u16, _value: u8) {}
 
-        pub fn fetch(&self, addr: u16) {}
+        pub fn fetch(&self, _addr: u16) {}
 
         pub fn trace(&self, _system: &Machine, _cpu_state: CpuDebugState) {}
 

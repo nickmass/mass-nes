@@ -1,6 +1,6 @@
 use futures::{
     channel::mpsc::{Receiver, Sender},
-    SinkExt, StreamExt,
+    StreamExt,
 };
 use web_sys::OffscreenCanvas;
 
@@ -223,12 +223,12 @@ impl GfxBackBuffer {
         Self { frame, tx }
     }
 
-    pub async fn update<F: FnOnce(&mut [u16])>(&mut self, func: F) {
+    pub fn update<F: FnOnce(&mut [u16])>(&mut self, func: F) {
         {
             let mut frame = self.frame.lock().unwrap();
             func(&mut frame);
         }
-        self.tx.send(GfxRequest::Frame).await.unwrap();
+        let _ = self.tx.try_send(GfxRequest::Frame);
     }
 
     pub fn swap(&self, other: &mut Vec<u16>) {

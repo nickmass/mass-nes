@@ -8,6 +8,7 @@ use web_sys::{
 pub trait WorkerSpawn: Send + Sized + 'static {
     const ENTRY_POINT: &'static str;
 
+    #[allow(async_fn_in_trait)]
     async fn run(self, transferables: Array);
 }
 

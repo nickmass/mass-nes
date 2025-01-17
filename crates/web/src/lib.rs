@@ -4,14 +4,13 @@ use web_sys::{js_sys, wasm_bindgen, HtmlCanvasElement};
 use winit::event_loop::EventLoopProxy;
 
 use nes::Region;
-use ui::{audio::Audio, sync::EmuSync};
+use ui::audio::Audio;
 
 mod app;
 mod gfx;
 mod gl;
 mod offscreen_gfx;
 mod runner;
-mod sync;
 
 use app::UserEvent;
 
@@ -36,8 +35,11 @@ impl Emulator {
             "ntsc" | _ => Region::Ntsc,
         };
 
-        let (audio, audio_sync, samples_producer) =
-            ui::audio::CpalAudio::new(region.refresh_rate())?;
+        #[cfg(target_arch = "wasm32")]
+        let (audio, samples_tx) =
+            ui::audio::BrowserAudio::new("worklet.js", region.refresh_rate()).await?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let (audio, samples_tx) = ui::audio::Null::new();
 
         let sample_rate = audio.sample_rate();
 
@@ -45,20 +47,10 @@ impl Emulator {
         let back_buffer = gfx_worker.back_buffer.clone();
         let mut app = app::App::new(gfx_worker, audio, canvas)?;
 
-        let emu_sync = EmuSync::new();
-        let sync_spawner = sync::SyncSpawner::new(audio_sync, emu_sync.clone(), app.proxy());
-        web_worker::spawn_worker(sync_spawner).await?;
-
         let nes_inputs = app.nes_io();
 
-        let machine_spawner = runner::MachineSpawner::new(
-            region,
-            sample_rate,
-            back_buffer,
-            samples_producer,
-            emu_sync,
-            nes_inputs,
-        );
+        let machine_spawner =
+            runner::MachineSpawner::new(region, sample_rate, back_buffer, samples_tx, nes_inputs);
         web_worker::spawn_worker(machine_spawner).await?;
 
         let proxy = app.proxy();
@@ -69,7 +61,6 @@ impl Emulator {
 
     fn load_rom_bytes(&self, bytes: Vec<u8>) {
         let _ = self.proxy.send_event(UserEvent::Load(bytes));
-        let _ = self.proxy.send_event(UserEvent::Sync);
     }
 
     #[wasm_bindgen]
@@ -115,7 +106,7 @@ impl Emulator {
         let fps = frames as f64 / elapsed.as_secs_f64();
 
         tracing::info!(
-            "Benchmark {} frames in {}.{:03} seconds, {:.3}fps",
+            "benchmark {} frames in {}.{:03} seconds, {:.3}fps",
             frames,
             elapsed.as_secs(),
             elapsed.subsec_millis(),

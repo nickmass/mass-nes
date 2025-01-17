@@ -1,9 +1,9 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, time::Duration};
 
 use blip_buf_rs::Blip;
 use nes::{Cartridge, Machine, Region, UserInput};
 use tracing::instrument;
-use ui::{audio::SamplesProducer, sync::EmuSync};
+use ui::audio::SamplesSender;
 
 use crate::{
     app::{EmulatorInput, NesInputs},
@@ -14,7 +14,7 @@ pub struct Runner {
     machine: Machine,
     back_buffer: GfxBackBuffer,
     inputs: Option<NesInputs>,
-    samples_producer: Option<SamplesProducer>,
+    samples_tx: SamplesSender,
     blip: Blip,
     blip_delta: i32,
     audio_buffer: Vec<i16>,
@@ -29,7 +29,7 @@ impl Runner {
         region: Region,
         inputs: NesInputs,
         back_buffer: GfxBackBuffer,
-        samples_producer: Option<SamplesProducer>,
+        samples_tx: SamplesSender,
         sample_rate: u32,
     ) -> Self {
         let machine = Machine::new(region, cart);
@@ -43,7 +43,7 @@ impl Runner {
             machine,
             back_buffer,
             inputs: Some(inputs),
-            samples_producer,
+            samples_tx,
             blip,
             blip_delta: 0,
             audio_buffer: vec![0; 1024],
@@ -54,43 +54,47 @@ impl Runner {
     }
 
     pub fn run(mut self) {
-        let Some(inputs) = self.inputs.take() else {
+        let Some(mut inputs) = self.inputs.take() else {
             panic!("nes inputs taken");
         };
 
-        let sync = inputs.sync();
+        loop {
+            for input in inputs.try_inputs() {
+                match input {
+                    EmulatorInput::Nes(input) => self.handle_input(input),
+                    EmulatorInput::SaveState(slot) => {
+                        let data = self.machine.save_state();
 
-        for input in inputs.inputs() {
-            match input {
-                EmulatorInput::Nes(input) => self.handle_input(input, &sync),
-                EmulatorInput::SaveState(slot) => {
-                    let data = self.machine.save_state();
-
-                    self.save_states[slot as usize] = Some((self.frame, data));
-                }
-                EmulatorInput::RestoreState(slot) => {
-                    if let Some((frame, data)) = self.save_states[slot as usize].as_ref() {
-                        self.frame = *frame;
-                        self.machine.restore_state(data);
+                        self.save_states[slot as usize] = Some((self.frame, data));
                     }
-                }
-                EmulatorInput::Rewind => {
-                    if let Some((frame, data)) = self.save_store.pop() {
-                        self.frame = frame;
-                        self.machine.restore_state(&data);
+                    EmulatorInput::RestoreState(slot) => {
+                        if let Some((frame, data)) = self.save_states[slot as usize].as_ref() {
+                            self.frame = *frame;
+                            self.machine.restore_state(data);
+                        }
+                    }
+                    EmulatorInput::Rewind => {
+                        if let Some((frame, data)) = self.save_store.pop() {
+                            self.frame = frame;
+                            self.machine.restore_state(&data);
+                        }
                     }
                 }
             }
+
+            if self.samples_tx.wants_samples() {
+                self.step();
+            }
+
+            std::thread::sleep(Duration::from_millis(1));
         }
     }
 
-    fn handle_input(&mut self, input: UserInput, sync: &EmuSync) {
+    fn handle_input(&mut self, input: UserInput) {
         self.machine.handle_input(input);
+    }
 
-        if !sync.run() {
-            return;
-        }
-
+    fn step(&mut self) {
         self.machine.run();
 
         self.frame += 1;
@@ -103,19 +107,17 @@ impl Runner {
 
     #[instrument(skip_all)]
     fn update_audio(&mut self) {
-        if let Some(samples_producer) = self.samples_producer.as_mut() {
-            let samples = self.machine.get_audio();
-            let count = samples.len();
+        let samples = self.machine.get_audio();
+        let count = samples.len();
 
-            for (i, v) in samples.iter().enumerate() {
-                self.blip.add_delta(i as u32, *v as i32 - self.blip_delta);
-                self.blip_delta = *v as i32;
-            }
-            self.blip.end_frame(count as u32);
-            while self.blip.samples_avail() > 0 {
-                let count = self.blip.read_samples(&mut self.audio_buffer, 1024, false) as usize;
-                samples_producer.add_samples(&self.audio_buffer[..count]);
-            }
+        for (i, v) in samples.iter().enumerate() {
+            self.blip.add_delta(i as u32, *v as i32 - self.blip_delta);
+            self.blip_delta = *v as i32;
+        }
+        self.blip.end_frame(count as u32);
+        while self.blip.samples_avail() > 0 {
+            let count = self.blip.read_samples(&mut self.audio_buffer, 1024, false) as usize;
+            self.samples_tx.add_samples(&self.audio_buffer[..count]);
         }
     }
 
