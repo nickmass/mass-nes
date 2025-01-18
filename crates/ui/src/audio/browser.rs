@@ -1,4 +1,3 @@
-use core::f32;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::u32;
@@ -43,7 +42,7 @@ impl BrowserAudio {
         let ctx = AudioContext::new().map_err(Error::CreateContext)?;
         let volume = Volume::new();
         let sample_rate = ctx.sample_rate();
-        let buffer = (sample_rate as f64 / refresh_rate) * 3.0;
+        let buffer = (sample_rate as f64 / refresh_rate) * 2.1;
         let (samples_tx, samples_rx) = samples_channel(sample_rate as usize, buffer as usize);
 
         let worklet_processor = WorkletProcessor::new(samples_rx, volume.clone());

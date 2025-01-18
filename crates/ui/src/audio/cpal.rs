@@ -8,7 +8,7 @@ use std::sync::{
 use super::{samples_channel, Audio, SamplesReceiver, SamplesSender};
 
 // Number of frames to store samples for across all buffers
-const BUFFER_FRAMES: f64 = 1.5;
+const BUFFER_FRAMES: f64 = 1.1;
 
 // Number of samples stored directly in the audio device buffers
 const DEVICE_BUFFER: usize = 256;

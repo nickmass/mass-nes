@@ -4088,6 +4088,7 @@ dependencies = [
 name = "ui"
 version = "0.1.2"
 dependencies = [
+ "blip_buf-rs",
  "bytemuck",
  "const_format",
  "cpal",

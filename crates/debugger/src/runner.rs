@@ -94,7 +94,6 @@ pub struct Runner {
     sample_rate: u32,
     blip: Blip,
     blip_delta: i32,
-    audio_buffer: Vec<i16>,
     save_states: Vec<Option<(usize, nes::SaveData)>>,
     save_store: SaveStore,
     frame: usize,
@@ -111,7 +110,7 @@ impl Runner {
         sample_rate: u32,
         debug: DebugSwapState,
     ) -> Self {
-        let blip = blip_buf_rs::Blip::new(sample_rate / 30);
+        let blip = blip_buf_rs::Blip::new(sample_rate / 20);
 
         let save_store = SaveStore::builder()
             .add(1, 600)
@@ -130,7 +129,6 @@ impl Runner {
             sample_rate,
             blip,
             blip_delta: 0,
-            audio_buffer: vec![0; 1024],
             save_states: vec![None; 10],
             save_store,
             frame: 0,
@@ -268,26 +266,22 @@ impl Runner {
     fn update_audio(&mut self, playback: Playback) {
         if let Some(machine) = self.machine.as_mut() {
             let samples = machine.get_audio();
-            let count = samples.len();
+            if playback.update_audio() {
+                let count = samples.len();
 
-            if playback.reverse_audio() {
-                for (i, v) in samples.iter().rev().enumerate() {
-                    self.blip.add_delta(i as u32, *v as i32 - self.blip_delta);
-                    self.blip_delta = *v as i32;
+                if playback.reverse_audio() {
+                    for (i, v) in samples.iter().rev().enumerate() {
+                        self.blip.add_delta(i as u32, *v as i32 - self.blip_delta);
+                        self.blip_delta = *v as i32;
+                    }
+                } else {
+                    for (i, v) in samples.iter().enumerate() {
+                        self.blip.add_delta(i as u32, *v as i32 - self.blip_delta);
+                        self.blip_delta = *v as i32;
+                    }
                 }
-            } else {
-                for (i, v) in samples.iter().enumerate() {
-                    self.blip.add_delta(i as u32, *v as i32 - self.blip_delta);
-                    self.blip_delta = *v as i32;
-                }
-            }
-            self.blip.end_frame(count as u32);
-
-            while self.blip.samples_avail() > 0 {
-                let count = self.blip.read_samples(&mut self.audio_buffer, 1024, false) as usize;
-                if playback.update_audio() {
-                    self.samples_tx.add_samples(&self.audio_buffer[..count]);
-                }
+                self.blip.end_frame(count as u32);
+                self.samples_tx.add_samples_from_blip(&mut self.blip);
             }
         }
     }

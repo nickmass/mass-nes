@@ -50,9 +50,10 @@ impl<T: DerefMut> SwapBuffer<T> {
 
     pub fn attempt_swap(&self, other: &mut T) {
         if self.updated.load(Ordering::Relaxed) {
-            let mut data = self.data.lock().unwrap();
-            std::mem::swap(&mut *data, other);
-            self.updated.store(false, Ordering::Relaxed);
+            if let Ok(mut data) = self.data.try_lock() {
+                std::mem::swap(&mut *data, other);
+                self.updated.store(false, Ordering::Relaxed);
+            }
         }
     }
 }

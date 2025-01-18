@@ -7,6 +7,7 @@ edition.workspace = true
 
 [dependencies]
 nes = { path = "../nes", default-features = false }
+blip_buf-rs = "0.1"
 gilrs = "0.10.9"
 winit = "0.30.5"
 bytemuck = "1.18.0"

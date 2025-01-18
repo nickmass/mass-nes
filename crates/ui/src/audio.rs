@@ -1,7 +1,5 @@
 use direct_ring_buffer::{create_ring_buffer, Consumer, Producer};
 
-use std::collections::VecDeque;
-
 #[cfg(not(target_arch = "wasm32"))]
 mod cpal;
 #[cfg(not(target_arch = "wasm32"))]
@@ -22,18 +20,14 @@ pub trait Audio {
     fn volume(&mut self, volume: f32);
 }
 
-fn samples_channel(
-    capacity: usize,
-    buffer_capcity: usize,
-) -> (SamplesSender, SamplesReceiver<i16>) {
-    let target_samples = buffer_capcity / 2;
+fn samples_channel(capacity: usize, target_buffer: usize) -> (SamplesSender, SamplesReceiver<i16>) {
     let (tx, rx) = create_ring_buffer(capacity);
-    let rx = SamplesReceiver::new(rx, target_samples);
 
+    let rx = SamplesReceiver { rx, last_sample: 0 };
     let tx = SamplesSender {
         tx,
         capacity,
-        target_samples,
+        target_samples: target_buffer,
     };
 
     (tx, rx)
@@ -41,18 +35,18 @@ fn samples_channel(
 
 struct SamplesReceiver<T> {
     rx: Consumer<T>,
-    buf: VecDeque<T>,
-    buffer_capacity: usize,
     last_sample: T,
 }
 
-impl<T: Default + Copy> SamplesReceiver<T> {
-    fn new(rx: Consumer<T>, buffer_capacity: usize) -> Self {
-        Self {
-            rx,
-            buf: VecDeque::new(),
-            buffer_capacity,
-            last_sample: T::default(),
+impl<T: Copy> Iterator for SamplesReceiver<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> {
+        if let Some(sample) = self.rx.read_element() {
+            self.last_sample = sample;
+            Some(sample)
+        } else {
+            Some(self.last_sample)
         }
     }
 }
@@ -77,37 +71,30 @@ impl SamplesSender {
         );
     }
 
+    pub fn add_samples_from_blip(&mut self, blip: &mut blip_buf_rs::Blip) {
+        let avail = blip.samples_avail() as usize;
+        let written = self.tx.write_slices(
+            |buf, _offset| blip.read_samples(buf, buf.len() as u32, false) as usize,
+            Some(avail),
+        );
+
+        if written < avail {
+            tracing::warn!("run out of sample space");
+            blip.clear();
+        }
+    }
+
     pub fn wants_samples(&self) -> bool {
         let used = self.capacity - self.tx.available();
         used <= self.target_samples
     }
 }
 
-impl<T: Copy> Iterator for SamplesReceiver<T> {
-    type Item = T;
-
-    fn next(&mut self) -> Option<T> {
-        let cap = self.buffer_capacity - self.buf.len();
-        self.rx.read_slices(
-            |samples, _offset| {
-                self.buf.extend(samples);
-                samples.len()
-            },
-            Some(cap),
-        );
-
-        if let Some(sample) = self.buf.pop_front() {
-            self.last_sample = sample;
-            Some(sample)
-        } else {
-            Some(self.last_sample)
-        }
-    }
-}
-
 pub enum AudioDevices {
     #[cfg(not(target_arch = "wasm32"))]
     Cpal(CpalAudio),
+    #[cfg(target_arch = "wasm32")]
+    Browser(BrowserAudio),
     Null(Null),
 }
 
@@ -116,6 +103,8 @@ impl Audio for AudioDevices {
         match self {
             #[cfg(not(target_arch = "wasm32"))]
             AudioDevices::Cpal(a) => a.sample_rate(),
+            #[cfg(target_arch = "wasm32")]
+            AudioDevices::Browser(a) => a.sample_rate(),
             AudioDevices::Null(a) => a.sample_rate(),
         }
     }
@@ -124,6 +113,8 @@ impl Audio for AudioDevices {
         match self {
             #[cfg(not(target_arch = "wasm32"))]
             AudioDevices::Cpal(a) => a.play(),
+            #[cfg(target_arch = "wasm32")]
+            AudioDevices::Browser(a) => a.play(),
             AudioDevices::Null(a) => a.play(),
         }
     }
@@ -132,6 +123,8 @@ impl Audio for AudioDevices {
         match self {
             #[cfg(not(target_arch = "wasm32"))]
             AudioDevices::Cpal(a) => a.pause(),
+            #[cfg(target_arch = "wasm32")]
+            AudioDevices::Browser(a) => a.pause(),
             AudioDevices::Null(a) => a.pause(),
         }
     }
@@ -140,6 +133,8 @@ impl Audio for AudioDevices {
         match self {
             #[cfg(not(target_arch = "wasm32"))]
             AudioDevices::Cpal(a) => a.volume(volume),
+            #[cfg(target_arch = "wasm32")]
+            AudioDevices::Browser(a) => a.volume(volume),
             AudioDevices::Null(a) => a.volume(volume),
         }
     }
@@ -149,6 +144,13 @@ impl Audio for AudioDevices {
 impl From<CpalAudio> for AudioDevices {
     fn from(value: CpalAudio) -> Self {
         AudioDevices::Cpal(value)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl From<BrowserAudio> for AudioDevices {
+    fn from(value: BrowserAudio) -> Self {
+        AudioDevices::Browser(value)
     }
 }
 

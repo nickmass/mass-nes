@@ -17,7 +17,6 @@ pub struct Runner {
     samples_tx: SamplesSender,
     blip: Blip,
     blip_delta: i32,
-    audio_buffer: Vec<i16>,
     save_states: Vec<Option<(usize, nes::SaveData)>>,
     save_store: SaveStore,
     frame: usize,
@@ -33,7 +32,7 @@ impl Runner {
         sample_rate: u32,
     ) -> Self {
         let machine = Machine::new(region, cart);
-        let mut blip = blip_buf_rs::Blip::new(sample_rate / 30);
+        let mut blip = blip_buf_rs::Blip::new(sample_rate / 20);
         blip.set_rates(
             region.frame_ticks() * region.refresh_rate(),
             sample_rate as f64,
@@ -46,7 +45,6 @@ impl Runner {
             samples_tx,
             blip,
             blip_delta: 0,
-            audio_buffer: vec![0; 1024],
             save_states: vec![None; 10],
             save_store: SaveStore::new(32000, 5),
             frame: 0,
@@ -115,10 +113,7 @@ impl Runner {
             self.blip_delta = *v as i32;
         }
         self.blip.end_frame(count as u32);
-        while self.blip.samples_avail() > 0 {
-            let count = self.blip.read_samples(&mut self.audio_buffer, 1024, false) as usize;
-            self.samples_tx.add_samples(&self.audio_buffer[..count]);
-        }
+        self.samples_tx.add_samples_from_blip(&mut self.blip);
     }
 
     #[instrument(skip_all)]

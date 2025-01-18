@@ -59,7 +59,6 @@ struct MachineRunner {
     blip_delta: i32,
     blip: blip_buf_rs::Blip,
     back_buffer: GfxBackBuffer,
-    audio_buffer: Vec<i16>,
     samples_tx: SamplesSender,
     nes_inputs: Option<NesInputs>,
 }
@@ -74,7 +73,7 @@ impl MachineRunner {
             samples_tx,
         } = channel;
 
-        let mut blip = blip_buf_rs::Blip::new(sample_rate / 30);
+        let mut blip = blip_buf_rs::Blip::new(sample_rate / 20);
         blip.set_rates(
             region.frame_ticks() * region.refresh_rate(),
             sample_rate as f64,
@@ -87,7 +86,6 @@ impl MachineRunner {
             blip_delta: 0,
             blip,
             back_buffer,
-            audio_buffer: vec![0; 1024],
             samples_tx,
         }
     }
@@ -142,10 +140,7 @@ impl MachineRunner {
             }
             self.blip.end_frame(count as u32);
 
-            while self.blip.samples_avail() > 0 {
-                let count = self.blip.read_samples(&mut self.audio_buffer, 1024, false) as usize;
-                self.samples_tx.add_samples(&self.audio_buffer[..count]);
-            }
+            self.samples_tx.add_samples_from_blip(&mut self.blip);
 
             self.back_buffer.update(|frame| {
                 frame.copy_from_slice(machine.get_screen());
