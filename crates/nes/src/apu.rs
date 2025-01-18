@@ -49,9 +49,7 @@ pub struct Apu {
     #[cfg_attr(feature = "save-states", save(skip))]
     tnd_table: Vec<i16>,
     #[cfg_attr(feature = "save-states", save(skip))]
-    samples: Vec<i16>,
-    #[cfg_attr(feature = "save-states", save(skip))]
-    sample_index: usize,
+    samples: Samples,
     current_tick: u32,
     reset_delay: u32,
     frame_counter: u32,
@@ -86,8 +84,7 @@ impl Apu {
             dmc: Dmc::new(region),
             pulse_table,
             tnd_table,
-            samples: vec![0; 33248], //Max cycles for the longer pal frame
-            sample_index: 0,
+            samples: Samples::new(33248), //Max cycles for the longer pal frame
             current_tick: 0,
             reset_delay: 0,
             frame_counter: 6,
@@ -261,12 +258,12 @@ impl Apu {
         let pulse_out = self.pulse_table[(pulse1 + pulse2) as usize];
         let tnd_out = self.tnd_table[((3 * triangle) + (2 * noise) + dmc) as usize];
         let ext_out = self.mapper.get_sample().unwrap_or(0);
-        if let Some(v) = self.samples.get_mut(self.sample_index) {
-            // lazy mixing
-            *v = (pulse_out + tnd_out) - (ext_out);
-        }
+        let sample = (pulse_out + tnd_out) - ext_out;
+        self.samples.push(sample);
+    }
 
-        self.sample_index += 1;
+    pub fn samples(&mut self) -> impl Iterator<Item = i16> + '_ {
+        self.samples.iter()
     }
 
     pub fn get_irq(&self) -> bool {
@@ -279,12 +276,6 @@ impl Apu {
 
     pub fn get_oam_req(&mut self) -> Option<u8> {
         self.oam_req.take()
-    }
-
-    pub fn get_samples(&mut self) -> &[i16] {
-        let index = self.sample_index;
-        self.sample_index = 0;
-        &self.samples[0..index]
     }
 
     pub fn register(&self, cpu: &mut AddressBus) {
@@ -346,5 +337,55 @@ impl Apu {
             is_half_frame: self.is_half_frame(),
             is_quarter_frame: self.is_quarter_frame(),
         }
+    }
+}
+
+pub struct Samples {
+    samples: Vec<i16>,
+    capacity: usize,
+    reader_idx: usize,
+    writer_idx: usize,
+}
+
+impl Samples {
+    fn new(capacity: usize) -> Self {
+        Self {
+            samples: vec![0; capacity],
+            capacity,
+            reader_idx: 0,
+            writer_idx: 0,
+        }
+    }
+
+    fn push(&mut self, sample: i16) {
+        self.samples[self.writer_idx] = sample;
+        self.advance_writer();
+        if self.reader_idx == self.writer_idx {
+            self.advance_reader();
+        }
+    }
+
+    pub fn pop(&mut self) -> Option<i16> {
+        if self.reader_idx == self.writer_idx {
+            None
+        } else {
+            let sample = self.samples[self.reader_idx];
+            self.advance_reader();
+            Some(sample)
+        }
+    }
+
+    pub fn iter(&mut self) -> impl Iterator<Item = i16> + '_ {
+        std::iter::from_fn(|| self.pop())
+    }
+
+    fn advance_reader(&mut self) {
+        self.reader_idx += 1;
+        self.reader_idx *= (self.reader_idx < self.capacity) as usize;
+    }
+
+    fn advance_writer(&mut self) {
+        self.writer_idx += 1;
+        self.writer_idx *= (self.writer_idx < self.capacity) as usize;
     }
 }

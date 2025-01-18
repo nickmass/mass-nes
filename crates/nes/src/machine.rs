@@ -277,8 +277,8 @@ impl Machine {
         self.ppu.screen()
     }
 
-    pub fn get_audio(&mut self) -> &[i16] {
-        self.apu.get_samples()
+    pub fn get_audio(&mut self) -> impl Iterator<Item = i16> + '_ {
+        self.apu.samples()
     }
 
     pub fn set_input<T: IntoIterator<Item = UserInput>>(&mut self, input: T) {

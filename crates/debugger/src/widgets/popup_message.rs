@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use eframe::egui;
+use eframe::egui::{self, Widget};
 
 use crate::platform::Timestamp;
 
@@ -66,6 +66,6 @@ impl PopupMessage {
         };
 
         let txt = egui::RichText::new(&*msg).strong().size(30.0);
-        ui.add(egui::Label::new(txt).extend().selectable(false));
+        egui::Label::new(txt).extend().selectable(false).ui(ui);
     }
 }

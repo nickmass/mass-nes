@@ -22,13 +22,6 @@ impl Playback {
         }
     }
 
-    fn reverse_audio(&self) -> bool {
-        match self {
-            Playback::Rewind | Playback::StepBackward => true,
-            _ => false,
-        }
-    }
-
     fn update_audio(&self) -> bool {
         match self {
             Playback::StepForward | Playback::StepBackward | Playback::FastForward => false,
@@ -246,14 +239,15 @@ impl Runner {
                     self.frame += 1;
                     self.total_frames += 1;
 
-                    self.update_audio(playback);
+                    if playback.update_audio() {
+                        self.update_audio();
+                    }
                     if self.frame % playback.frame_freq() == 0 || true {
                         self.update_frame();
                     }
                     self.update_debug(false);
                 }
                 RunResult::Breakpoint => {
-                    let _ = machine.get_audio();
                     self.debug.set_breakpoint();
                     self.update_frame();
                     self.update_debug(true);
@@ -263,26 +257,16 @@ impl Runner {
     }
 
     #[instrument(skip_all)]
-    fn update_audio(&mut self, playback: Playback) {
+    fn update_audio(&mut self) {
         if let Some(machine) = self.machine.as_mut() {
-            let samples = machine.get_audio();
-            if playback.update_audio() {
-                let count = samples.len();
-
-                if playback.reverse_audio() {
-                    for (i, v) in samples.iter().rev().enumerate() {
-                        self.blip.add_delta(i as u32, *v as i32 - self.blip_delta);
-                        self.blip_delta = *v as i32;
-                    }
-                } else {
-                    for (i, v) in samples.iter().enumerate() {
-                        self.blip.add_delta(i as u32, *v as i32 - self.blip_delta);
-                        self.blip_delta = *v as i32;
-                    }
-                }
-                self.blip.end_frame(count as u32);
-                self.samples_tx.add_samples_from_blip(&mut self.blip);
+            let mut count = 0;
+            for (i, v) in machine.get_audio().enumerate() {
+                self.blip.add_delta(i as u32, v as i32 - self.blip_delta);
+                self.blip_delta = v as i32;
+                count += 1;
             }
+            self.blip.end_frame(count);
+            self.samples_tx.add_samples_from_blip(&mut self.blip);
         }
     }
 

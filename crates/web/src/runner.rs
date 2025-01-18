@@ -131,12 +131,12 @@ impl MachineRunner {
         if let Some(machine) = self.machine.as_mut() {
             machine.run();
 
-            let samples = machine.get_audio();
-            let count = samples.len();
+            let mut count = 0;
 
-            for (i, v) in samples.iter().enumerate() {
-                self.blip.add_delta(i as u32, *v as i32 - self.blip_delta);
-                self.blip_delta = *v as i32;
+            for (i, v) in machine.get_audio().enumerate() {
+                self.blip.add_delta(i as u32, v as i32 - self.blip_delta);
+                self.blip_delta = v as i32;
+                count += 1;
             }
             self.blip.end_frame(count as u32);
 
