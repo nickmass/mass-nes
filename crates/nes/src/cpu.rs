@@ -468,7 +468,7 @@ impl Cpu {
             IllDcp(step) => self.ill_inst_dcp(address, step),
             IllIsc(step) => self.ill_inst_isc(address, step),
             IllKil => self.ill_inst_kil(),
-            IllLas => self.ill_inst_las(address),
+            IllLas(step) => self.ill_inst_las(address, step),
             IllLax(step) => self.ill_inst_lax(address, step),
             IllNop => self.ill_inst_nop(),
             IllNopAddr => self.ill_inst_nop_addr(address),
@@ -1207,7 +1207,20 @@ impl Cpu {
     }
 
     fn ill_inst_ahx(&mut self, addr: u16) -> ExecResult {
-        ExecResult::Tick(TickResult::Read(addr))
+        let base_addr = addr.wrapping_sub(self.regs.reg_y as u16);
+        let hi = ((base_addr >> 8) as u8).wrapping_add(1);
+        let value = self.regs.reg_a & self.regs.reg_x & hi;
+
+        let wrapped = addr & 0xff00 != base_addr & 0xff00;
+        let target = if wrapped {
+            let hi_a = (self.regs.reg_a as u16) << 8 | 0xff;
+            let hi_x = (self.regs.reg_x as u16) << 8 | 0xff;
+            addr & hi_a & hi_x
+        } else {
+            addr
+        };
+
+        ExecResult::Tick(TickResult::Write(target, value))
     }
 
     fn ill_inst_alr(&mut self, addr: u16, step: ReadExec) -> ExecResult {
@@ -1348,8 +1361,19 @@ impl Cpu {
         ExecResult::Done
     }
 
-    fn ill_inst_las(&mut self, addr: u16) -> ExecResult {
-        ExecResult::Tick(TickResult::Read(addr))
+    fn ill_inst_las(&mut self, addr: u16, step: ReadExec) -> ExecResult {
+        use ExecResult::*;
+        use ReadExec::*;
+        match step {
+            Read => Next(TickResult::Read(addr), Instruction::IllLas(Exec)),
+            Exec => {
+                self.regs.reg_sp &= self.pin_in.data;
+                self.regs.reg_a = self.regs.reg_sp;
+                self.regs.reg_x = self.regs.reg_sp;
+                self.regs.set_flags_zs(self.regs.reg_a);
+                Done
+            }
+        }
     }
 
     fn ill_inst_lax(&mut self, addr: u16, step: ReadExec) -> ExecResult {
@@ -1453,17 +1477,35 @@ impl Cpu {
     }
 
     fn ill_inst_shx(&mut self, addr: u16) -> ExecResult {
-        let temp = (addr >> 8).wrapping_add(1) as u8;
-        let value = self.regs.reg_x & temp;
-        let addr = (addr & 0x00ff) | ((value as u16) << 8);
-        ExecResult::Tick(TickResult::Write(addr, value))
+        let base_addr = addr.wrapping_sub(self.regs.reg_y as u16);
+        let hi = ((base_addr >> 8) as u8).wrapping_add(1);
+        let value = self.regs.reg_x & hi;
+
+        let wrapped = addr & 0xff00 != base_addr & 0xff00;
+        let target = if wrapped {
+            let hi_x = (self.regs.reg_x as u16) << 8 | 0xff;
+            addr & hi_x
+        } else {
+            addr
+        };
+
+        ExecResult::Tick(TickResult::Write(target, value))
     }
 
     fn ill_inst_shy(&mut self, addr: u16) -> ExecResult {
-        let temp = (addr >> 8).wrapping_add(1) as u8;
-        let value = self.regs.reg_y & temp;
-        let addr = (addr & 0x00ff) | ((value as u16) << 8);
-        ExecResult::Tick(TickResult::Write(addr, value))
+        let base_addr = addr.wrapping_sub(self.regs.reg_x as u16);
+        let hi = ((base_addr >> 8) as u8).wrapping_add(1);
+        let value = self.regs.reg_y & hi;
+
+        let wrapped = addr & 0xff00 != base_addr & 0xff00;
+        let target = if wrapped {
+            let hi_y = (self.regs.reg_y as u16) << 8 | 0xff;
+            addr & hi_y
+        } else {
+            addr
+        };
+
+        ExecResult::Tick(TickResult::Write(target, value))
     }
 
     fn ill_inst_slo(&mut self, addr: u16, step: ReadDummyExec) -> ExecResult {
@@ -1511,9 +1553,21 @@ impl Cpu {
     }
 
     fn ill_inst_tas(&mut self, addr: u16) -> ExecResult {
-        self.regs.reg_sp = self.regs.reg_x & self.regs.reg_a;
-        let value = self.regs.reg_sp & ((addr >> 8) as u8);
-        ExecResult::Tick(TickResult::Write(addr, value))
+        let base_addr = addr.wrapping_sub(self.regs.reg_y as u16);
+        let hi = ((base_addr >> 8) as u8).wrapping_add(1);
+        self.regs.reg_sp = self.regs.reg_a & self.regs.reg_x;
+        let value = self.regs.reg_a & self.regs.reg_x & hi;
+
+        let wrapped = addr & 0xff00 != base_addr & 0xff00;
+        let target = if wrapped {
+            let hi_a = (self.regs.reg_a as u16) << 8 | 0xff;
+            let hi_x = (self.regs.reg_x as u16) << 8 | 0xff;
+            addr & hi_a & hi_x
+        } else {
+            addr
+        };
+
+        ExecResult::Tick(TickResult::Write(target, value))
     }
 
     fn ill_inst_xaa(&mut self, addr: u16, step: ReadExec) -> ExecResult {

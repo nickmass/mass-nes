@@ -76,7 +76,7 @@ pub enum Instruction {
     IllDcp(ReadDummyExec),
     IllIsc(ReadDummyExec),
     IllKil,
-    IllLas,
+    IllLas(ReadExec),
     IllLax(ReadExec),
     IllNop,
     IllNopAddr,
@@ -166,7 +166,7 @@ impl Instruction {
             IllDcp(..) => "*DCP",
             IllIsc(..) => "*ISC",
             IllKil => "*KIL",
-            IllLas => "*LAS",
+            IllLas(..) => "*LAS",
             IllLax(..) => "*LAX",
             IllNop => "*NOP",
             IllNopAddr => "*NOP",
@@ -1440,7 +1440,7 @@ impl Op {
         set_op!(
             ops,
             0xbb,
-            I::IllLas,
+            I::IllLas(ReadExec::Read),
             A::AbsoluteOffset(Reg::Y, DummyRead::OnCarry, AbsoluteOffset::ReadLow),
         );
 
