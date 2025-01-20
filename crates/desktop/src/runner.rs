@@ -106,7 +106,7 @@ impl Runner {
     #[instrument(skip_all)]
     fn update_audio(&mut self) {
         let mut count = 0;
-        for (i, v) in self.machine.get_audio().enumerate() {
+        for (i, v) in self.machine.get_samples().enumerate() {
             self.blip.add_delta(i as u32, v as i32 - self.blip_delta);
             self.blip_delta = v as i32;
             count += 1;

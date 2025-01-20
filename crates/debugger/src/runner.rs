@@ -49,12 +49,19 @@ impl Playback {
             _ => 1,
         }
     }
+
+    fn reverse(&self) -> bool {
+        match self {
+            Playback::Rewind | Playback::StepBackward => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug)]
 pub enum EmulatorInput {
     Nes(UserInput),
-    Rewind,
+    Rewind(bool),
     SaveState(u32),
     RestoreState(u32),
     LoadCartridge(Region, Vec<u8>),
@@ -144,6 +151,7 @@ impl Runner {
             panic!("nes commands taken");
         };
 
+        let mut rewinding = false;
         loop {
             let mut playback = Playback::Normal;
             for input in commands.try_commands() {
@@ -168,14 +176,8 @@ impl Runner {
                             }
                         }
                     }
-                    EmulatorInput::Rewind => {
-                        if let Some(machine) = &mut self.machine {
-                            if let Some((frame, data)) = self.save_store.pop() {
-                                self.frame = frame;
-                                machine.restore_state(&data);
-                                playback = Playback::Rewind;
-                            }
-                        }
+                    EmulatorInput::Rewind(toggle) => {
+                        rewinding = toggle;
                     }
                     EmulatorInput::StepBack => {
                         if let Some(machine) = &mut self.machine {
@@ -213,6 +215,15 @@ impl Runner {
             }
 
             if !playback.skip_step() && self.samples_tx.wants_samples() {
+                if rewinding {
+                    if let Some((machine, (frame, data))) =
+                        self.machine.as_mut().zip(self.save_store.pop())
+                    {
+                        self.frame = frame;
+                        machine.restore_state(&data);
+                        playback = Playback::Rewind;
+                    }
+                }
                 self.step(playback);
             }
 
@@ -240,7 +251,7 @@ impl Runner {
                     self.total_frames += 1;
 
                     if playback.update_audio() {
-                        self.update_audio();
+                        self.update_audio(playback);
                     }
                     if self.frame % playback.frame_freq() == 0 || true {
                         self.update_frame();
@@ -257,15 +268,22 @@ impl Runner {
     }
 
     #[instrument(skip_all)]
-    fn update_audio(&mut self) {
+    fn update_audio(&mut self, playback: Playback) {
         if let Some(machine) = self.machine.as_mut() {
-            let mut count = 0;
-            for (i, v) in machine.get_audio().enumerate() {
-                self.blip.add_delta(i as u32, v as i32 - self.blip_delta);
-                self.blip_delta = v as i32;
-                count += 1;
+            let samples = machine.take_samples();
+            let count = samples.len();
+            if playback.reverse() {
+                for (i, v) in samples.rev().enumerate() {
+                    self.blip.add_delta(i as u32, v as i32 - self.blip_delta);
+                    self.blip_delta = v as i32;
+                }
+            } else {
+                for (i, v) in samples.enumerate() {
+                    self.blip.add_delta(i as u32, v as i32 - self.blip_delta);
+                    self.blip_delta = v as i32;
+                }
             }
-            self.blip.end_frame(count);
+            self.blip.end_frame(count as u32);
             self.samples_tx.add_samples_from_blip(&mut self.blip);
         }
     }

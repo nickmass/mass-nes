@@ -99,7 +99,7 @@ impl Emulator {
         let start = performance.now();
         for _ in 0..frames {
             machine.run();
-            let _ = machine.get_audio();
+            let _ = machine.get_samples();
         }
         let end = performance.now();
         let elapsed = std::time::Duration::from_secs_f64((end - start) / 1000.0);

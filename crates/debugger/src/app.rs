@@ -273,8 +273,10 @@ impl<A: Audio> DebuggerApp<A> {
             self.emu_control.fast_forward();
             self.nes_screen.set_message(Message::FastForward);
         }
+        if input_state.rewind != self.last_input.rewind {
+            self.emu_control.rewind(input_state.rewind);
+        }
         if input_state.rewind {
-            self.emu_control.rewind();
             self.nes_screen.set_message(Message::Rewind);
         }
         if input_state.power {
@@ -670,8 +672,8 @@ impl EmulatorControl {
         let _ = self.tx.send(EmulatorInput::StepForward);
     }
 
-    pub fn rewind(&self) {
-        let _ = self.tx.send(EmulatorInput::Rewind);
+    pub fn rewind(&self, toggle: bool) {
+        let _ = self.tx.send(EmulatorInput::Rewind(toggle));
     }
 
     pub fn power(&self) {

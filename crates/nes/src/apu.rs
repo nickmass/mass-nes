@@ -266,6 +266,12 @@ impl Apu {
         self.samples.iter()
     }
 
+    pub fn take_samples(
+        &mut self,
+    ) -> impl DoubleEndedIterator<Item = i16> + ExactSizeIterator + '_ {
+        self.samples.take_iter()
+    }
+
     pub fn get_irq(&self) -> bool {
         self.irq | self.dmc.get_irq()
     }
@@ -365,7 +371,7 @@ impl Samples {
         }
     }
 
-    pub fn pop(&mut self) -> Option<i16> {
+    fn pop(&mut self) -> Option<i16> {
         if self.reader_idx == self.writer_idx {
             None
         } else {
@@ -375,8 +381,22 @@ impl Samples {
         }
     }
 
-    pub fn iter(&mut self) -> impl Iterator<Item = i16> + '_ {
+    fn iter(&mut self) -> impl Iterator<Item = i16> + '_ {
         std::iter::from_fn(|| self.pop())
+    }
+
+    fn take_iter(&mut self) -> SamplesIter {
+        let iter = SamplesIter {
+            samples: &self.samples,
+            done: false,
+            capacity: self.capacity,
+            reader_idx: self.reader_idx,
+            writer_idx: self.writer_idx,
+        };
+
+        self.reader_idx = self.writer_idx;
+
+        iter
     }
 
     fn advance_reader(&mut self) {
@@ -389,3 +409,69 @@ impl Samples {
         self.writer_idx *= (self.writer_idx < self.capacity) as usize;
     }
 }
+
+struct SamplesIter<'a> {
+    samples: &'a [i16],
+    done: bool,
+    capacity: usize,
+    reader_idx: usize,
+    writer_idx: usize,
+}
+
+impl<'a> SamplesIter<'a> {
+    fn advance_reader(&mut self) {
+        self.reader_idx += 1;
+        self.reader_idx *= (self.reader_idx < self.capacity) as usize;
+    }
+
+    fn retreat_writer(&mut self) {
+        if self.writer_idx == 0 {
+            self.writer_idx = self.capacity - 1;
+        } else {
+            self.writer_idx -= 1;
+        }
+    }
+}
+
+impl<'a> Iterator for SamplesIter<'a> {
+    type Item = i16;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.reader_idx == self.writer_idx || self.done {
+            self.done = true;
+            None
+        } else {
+            let sample = self.samples[self.reader_idx];
+            self.advance_reader();
+            Some(sample)
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = if self.done {
+            0
+        } else if self.reader_idx < self.writer_idx {
+            self.writer_idx - self.reader_idx
+        } else {
+            self.capacity - (self.reader_idx - self.writer_idx)
+        };
+
+        (len, Some(len))
+    }
+}
+
+impl<'a> DoubleEndedIterator for SamplesIter<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.done {
+            None
+        } else {
+            self.retreat_writer();
+            if self.reader_idx == self.writer_idx {
+                self.done = true;
+            }
+            Some(self.samples[self.writer_idx])
+        }
+    }
+}
+
+impl<'a> ExactSizeIterator for SamplesIter<'a> {}
