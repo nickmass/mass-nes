@@ -467,6 +467,8 @@ impl Exrom {
             }
             0x5203 => self.ppu_state.scanline_compare = value,
             0x5204 => self.irq_enabled = value & 0x80 != 0,
+            0x5205 => self.mul_left = value,
+            0x5206 => self.mul_right = value,
             addr if addr >= 0x5c00 && addr <= 0x5fff => {
                 if self.ex_ram_mode != 3 {
                     self.exram.write(addr & 0x3ff, value)
