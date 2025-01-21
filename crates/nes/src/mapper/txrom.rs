@@ -9,13 +9,13 @@ use crate::ppu::PpuFetchKind;
 
 use super::{Nametable, SimpleMirroring};
 
+const MMC3_ALT_IRQ_BEHAVIOR: bool = false;
+
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Txrom {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: Cartridge,
     mirroring: SimpleMirroring,
-    current_tick: u64,
-    last_a12_tick: u64,
     prg: MappedMemory,
     chr: MappedMemory,
     chr_type: BankKind,
@@ -30,6 +30,8 @@ pub struct Txrom {
     irq_counter: u8,
     irq_reload_pending: bool,
     irq_force_reload_pending: bool,
+    irq_a12: bool,
+    irq_a12_low_cycles: u64,
     last: usize,
     ext_nt: Option<[MemoryBlock; 2]>,
 }
@@ -70,8 +72,6 @@ impl Txrom {
         let mut rom = Txrom {
             cartridge,
             mirroring,
-            current_tick: 0,
-            last_a12_tick: 0,
             prg,
             chr,
             chr_type,
@@ -86,6 +86,8 @@ impl Txrom {
             irq_counter: 0,
             irq_reload_pending: false,
             irq_force_reload_pending: false,
+            irq_a12: false,
+            irq_a12_low_cycles: 0,
             ext_nt,
             last,
         };
@@ -170,7 +172,6 @@ impl Txrom {
     }
 
     fn write_ppu(&mut self, addr: u16, value: u8) {
-        self.irq_tick(addr);
         if let Some([a, b]) = self.ext_nt.as_mut() {
             if addr & 0x2000 != 0 {
                 match addr & 0x400 {
@@ -186,17 +187,18 @@ impl Txrom {
         }
     }
 
-    fn irq_tick(&mut self, addr: u16) {
+    fn irq_addr(&mut self, addr: u16) {
         let a12 = addr & 0x1000 != 0;
-        let mut clock = a12;
-        if clock {
-            if self.current_tick - self.last_a12_tick <= 3 {
-                clock = false
-            }
-            self.last_a12_tick = self.current_tick;
+        let clock = a12 && !self.irq_a12 && self.irq_a12_low_cycles > 3;
+        if a12 {
+            self.irq_a12_low_cycles = 0
         }
+        self.irq_a12 = a12;
+
         let mut is_zero = false;
         if clock {
+            let was_zero =
+                MMC3_ALT_IRQ_BEHAVIOR && self.irq_counter == 0 && !self.irq_force_reload_pending;
             if self.irq_reload_pending || self.irq_force_reload_pending {
                 self.irq_counter = self.irq_latch;
                 if self.irq_counter == 0 {
@@ -211,7 +213,7 @@ impl Txrom {
                     self.irq_reload_pending = true;
                 }
             }
-            if is_zero && self.irq_enabled {
+            if is_zero && self.irq_enabled && !was_zero {
                 self.irq = true;
             }
         }
@@ -287,7 +289,11 @@ impl Mapper for Txrom {
     }
 
     fn tick(&mut self) {
-        self.current_tick += 1;
+        if self.irq_a12 {
+            self.irq_a12_low_cycles = 0;
+        } else {
+            self.irq_a12_low_cycles += 1;
+        }
     }
 
     fn get_irq(&mut self) -> bool {
@@ -312,7 +318,7 @@ impl Mapper for Txrom {
     }
 
     fn ppu_fetch(&mut self, address: u16, kind: PpuFetchKind) -> super::Nametable {
-        self.irq_tick(address);
+        self.irq_addr(address);
         self.peek_ppu_fetch(address, kind)
     }
 }

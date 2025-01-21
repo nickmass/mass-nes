@@ -26,7 +26,6 @@ fn a12_clocking() {
 }
 
 #[test]
-#[should_panic]
 fn scanline_timing() {
     run("4-scanline_timing.nes");
 }
