@@ -40,8 +40,19 @@ pub enum RunResult {
 #[derive(Debug, Copy, Clone)]
 pub enum UserInput {
     PlayerOne(Controller),
+    Mapper(MapperInput),
     Power,
     Reset,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum MapperInput {
+    Fds(FdsInput),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum FdsInput {
+    SetDisk(Option<usize>),
 }
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
@@ -299,6 +310,7 @@ impl Machine {
             UserInput::PlayerOne(c) => self.input.set_input(c.to_byte()),
             UserInput::Power => self.power(),
             UserInput::Reset => self.reset(),
+            UserInput::Mapper(mapper_input) => self.mapper.input(mapper_input),
         }
     }
 

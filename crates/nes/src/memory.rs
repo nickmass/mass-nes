@@ -1,7 +1,7 @@
 #[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
 
-use crate::cartridge::Cartridge;
+use crate::cartridge::INes;
 
 use std::cell::Cell;
 
@@ -79,7 +79,7 @@ pub struct Banks {
 }
 
 impl Banks {
-    pub fn load(cart: &Cartridge, kind: MemKind) -> Banks {
+    pub fn load(cart: &INes, kind: MemKind) -> Banks {
         let data: &[u8] = match kind {
             MemKind::Prg => &*cart.prg_rom,
             MemKind::Chr => &*cart.chr_rom,
@@ -94,7 +94,7 @@ impl Banks {
         Banks { data: v, kind }
     }
 
-    pub fn read(&self, cartridge: &Cartridge, bank: usize, addr: u16) -> u8 {
+    pub fn read(&self, cartridge: &INes, bank: usize, addr: u16) -> u8 {
         let bank = self.data[bank % self.data.len()];
         match self.kind {
             MemKind::Prg => cartridge.prg_rom[bank.start + addr as usize],
@@ -129,7 +129,7 @@ pub struct MappedMemory {
 
 impl MappedMemory {
     pub fn new(
-        cart: &Cartridge,
+        cart: &INes,
         base_addr: u16,
         ram_kb: u32,
         size_kb: u32,
@@ -186,7 +186,7 @@ impl MappedMemory {
             })
     }
 
-    pub fn read(&self, cartridge: &Cartridge, addr: u16) -> u8 {
+    pub fn read(&self, cartridge: &INes, addr: u16) -> u8 {
         let mapping = self.get_mapping(addr);
 
         match mapping {

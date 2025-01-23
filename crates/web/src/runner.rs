@@ -112,7 +112,7 @@ impl MachineRunner {
         match input {
             EmulatorInput::Load(rom) => {
                 let mut rom = std::io::Cursor::new(rom);
-                let Ok(cart) = nes::Cartridge::load(&mut rom) else {
+                let Ok(cart) = nes::Cartridge::load(&mut rom, None, "rom.nes") else {
                     tracing::error!("failed to load rom");
                     return;
                 };

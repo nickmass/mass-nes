@@ -51,7 +51,7 @@ mod web {
                     .await
                 {
                     if let Ok(bytes) = res.binary().await {
-                        control.load_rom(Region::Ntsc, bytes);
+                        control.load_rom(Region::Ntsc, bytes, "example.nes".to_string(), None);
                         proxy.send(AppEvent::RomLoaded(PathBuf::new()));
                     }
                 }

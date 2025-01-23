@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, time::Duration};
 
 use blip_buf_rs::Blip;
-use nes::{Cartridge, Machine, MachineState, Region, RunResult, UserInput};
+use nes::{Cartridge, FdsInput, Machine, MachineState, MapperInput, Region, RunResult, UserInput};
 use tracing::instrument;
 use ui::audio::SamplesSender;
 
@@ -64,11 +64,12 @@ pub enum EmulatorInput {
     Rewind(bool),
     SaveState(u32),
     RestoreState(u32),
-    LoadCartridge(Region, Vec<u8>),
+    LoadCartridge(Region, Vec<u8>, String, Option<Vec<u8>>),
     DebugRequest(DebugRequest),
     StepBack,
     StepForward,
     FastForward,
+    SetFdsDisk(Option<usize>),
 }
 
 #[derive(Debug)]
@@ -83,13 +84,16 @@ pub struct DebugRequest {
 }
 
 use crate::{
-    app::EmulatorCommands, debug_state::DebugSwapState, gfx::GfxBackBuffer, widgets::Breakpoints,
+    app::{CartridgeKind, EmulatorCommands},
+    debug_state::DebugSwapState,
+    gfx::GfxBackBuffer,
+    widgets::Breakpoints,
 };
 
 pub struct Runner {
     machine: Option<Machine>,
     back_buffer: GfxBackBuffer,
-    commands: Option<EmulatorCommands>,
+    commands: EmulatorCommands,
     samples_tx: SamplesSender,
     sample_rate: u32,
     blip: Blip,
@@ -124,7 +128,7 @@ impl Runner {
         Self {
             machine: None,
             back_buffer,
-            commands: Some(commands),
+            commands,
             samples_tx,
             sample_rate,
             blip,
@@ -147,14 +151,10 @@ impl Runner {
     }
 
     pub fn run(mut self) {
-        let Some(mut commands) = self.commands.take() else {
-            panic!("nes commands taken");
-        };
-
         let mut rewinding = false;
         loop {
             let mut playback = Playback::Normal;
-            for input in commands.try_commands() {
+            while let Some(input) = self.commands.try_command() {
                 match input {
                     EmulatorInput::Nes(input) => {
                         if let Some(machine) = &mut self.machine {
@@ -193,16 +193,28 @@ impl Runner {
                         playback = Playback::StepForward;
                         self.step(playback);
                     }
-                    EmulatorInput::LoadCartridge(region, rom) => {
+                    EmulatorInput::LoadCartridge(region, rom, file_name, bios) => {
                         let mut rom = std::io::Cursor::new(rom);
-                        if let Ok(cart) = Cartridge::load(&mut rom) {
-                            self.save_store.clear();
-                            self.frame = 0;
-                            self.machine = Some(Machine::new(region, cart));
-                            self.blip.set_rates(
-                                region.frame_ticks() * region.refresh_rate(),
-                                self.sample_rate as f64,
-                            );
+                        let mut bios = bios.map(std::io::Cursor::new);
+                        match Cartridge::load(&mut rom, bios.as_mut(), file_name) {
+                            Ok(cart) => {
+                                let cart_info = match cart.info() {
+                                    nes::CartridgeInfo::Cartridge => CartridgeKind::Cartridge,
+                                    nes::CartridgeInfo::Fds { total_sides } => CartridgeKind::Fds {
+                                        current_side: Some(0),
+                                        total_sides,
+                                    },
+                                };
+                                self.save_store.clear();
+                                self.frame = 0;
+                                self.machine = Some(Machine::new(region, cart));
+                                self.blip.set_rates(
+                                    region.frame_ticks() * region.refresh_rate(),
+                                    self.sample_rate as f64,
+                                );
+                                self.commands.send_cartridge_info(cart_info);
+                            }
+                            Err(e) => tracing::error!("Unable to load cartridge: {e:?}"),
                         }
                     }
                     EmulatorInput::DebugRequest(req) => {
@@ -210,6 +222,13 @@ impl Runner {
                     }
                     EmulatorInput::FastForward => {
                         playback = Playback::FastForward;
+                    }
+                    EmulatorInput::SetFdsDisk(disk) => {
+                        if let Some(machine) = self.machine.as_mut() {
+                            machine.handle_input(UserInput::Mapper(MapperInput::Fds(
+                                FdsInput::SetDisk(disk),
+                            )));
+                        }
                     }
                 }
             }

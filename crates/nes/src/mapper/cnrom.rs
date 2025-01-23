@@ -2,7 +2,7 @@
 use nes_traits::SaveState;
 
 use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind};
-use crate::cartridge::Cartridge;
+use crate::cartridge::INes;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind};
 use crate::ppu::PpuFetchKind;
@@ -12,14 +12,14 @@ use super::SimpleMirroring;
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Cnrom {
     #[cfg_attr(feature = "save-states", save(skip))]
-    cartridge: Cartridge,
+    cartridge: INes,
     chr: MappedMemory,
     mirroring: SimpleMirroring,
     prg_len: usize,
 }
 
 impl Cnrom {
-    pub fn new(cartridge: Cartridge) -> Cnrom {
+    pub fn new(cartridge: INes) -> Cnrom {
         let mut chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
         chr.map(0x0000, 8, 0, BankKind::Rom);
 

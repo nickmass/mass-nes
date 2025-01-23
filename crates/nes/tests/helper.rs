@@ -36,7 +36,7 @@ impl MachineBuilder {
         eprintln!("cargo run -p mass_nes -- run '{}'", path.display());
 
         let mut file = File::open(path).unwrap();
-        let cart = Cartridge::load(&mut file).unwrap();
+        let cart = Cartridge::load(&mut file, None, "test.nes").unwrap();
         let mut machine = Machine::new(self.region, cart);
         if let Some(pc) = self.power_up_pc {
             machine.force_power_up_pc(pc);

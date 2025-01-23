@@ -2,7 +2,7 @@
 use nes_traits::SaveState;
 
 use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind};
-use crate::cartridge::Cartridge;
+use crate::cartridge::INes;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
 use crate::ppu::PpuFetchKind;
@@ -12,7 +12,7 @@ use super::SimpleMirroring;
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Uxrom {
     #[cfg_attr(feature = "save-states", save(skip))]
-    cartridge: Cartridge,
+    cartridge: INes,
     chr_ram: MemoryBlock,
     mem: MappedMemory,
     mirroring: SimpleMirroring,
@@ -20,7 +20,7 @@ pub struct Uxrom {
 }
 
 impl Uxrom {
-    pub fn new(cartridge: Cartridge) -> Uxrom {
+    pub fn new(cartridge: INes) -> Uxrom {
         let last = (cartridge.prg_rom.len() / 0x4000) - 1;
         let mut mem = MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg);
         mem.map(0xC000, 16, last, BankKind::Rom);

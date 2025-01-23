@@ -2,7 +2,7 @@
 use nes_traits::SaveState;
 
 use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind};
-use crate::cartridge::Cartridge;
+use crate::cartridge::INes;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
 use crate::ppu::PpuFetchKind;
@@ -12,7 +12,7 @@ use super::SimpleMirroring;
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Bf909x {
     #[cfg_attr(feature = "save-states", save(skip))]
-    cartridge: Cartridge,
+    cartridge: INes,
     mem: MappedMemory,
     chr_ram: MemoryBlock,
     mirroring: SimpleMirroring,
@@ -20,7 +20,7 @@ pub struct Bf909x {
 }
 
 impl Bf909x {
-    pub fn new(cartridge: Cartridge) -> Bf909x {
+    pub fn new(cartridge: INes) -> Bf909x {
         let mut mem = MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg);
 
         let last_prg = (cartridge.prg_rom.len() / 0x4000) - 1;

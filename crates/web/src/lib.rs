@@ -91,7 +91,7 @@ impl Emulator {
         let rom = js_sys::Uint8Array::new(&rom);
         let rom = rom.to_vec();
         let mut cursor = Cursor::new(rom);
-        let cart = Cartridge::load(&mut cursor).unwrap();
+        let cart = Cartridge::load(&mut cursor, None, "bench.nes").unwrap();
         let mut machine = Machine::new(Region::Ntsc, cart);
         let window = web_sys::window()?;
         let performance = window.performance()?;

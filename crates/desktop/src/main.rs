@@ -24,8 +24,13 @@ fn main() {
 }
 
 fn run(path: PathBuf, region: nes::Region) {
-    let mut file = File::open(path).unwrap();
-    let cart = Cartridge::load(&mut file).unwrap();
+    let mut file = File::open(&path).unwrap();
+    let file_name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+    let cart = Cartridge::load(&mut file, None, file_name).unwrap();
 
     let setup = NesNtscSetup::composite();
     let filter = ui::filters::NtscFilter::new(&setup);
@@ -50,8 +55,13 @@ fn run(path: PathBuf, region: nes::Region) {
 }
 
 fn bench(path: PathBuf, region: nes::Region, mut frames: u32) {
-    let mut file = File::open(path).unwrap();
-    let cart = Cartridge::load(&mut file).unwrap();
+    let mut file = File::open(&path).unwrap();
+    let file_name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+    let cart = Cartridge::load(&mut file, None, file_name).unwrap();
     let mut machine = Machine::new(region, cart);
     loop {
         machine.run();

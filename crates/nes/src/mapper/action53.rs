@@ -2,7 +2,7 @@
 use nes_traits::SaveState;
 
 use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind, RangeAndMask};
-use crate::cartridge::Cartridge;
+use crate::cartridge::INes;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind};
 use crate::ppu::PpuFetchKind;
@@ -12,7 +12,7 @@ use super::SimpleMirroring;
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Action53 {
     #[cfg_attr(feature = "save-states", save(skip))]
-    cartridge: Cartridge,
+    cartridge: INes,
     prg: MappedMemory,
     chr: MappedMemory,
     regs: [u8; 4],
@@ -21,7 +21,7 @@ pub struct Action53 {
 }
 
 impl Action53 {
-    pub fn new(cartridge: Cartridge) -> Action53 {
+    pub fn new(cartridge: INes) -> Action53 {
         let chr_type = if cartridge.chr_rom.is_empty() {
             BankKind::Ram
         } else {

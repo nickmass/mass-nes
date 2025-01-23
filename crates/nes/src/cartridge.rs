@@ -6,6 +6,7 @@ use std::{fmt, io};
 pub enum CartridgeError {
     InvalidFileType,
     NotSupported,
+    BiosRequired(&'static str),
     IoError(io::Error),
 }
 
@@ -14,6 +15,9 @@ impl fmt::Display for CartridgeError {
         match *self {
             CartridgeError::InvalidFileType => write!(f, "Unrecognized rom file format"),
             CartridgeError::NotSupported => write!(f, "Rom file format not supported"),
+            CartridgeError::BiosRequired(bios_name) => {
+                write!(f, "This rom requires a bios file named '{bios_name}'")
+            }
             CartridgeError::IoError(ref x) => write!(f, "Cartridge io error: {}", x),
         }
     }
@@ -49,7 +53,7 @@ impl From<CartMirroring> for mapper::Mirroring {
     }
 }
 
-pub struct Cartridge {
+pub struct INes {
     pub chr_ram_bytes: usize,
     pub prg_ram_bytes: usize,
     pub prg_rom: Vec<u8>,
@@ -59,14 +63,34 @@ pub struct Cartridge {
     pub submapper: Option<u32>,
 }
 
+pub struct Fds {
+    pub disk_sides: Vec<Vec<u8>>,
+    pub bios: Vec<u8>,
+}
+
+pub enum CartridgeInfo {
+    Cartridge,
+    Fds { total_sides: usize },
+}
+
+pub enum Cartridge {
+    INes(INes),
+    Fds(Fds),
+}
+
 impl Cartridge {
-    pub fn load<T: io::Read>(file: &mut T) -> Result<Cartridge, CartridgeError> {
+    pub fn load<T: io::Read, S: AsRef<str>>(
+        file: &mut T,
+        bios: Option<&mut T>,
+        file_name: S,
+    ) -> Result<Cartridge, CartridgeError> {
         let mut ident = [0; 4];
         file.read_exact(&mut ident)?;
+        let file_name = file_name.as_ref();
 
-        match Cartridge::get_rom_type(&ident) {
+        match Cartridge::get_rom_type(&ident, file_name) {
             Some(RomType::Ines) => Cartridge::load_ines(file),
-            Some(RomType::Fds) => Cartridge::load_fds(file),
+            Some(RomType::Fds) => Cartridge::load_fds(file, ident, bios),
             Some(RomType::Unif) => Cartridge::load_unif(file),
             None => Err(CartridgeError::InvalidFileType),
         }
@@ -138,7 +162,7 @@ impl Cartridge {
         file.read_exact(&mut prg_rom)?;
         file.read_exact(&mut chr_rom)?;
 
-        let cartridge = Cartridge {
+        let cartridge = INes {
             chr_ram_bytes,
             prg_ram_bytes,
             prg_rom,
@@ -164,12 +188,68 @@ impl Cartridge {
             chr_ram_bytes,
             mapper
         );
-        Ok(cartridge)
+        Ok(Cartridge::INes(cartridge))
     }
 
-    fn load_fds<T: std::io::Read>(_file: &mut T) -> Result<Cartridge, CartridgeError> {
-        tracing::debug!("FDS");
-        Err(CartridgeError::NotSupported)
+    fn load_fds<T: std::io::Read, B: std::io::Read>(
+        file: &mut T,
+        ident: [u8; 4],
+        bios: Option<B>,
+    ) -> Result<Cartridge, CartridgeError> {
+        let Some(mut bios_rom) = bios else {
+            return Err(CartridgeError::BiosRequired("disksys.rom"));
+        };
+
+        let mut buffer = Vec::new();
+        if &ident == b"FDS\x1a" {
+            // Skip header
+            let mut header = [0; 16];
+            file.read_exact(&mut header[4..])?;
+        } else {
+            buffer.extend(&ident);
+        }
+
+        file.read_to_end(&mut buffer)?;
+
+        let mut bios = vec![0; 1024 * 8];
+        bios_rom.read_exact(&mut bios)?;
+
+        let mut disk_sides = Vec::new();
+        while disk_sides.len() * 65500 < buffer.len() {
+            let mut side = vec![0; 28300 / 8];
+
+            let offset = disk_sides.len() * 65500;
+            let mut i = 0;
+            while i < 65500 {
+                let idx = i + offset;
+                let block_type = buffer[idx];
+                let block_len = match block_type {
+                    1 => 56,
+                    2 => 2,
+                    3 => 16,
+                    4 => 1 + buffer[idx - 3] as usize + buffer[idx - 2] as usize * 0x100,
+                    _ => break,
+                };
+
+                side.push(0x80);
+                side.extend_from_slice(&buffer[idx..idx + block_len]);
+                side.push(0x4d);
+                side.push(0x62);
+                side.extend((0..976 / 8).map(|_| 0));
+                i += block_len;
+            }
+
+            if side.len() < 65500 {
+                side.resize(65500, 0);
+            }
+            disk_sides.push(side);
+        }
+
+        tracing::debug!("FDS Disk Sides: {}", disk_sides.len());
+
+        let fds = Fds { disk_sides, bios };
+
+        Ok(Cartridge::Fds(fds))
     }
 
     fn load_unif<T: std::io::Read>(_file: &mut T) -> Result<Cartridge, CartridgeError> {
@@ -177,14 +257,15 @@ impl Cartridge {
         Err(CartridgeError::NotSupported)
     }
 
-    fn get_rom_type(rom: &[u8]) -> Option<RomType> {
+    fn get_rom_type(rom: &[u8], file_name: &str) -> Option<RomType> {
         let ines_header = b"NES\x1a";
         if rom.starts_with(ines_header) {
             return Some(RomType::Ines);
         }
 
+        let ascii_ext = &file_name.as_bytes()[file_name.len() - 4..];
         let fds_header = b"FDS\x1a";
-        if rom.starts_with(fds_header) {
+        if rom.starts_with(fds_header) || ascii_ext.eq_ignore_ascii_case(b".fds") {
             return Some(RomType::Fds);
         }
 
@@ -197,6 +278,18 @@ impl Cartridge {
     }
 
     pub fn build_mapper(self) -> mapper::RcMapper {
-        mapper::ines(self)
+        match self {
+            Cartridge::INes(ines) => mapper::ines(ines),
+            Cartridge::Fds(fds) => mapper::fds(fds),
+        }
+    }
+
+    pub fn info(&self) -> CartridgeInfo {
+        match self {
+            Cartridge::INes(_) => CartridgeInfo::Cartridge,
+            Cartridge::Fds(fds) => CartridgeInfo::Fds {
+                total_sides: fds.disk_sides.len(),
+            },
+        }
     }
 }

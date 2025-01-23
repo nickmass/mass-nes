@@ -4,6 +4,7 @@ mod bf909x;
 mod bxrom;
 mod cnrom;
 mod exrom;
+mod fds;
 mod fme7;
 mod nina001;
 mod nrom;
@@ -17,7 +18,8 @@ mod vrc6;
 use serde::{Deserialize, Serialize};
 
 use crate::bus::{AddressBus, BusKind};
-use crate::cartridge::Cartridge;
+use crate::cartridge::{Fds, INes};
+use crate::machine::MapperInput;
 use crate::ppu::PpuFetchKind;
 
 use std::cell::RefCell;
@@ -76,6 +78,8 @@ pub trait Mapper {
     fn get_sample(&self) -> Option<i16> {
         None
     }
+
+    fn input(&mut self, _input: MapperInput) {}
 }
 
 #[derive(Clone)]
@@ -121,9 +125,13 @@ impl RcMapper {
     pub fn get_sample(&self) -> Option<i16> {
         self.0.borrow().get_sample()
     }
+
+    pub fn input(&self, input: MapperInput) {
+        self.0.borrow_mut().input(input);
+    }
 }
 
-pub fn ines(cart: Cartridge) -> RcMapper {
+pub fn ines(cart: INes) -> RcMapper {
     match cart.mapper {
         0 => RcMapper::new(nrom::Nrom::new(cart)),
         1 | 65 => RcMapper::new(sxrom::Sxrom::new(cart)),
@@ -154,6 +162,10 @@ pub fn ines(cart: Cartridge) -> RcMapper {
             RcMapper::new(nrom::Nrom::new(cart))
         }
     }
+}
+
+pub fn fds(disk: Fds) -> RcMapper {
+    RcMapper::new(fds::Fds::new(disk))
 }
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]

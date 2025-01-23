@@ -4,7 +4,7 @@ use nes_traits::SaveState;
 use serde::{Deserialize, Serialize};
 
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
-use crate::cartridge::Cartridge;
+use crate::cartridge::INes;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind};
 use crate::ppu::PpuFetchKind;
@@ -125,7 +125,7 @@ impl Vrc6Variant {
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Vrc6 {
     #[cfg_attr(feature = "save-states", save(skip))]
-    cartridge: Cartridge,
+    cartridge: INes,
     variant: Vrc6Variant,
     mirroring: SimpleMirroring,
     irq: VrcIrq,
@@ -144,7 +144,7 @@ pub struct Vrc6 {
 }
 
 impl Vrc6 {
-    pub fn new(cartridge: Cartridge, variant: Vrc6Variant) -> Self {
+    pub fn new(cartridge: INes, variant: Vrc6Variant) -> Self {
         let mirroring = SimpleMirroring::new(cartridge.mirroring.into());
         let mut prg = MappedMemory::new(&cartridge, 0x6000, 8, 40, MemKind::Prg);
         let chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);

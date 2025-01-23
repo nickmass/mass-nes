@@ -2,7 +2,7 @@
 use nes_traits::SaveState;
 
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
-use crate::cartridge::Cartridge;
+use crate::cartridge::INes;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind};
 use crate::ppu::PpuFetchKind;
@@ -45,7 +45,7 @@ impl Channel {
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Fme7 {
     #[cfg_attr(feature = "save-states", save(skip))]
-    cartridge: Cartridge,
+    cartridge: INes,
     prg: MappedMemory,
     chr: MappedMemory,
     command: u8,
@@ -78,7 +78,7 @@ pub struct Fme7 {
 }
 
 impl Fme7 {
-    pub fn new(cartridge: Cartridge) -> Fme7 {
+    pub fn new(cartridge: INes) -> Fme7 {
         let chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
         let mut prg = MappedMemory::new(&cartridge, 0x6000, 16, 40, MemKind::Prg);
         prg.map(0x6000, 8, 0, BankKind::Ram);

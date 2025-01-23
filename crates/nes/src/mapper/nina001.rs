@@ -2,7 +2,7 @@
 use nes_traits::SaveState;
 
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
-use crate::cartridge::Cartridge;
+use crate::cartridge::INes;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind};
 use crate::ppu::PpuFetchKind;
@@ -12,7 +12,7 @@ use super::SimpleMirroring;
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Nina001 {
     #[cfg_attr(feature = "save-states", save(skip))]
-    cartridge: Cartridge,
+    cartridge: INes,
     prg: MappedMemory,
     prg_count: usize,
     chr: MappedMemory,
@@ -21,7 +21,7 @@ pub struct Nina001 {
 }
 
 impl Nina001 {
-    pub fn new(cartridge: Cartridge) -> Nina001 {
+    pub fn new(cartridge: INes) -> Nina001 {
         let mut prg = MappedMemory::new(&cartridge, 0x6000, 8, 40, MemKind::Prg);
 
         prg.map(0x6000, 8, 0, BankKind::Ram);

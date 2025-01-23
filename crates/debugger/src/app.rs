@@ -64,6 +64,7 @@ struct UiState {
     debug_interval: u64,
     selected_palette: u8,
     filter: Filter,
+    bios: Option<Vec<u8>>,
 }
 
 impl Default for UiState {
@@ -86,6 +87,7 @@ impl Default for UiState {
             debug_interval: 10,
             selected_palette: 0,
             filter: Filter::Ntsc,
+            bios: None,
         }
     }
 }
@@ -109,6 +111,8 @@ pub struct DebuggerApp<A> {
     breakpoints: Breakpoints,
     first_update: bool,
     help: Help,
+    fds_disk_sides: usize,
+    fds_current_side: Option<usize>,
 }
 
 impl<A: Audio> DebuggerApp<A> {
@@ -130,7 +134,7 @@ impl<A: Audio> DebuggerApp<A> {
 
         let input = SharedInput::new();
         let last_input = input.state();
-        let (emu_control, emu_commands) = EmulatorControl::new();
+        let (emu_control, emu_commands) = EmulatorControl::new(app_events.create_proxy());
         let gamepad_channel = GilrsInput::new(app_events.create_proxy()).ok();
         let debug_swap = DebugSwapState::new();
         let debug = DebugUiState::new(debug_swap.clone(), palette);
@@ -196,6 +200,8 @@ impl<A: Audio> DebuggerApp<A> {
             breakpoints: Breakpoints::new(),
             recents: Recents::new(&[], 10),
             help,
+            fds_disk_sides: 0,
+            fds_current_side: None,
         };
 
         app.hydrate();
@@ -215,7 +221,7 @@ impl<A: Audio> DebuggerApp<A> {
 
         if self.state.auto_open_most_recent {
             if let Some(recent) = self.state.recent_files.first() {
-                self.load_rom(recent.clone())
+                self.load_rom(recent.clone(), self.state.bios.clone())
             }
         }
 
@@ -232,7 +238,12 @@ impl<A: Audio> DebuggerApp<A> {
             .and_then(|r| r.parent())
             .map(|p| p.to_owned());
         let proxy = self.app_events.create_proxy();
-        pick_file(proxy, control, region, last_dir);
+        pick_file(proxy, control, region, last_dir, self.state.bios.clone());
+    }
+
+    fn select_bios(&self) {
+        let proxy = self.app_events.create_proxy();
+        pick_bios(proxy);
     }
 
     fn set_volume(&mut self, value: f32) {
@@ -311,6 +322,9 @@ impl<A: Audio> DebuggerApp<A> {
 
     fn handle_app_event(&mut self, event: AppEvent, ctx: &egui::Context) {
         match event {
+            AppEvent::BiosLoaded(bios) => {
+                self.state.bios = Some(bios);
+            }
             AppEvent::RomLoaded(path) => {
                 self.recents.add(path);
                 self.state.recent_files = self.recents.iter().map(|p| p.to_path_buf()).collect();
@@ -342,12 +356,31 @@ impl<A: Audio> DebuggerApp<A> {
                 }
                 _ => (),
             },
+            AppEvent::CartridgeInfo(cartridge_kind) => match cartridge_kind {
+                CartridgeKind::Cartridge => {
+                    self.fds_disk_sides = 0;
+                    self.fds_current_side = None;
+                }
+                CartridgeKind::Fds {
+                    current_side,
+                    total_sides,
+                } => {
+                    self.fds_disk_sides = total_sides;
+                    self.fds_current_side = current_side;
+                }
+            },
         }
     }
 
-    fn load_rom(&self, rom_file: PathBuf) {
+    fn load_rom(&self, rom_file: PathBuf, bios: Option<Vec<u8>>) {
         if let Some(bytes) = std::fs::read(&rom_file).ok() {
-            self.emu_control.load_rom(self.state.region.into(), bytes);
+            let file_name = rom_file
+                .file_name()
+                .and_then(|p| p.to_str())
+                .map(|s| s.to_string())
+                .unwrap_or(String::new());
+            self.emu_control
+                .load_rom(self.state.region.into(), bytes, file_name, bios);
             self.app_events.send(AppEvent::RomLoaded(rom_file));
         }
     }
@@ -393,7 +426,7 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
                         ui.close_menu();
                     }
                     if let Some(file) = self.recents.ui(ui) {
-                        self.load_rom(file.to_path_buf());
+                        self.load_rom(file.to_path_buf(), self.state.bios.clone());
                     }
 
                     ui.menu_button("Region", |ui| {
@@ -401,11 +434,49 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
                         ui.radio_value(&mut self.state.region, Region::Pal, "PAL");
                     });
 
+                    if ui.button("Load Bios").clicked() {
+                        self.select_bios();
+                        ui.close_menu();
+                    }
+
                     ui.separator();
 
                     if ui.button("Restore Defaults").clicked() {
                         self.state = Default::default();
                         self.hydrate();
+                    }
+                });
+                ui.menu_button("Game", |ui| {
+                    if ui.button("Power Cycle").clicked() {
+                        self.emu_control.power();
+                    }
+                    if ui.button("Reset").clicked() {
+                        self.emu_control.reset();
+                    }
+
+                    if self.fds_disk_sides > 0 {
+                        ui.menu_button("Select Disk", |ui| {
+                            let mut changed = ui
+                                .radio_value(&mut self.fds_current_side, None, "Eject")
+                                .changed();
+                            ui.separator();
+                            for disk_side in 0..self.fds_disk_sides {
+                                let side = if disk_side % 2 == 0 { "A" } else { "B" };
+                                let disk = (disk_side / 2) + 1;
+
+                                changed |= ui
+                                    .radio_value(
+                                        &mut self.fds_current_side,
+                                        Some(disk_side),
+                                        format!("Disk {disk} Side {side}"),
+                                    )
+                                    .changed();
+                            }
+
+                            if changed {
+                                self.emu_control.set_disk_side(self.fds_current_side);
+                            }
+                        });
                     }
                 });
                 ui.menu_button("Windows", |ui| {
@@ -588,6 +659,8 @@ pub enum AppEvent {
     FocusScreen,
     Breakpoint,
     Gamepad(GamepadEvent),
+    BiosLoaded(Vec<u8>),
+    CartridgeInfo(CartridgeKind),
 }
 
 impl From<GamepadEvent> for AppEvent {
@@ -649,9 +722,9 @@ pub struct EmulatorControl {
 }
 
 impl EmulatorControl {
-    pub fn new() -> (EmulatorControl, EmulatorCommands) {
+    pub fn new(proxy: AppEventsProxy) -> (EmulatorControl, EmulatorCommands) {
         let (tx, rx) = channel();
-        (EmulatorControl { tx }, EmulatorCommands { rx })
+        (EmulatorControl { tx }, EmulatorCommands { rx, proxy })
     }
 
     pub fn player_one(&self, controller: nes::Controller) {
@@ -660,8 +733,16 @@ impl EmulatorControl {
             .send(EmulatorInput::Nes(UserInput::PlayerOne(controller)));
     }
 
-    pub fn load_rom(&self, region: nes::Region, rom: Vec<u8>) {
-        let _ = self.tx.send(EmulatorInput::LoadCartridge(region, rom));
+    pub fn load_rom(
+        &self,
+        region: nes::Region,
+        rom: Vec<u8>,
+        file_name: String,
+        bios: Option<Vec<u8>>,
+    ) {
+        let _ = self
+            .tx
+            .send(EmulatorInput::LoadCartridge(region, rom, file_name, bios));
     }
 
     pub fn step_back(&self) {
@@ -699,16 +780,34 @@ impl EmulatorControl {
     pub fn save_state(&self, slot: u8) {
         let _ = self.tx.send(EmulatorInput::SaveState(slot as u32));
     }
+
+    pub fn set_disk_side(&self, side: Option<usize>) {
+        let _ = self.tx.send(EmulatorInput::SetFdsDisk(side));
+    }
 }
 
 pub struct EmulatorCommands {
     rx: Receiver<EmulatorInput>,
+    proxy: AppEventsProxy,
 }
 
 impl EmulatorCommands {
-    pub fn try_commands(&mut self) -> impl Iterator<Item = EmulatorInput> + '_ {
-        self.rx.try_iter()
+    pub fn try_command(&mut self) -> Option<EmulatorInput> {
+        self.rx.try_recv().ok()
     }
+
+    pub fn send_cartridge_info(&self, cartridge: CartridgeKind) {
+        self.proxy.send(AppEvent::CartridgeInfo(cartridge));
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum CartridgeKind {
+    Cartridge,
+    Fds {
+        current_side: Option<usize>,
+        total_sides: usize,
+    },
 }
 
 pub struct Input<I: Into<InputType>> {
@@ -795,9 +894,13 @@ fn pick_file(
     control: EmulatorControl,
     region: Region,
     last_dir: Option<PathBuf>,
+    bios: Option<Vec<u8>>,
 ) {
     std::thread::spawn(move || {
-        let picker = rfd::FileDialog::new().add_filter("NES Roms", &["nes", "NES"]);
+        let picker = rfd::FileDialog::new()
+            .add_filter("All Supported Files", &["nes", "NES", "fds", "FDS"])
+            .add_filter("NES Cartridges", &["nes", "NES"])
+            .add_filter("Famicom Disk System", &["fds", "FDS"]);
 
         let rom_file = if let Some(last_dir) = last_dir {
             picker.set_directory(last_dir).pick_file()
@@ -809,7 +912,12 @@ fn pick_file(
             let bytes = std::fs::read(&p).ok();
             Some(p).zip(bytes)
         }) {
-            control.load_rom(region.into(), bytes);
+            let file_name = path
+                .file_name()
+                .and_then(|p| p.to_str())
+                .map(|s| s.to_string())
+                .unwrap_or(String::new());
+            control.load_rom(region.into(), bytes, file_name, bios);
             proxy.send(AppEvent::RomLoaded(path));
         }
     });
@@ -821,8 +929,12 @@ fn pick_file(
     control: EmulatorControl,
     region: Region,
     last_dir: Option<PathBuf>,
+    bios: Option<Vec<u8>>,
 ) {
-    let picker = rfd::AsyncFileDialog::new().add_filter("NES Roms", &["nes", "NES"]);
+    let picker = rfd::AsyncFileDialog::new()
+        .add_filter("All Supported Files", &["nes", "NES", "fds", "FDS"])
+        .add_filter("NES Cartridges", &["nes", "NES"])
+        .add_filter("Famicom Disk System", &["fds", "FDS"]);
 
     let pick = async move {
         let rom_file = if let Some(last_dir) = last_dir {
@@ -836,8 +948,39 @@ fn pick_file(
         };
 
         let bytes = rom_file.read().await;
-        control.load_rom(region.into(), bytes);
+        control.load_rom(region.into(), bytes, rom_file.file_name(), bios);
         proxy.send(AppEvent::RomLoaded(std::path::PathBuf::new()));
+    };
+
+    wasm_bindgen_futures::spawn_local(pick);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn pick_bios(proxy: AppEventsProxy) {
+    std::thread::spawn(move || {
+        let rom_file = rfd::FileDialog::new()
+            .add_filter("All Supported Files", &["rom", "ROM"])
+            .pick_file();
+
+        if let Some(bytes) = rom_file.and_then(|p| std::fs::read(&p).ok()) {
+            proxy.send(AppEvent::BiosLoaded(bytes));
+        }
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn pick_bios(proxy: AppEventsProxy) {
+    let picker = rfd::AsyncFileDialog::new().add_filter("All Supported Files", &["rom", "ROM"]);
+
+    let pick = async move {
+        let rom_file = picker.pick_file().await;
+
+        let Some(rom_file) = rom_file else {
+            return;
+        };
+
+        let bytes = rom_file.read().await;
+        proxy.send(AppEvent::BiosLoaded(bytes));
     };
 
     wasm_bindgen_futures::spawn_local(pick);

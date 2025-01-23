@@ -5,7 +5,7 @@ use nes_traits::SaveState;
 use serde::{Deserialize, Serialize};
 
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
-use crate::cartridge::{CartMirroring, Cartridge};
+use crate::cartridge::{CartMirroring, INes};
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
 use crate::ppu::PpuFetchKind;
@@ -189,7 +189,7 @@ impl PpuState {
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Exrom {
     #[cfg_attr(feature = "save-states", save(skip))]
-    cartridge: Cartridge,
+    cartridge: INes,
     prg: MappedMemory,
     chr_spr: MappedMemory,
     chr_bg: MappedMemory,
@@ -230,7 +230,7 @@ pub struct Exrom {
 }
 
 impl Exrom {
-    pub fn new(cartridge: Cartridge) -> Self {
+    pub fn new(cartridge: INes) -> Self {
         let prg_ram_count = cartridge.prg_ram_bytes / (1024 * 8);
         let prg = if prg_ram_count > 0 {
             MappedMemory::new(

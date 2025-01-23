@@ -2,7 +2,7 @@
 use nes_traits::SaveState;
 
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
-use crate::cartridge::{CartMirroring, Cartridge};
+use crate::cartridge::{CartMirroring, INes};
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
 use crate::ppu::PpuFetchKind;
@@ -14,7 +14,7 @@ const MMC3_ALT_IRQ_BEHAVIOR: bool = false;
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Txrom {
     #[cfg_attr(feature = "save-states", save(skip))]
-    cartridge: Cartridge,
+    cartridge: INes,
     mirroring: SimpleMirroring,
     prg: MappedMemory,
     chr: MappedMemory,
@@ -37,7 +37,7 @@ pub struct Txrom {
 }
 
 impl Txrom {
-    pub fn new(cartridge: Cartridge) -> Txrom {
+    pub fn new(cartridge: INes) -> Txrom {
         let chr_type = if cartridge.chr_rom.is_empty() {
             BankKind::Ram
         } else {
