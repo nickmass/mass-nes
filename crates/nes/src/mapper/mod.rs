@@ -157,6 +157,10 @@ pub fn ines(cart: INes) -> RcMapper {
         },
         69 => RcMapper::new(fme7::Fme7::new(cart)),
         71 | 232 => RcMapper::new(bf909x::Bf909x::new(cart)),
+        206 => {
+            tracing::warn!("limited mapper support");
+            RcMapper::new(txrom::Txrom::new(cart))
+        }
         _ => {
             tracing::error!("mapper not implemented");
             RcMapper::new(nrom::Nrom::new(cart))
