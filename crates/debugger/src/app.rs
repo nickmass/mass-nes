@@ -328,7 +328,8 @@ impl<A: Audio> DebuggerApp<A> {
             AppEvent::RomLoaded(path) => {
                 self.recents.add(path);
                 self.state.recent_files = self.recents.iter().map(|p| p.to_path_buf()).collect();
-                self.audio.play();
+                self.pause = false;
+                self.handle_pause();
             }
             AppEvent::FocusScreen => {
                 self.nes_screen.focus(ctx);

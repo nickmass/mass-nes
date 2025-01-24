@@ -83,6 +83,7 @@ pub struct Cpu {
     stage: Stage,
     pub dma: Dma,
     interrupts: Interrupts,
+    halt: bool,
 }
 
 impl Cpu {
@@ -94,6 +95,7 @@ impl Cpu {
             stage: Stage::Fetch,
             dma: Dma::new(),
             interrupts: Interrupts::new(),
+            halt: false,
         }
     }
 
@@ -123,6 +125,13 @@ impl Cpu {
 
     pub fn tick(&mut self, pin_in: CpuPinIn) -> TickResult {
         self.pin_in = pin_in;
+
+        if pin_in.power {
+            self.halt = false;
+        } else if self.halt {
+            return TickResult::Idle(0xffff);
+        }
+
         self.current_tick += 1;
 
         let tick = if let Some(result) = self.dma.tick(pin_in) {
@@ -1357,6 +1366,7 @@ impl Cpu {
 
     fn ill_inst_kil(&mut self) -> ExecResult {
         self.interrupts.poll(&self.regs);
+        self.halt = true;
         tracing::error!("KIL encountered");
         ExecResult::Done
     }
