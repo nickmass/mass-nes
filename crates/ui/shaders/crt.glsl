@@ -46,6 +46,7 @@ uniform float gdv_R;
 uniform float gdv_G;
 uniform float gdv_B;
 uniform float thres;
+uniform float clampFalloff;
 
 // Parameter lines go here:
 
@@ -73,6 +74,7 @@ uniform float thres;
 #pragma parameter gdv_R             "Mono Red/Channel" 1.0 0.0 2.0 0.01
 #pragma parameter gdv_G             "Mono Green/Channel" 1.0 0.0 2.0 0.01
 #pragma parameter gdv_B             "Mono Blue/Channel" 1.0 0.0 2.0 0.01
+#pragma parameter clampFalloff      "Curvature Clamping" 4.0 0.0 100.0 0.5
 
 uniform vec4 OutputSize;
 uniform vec4 SourceSize;
@@ -467,7 +469,6 @@ void main()
     else color = color;
 
     float clamp = 0.0;
-    float clampFalloff = 4.0;
     vec3 clampColor = vec3(0.0, 0.0, 0.0);
     if (pos.y > 1.0) {
         clamp = min(((pos.y - 1.0) * OutputSize.y) / clampFalloff, 1.0);

@@ -13,6 +13,9 @@ pub trait Filter<C: FilterContext> {
     fn vertex_shader(&self) -> &str;
     fn fragment_shader(&self) -> &str;
     fn process(&mut self, ctx: &C, render_size: (f64, f64), screen: &[u16]) -> C::Uniforms;
+    fn parameters_mut(&mut self) -> std::slice::IterMut<Parameter<'static>> {
+        [].iter_mut()
+    }
 }
 
 pub trait FilterContext: Sized {

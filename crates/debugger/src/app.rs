@@ -59,6 +59,7 @@ struct UiState {
     show_all_sprites: bool,
     show_messages: bool,
     show_code: bool,
+    show_filter_config: bool,
     auto_open_most_recent: bool,
     recent_files: Vec<PathBuf>,
     debug_interval: u64,
@@ -82,6 +83,7 @@ impl Default for UiState {
             show_all_sprites: false,
             show_messages: false,
             show_code: false,
+            show_filter_config: false,
             auto_open_most_recent: true,
             recent_files: Vec::new(),
             debug_interval: 10,
@@ -518,6 +520,8 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
                     ui.checkbox(&mut self.state.show_messages, "Messages");
                 });
                 ui.menu_button("Filter", |ui| {
+                    ui.toggle_value(&mut self.state.show_filter_config, "Configure");
+                    ui.separator();
                     if ui
                         .radio_value(&mut self.state.filter, Filter::Paletted, "None")
                         .changed()
@@ -629,6 +633,10 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
 
         if self.state.show_messages {
             self.messages.show(ctx);
+        }
+
+        if self.state.show_filter_config {
+            self.nes_screen.configure_filter(ctx);
         }
 
         if self.first_update {

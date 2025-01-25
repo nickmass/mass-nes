@@ -7,7 +7,7 @@ use std::sync::{
     Arc, Mutex,
 };
 
-use ui::filters::{Filter as FilterTrait, FilterContext, FilterUniforms};
+use ui::filters::{Filter as FilterTrait, FilterContext, FilterUniforms, Parameter};
 
 use crate::gl::{self, Vertex as _};
 
@@ -107,6 +107,10 @@ impl Gfx {
 
     pub fn swap(&mut self) {
         self.back_buffer.attempt_swap(&mut self.frame);
+    }
+
+    pub fn filter_parameters(&mut self) -> impl Iterator<Item = &mut Parameter<'static>> {
+        self.filter.iter_mut().flat_map(|f| f.parameters_mut())
     }
 
     pub fn render(&mut self, painter: &Painter, paint_info: PaintCallbackInfo) {

@@ -83,4 +83,8 @@ impl<C: FilterContext> Filter<C> for CrtFilter {
 
         unis
     }
+
+    fn parameters_mut(&mut self) -> std::slice::IterMut<super::Parameter<'static>> {
+        self.program.parameters.iter_mut()
+    }
 }

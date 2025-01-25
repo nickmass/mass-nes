@@ -7,7 +7,7 @@ use crate::{
     egui, egui_glow,
     gfx::{Filter, Gfx},
 };
-use egui::Vec2;
+use egui::{Vec2, Widget};
 
 use super::{Message, PopupMessage};
 
@@ -145,5 +145,31 @@ impl NesScreen {
 
     pub fn has_message(&self) -> bool {
         self.popup.has_message()
+    }
+
+    pub fn configure_filter(&self, ctx: &egui::Context) {
+        let Ok(mut gfx) = self.gfx.try_lock() else {
+            return;
+        };
+
+        egui::Window::new("Filter").show(ctx, |ui| {
+            let mut has_params = false;
+            for param in gfx.filter_parameters() {
+                has_params = true;
+                ui.horizontal(|ui| {
+                    if ui.button("Reset").clicked() {
+                        param.value = param.default;
+                    };
+                    egui::Slider::new(&mut param.value, param.min..=param.max)
+                        .text(&param.description)
+                        .step_by(param.step as f64)
+                        .ui(ui);
+                });
+            }
+
+            if !has_params {
+                ui.label("This filter has no configuration options");
+            }
+        });
     }
 }

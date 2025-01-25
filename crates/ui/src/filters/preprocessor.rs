@@ -81,7 +81,7 @@ impl<'a> Preprocessor<'a> {
                     desc = desc.trim_matches('"').to_string();
                 }
 
-                let value = parts
+                let default = parts
                     .next()
                     .and_then(|p| p.parse::<f32>().ok())
                     .ok_or(Error::InvalidParam(line_num))?;
@@ -104,7 +104,8 @@ impl<'a> Preprocessor<'a> {
                 let param = Parameter {
                     name,
                     description: desc,
-                    value,
+                    value: default,
+                    default,
                     min,
                     max,
                     step,
@@ -157,6 +158,7 @@ pub struct Parameter<'a> {
     pub name: &'a str,
     pub description: String,
     pub value: f32,
+    pub default: f32,
     pub min: f32,
     pub max: f32,
     pub step: f32,
