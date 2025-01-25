@@ -1,6 +1,6 @@
 use glium::glutin::surface::WindowSurface;
 use glium::texture::{ClientFormat, MipmapsOption, RawImage2d, Texture2d, UnsignedTexture2d};
-use glium::uniforms::{UniformValue, Uniforms};
+use glium::uniforms::{SamplerWrapFunction, UniformValue, Uniforms};
 use glium::winit::event_loop::EventLoopProxy;
 use glium::{implement_vertex, Display, Program, Surface, VertexBuffer};
 
@@ -315,7 +315,15 @@ impl FilterContext for GliumContext {
 }
 
 impl FilterUniforms<GliumContext> for UniformCollection<'static> {
+    fn add_f32(&mut self, name: &'static str, value: f32) {
+        self.add(name, value);
+    }
+
     fn add_vec2(&mut self, name: &'static str, value: (f32, f32)) {
+        self.add(name, value);
+    }
+
+    fn add_vec4(&mut self, name: &'static str, value: (f32, f32, f32, f32)) {
         self.add(name, value);
     }
 
@@ -414,6 +422,11 @@ impl<'a> Uniforms for UniformCollection<'a> {
                     let mut sampler = glium::uniforms::SamplerBehavior::default();
                     sampler.magnify_filter = mag_scale;
                     sampler.minify_filter = min_scale;
+                    sampler.wrap_function = (
+                        SamplerWrapFunction::Clamp,
+                        SamplerWrapFunction::Clamp,
+                        SamplerWrapFunction::Clamp,
+                    );
 
                     match uni.texture {
                         FilterTexture::Texture2d(ref tex) => {
@@ -436,8 +449,20 @@ pub trait ToUniform {
     fn to_uniform(self) -> UniformValue<'static>;
 }
 
+impl ToUniform for f32 {
+    fn to_uniform(self) -> UniformValue<'static> {
+        UniformValue::Float(self)
+    }
+}
+
 impl ToUniform for (f32, f32) {
     fn to_uniform(self) -> UniformValue<'static> {
         UniformValue::Vec2([self.0, self.1])
+    }
+}
+
+impl ToUniform for (f32, f32, f32, f32) {
+    fn to_uniform(self) -> UniformValue<'static> {
+        UniformValue::Vec4([self.0, self.1, self.2, self.3])
     }
 }

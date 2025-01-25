@@ -202,7 +202,15 @@ impl ui::filters::FilterContext for gl::GlContext {
 }
 
 impl ui::filters::FilterUniforms<gl::GlContext> for gl::GlUniformCollection {
+    fn add_f32(&mut self, name: &'static str, value: f32) {
+        self.add(name, value);
+    }
+
     fn add_vec2(&mut self, name: &'static str, value: (f32, f32)) {
+        self.add(name, value);
+    }
+
+    fn add_vec4(&mut self, name: &'static str, value: (f32, f32, f32, f32)) {
         self.add(name, value);
     }
 

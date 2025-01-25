@@ -5,7 +5,7 @@ use super::{
 
 pub use nes_ntsc_rust::{NesNtsc, NesNtscSetup};
 
-pub struct NtscFilter {
+pub struct CrtFilter {
     program: Program<'static>,
     ntsc: NesNtsc,
     width: u32,
@@ -13,15 +13,16 @@ pub struct NtscFilter {
     frame: Vec<u32>,
 }
 
-impl NtscFilter {
-    pub fn new(setup: &NesNtscSetup) -> NtscFilter {
-        let processor = Preprocessor::new(super::NTSC_SHADER);
-        let program = processor.process().expect("valid shader source");
+impl CrtFilter {
+    pub fn new(setup: &NesNtscSetup) -> Self {
         let width = NesNtsc::out_width(256);
         let height = 240;
         let ntsc = NesNtsc::new(setup);
 
-        NtscFilter {
+        let processor = Preprocessor::new(super::CRT_SHADER);
+        let program = processor.process().expect("valid shader source");
+
+        Self {
             program,
             ntsc,
             width,
@@ -31,7 +32,7 @@ impl NtscFilter {
     }
 }
 
-impl<C: FilterContext> Filter<C> for NtscFilter {
+impl<C: FilterContext> Filter<C> for CrtFilter {
     fn dimensions(&self) -> (u32, u32) {
         (self.width * 2, self.height * 4)
     }
@@ -50,19 +51,35 @@ impl<C: FilterContext> Filter<C> for NtscFilter {
 
         self.ntsc.blit(screen, &mut self.frame, 256, 240, 0);
 
+        for p in self.frame.iter_mut() {
+            let r = (*p & 0x00ff0000) >> 16;
+            let b = (*p & 0x000000ff) << 16;
+            *p = (*p & 0xff00ff00) | r | b;
+        }
+
         let params = TextureParams {
             width: self.width as usize,
             height: self.height as usize,
             format: TextureFormat::RGBA,
             pixels: bytemuck::cast_slice(&self.frame),
-            filter: TextureFilter::Linear,
+            filter: TextureFilter::Nearest,
         };
 
         let texture = display.create_texture(params);
 
-        unis.add_vec2("input_size", (self.width as f32, self.height as f32));
-        unis.add_vec2("output_size", (render_size.0 as f32, render_size.1 as f32));
-        unis.add_texture("nes_screen", texture);
+        let s_w = self.width as f32;
+        let s_h = self.height as f32;
+        let d_w = render_size.0 as f32;
+        let d_h = render_size.1 as f32;
+
+        unis.add_texture("Source", texture);
+        unis.add_vec4("SourceSize", (s_w, s_h, 1.0 / s_w, 1.0 / s_h));
+        unis.add_vec4("OriginalSize", (s_w, s_h, 1.0 / s_w, 1.0 / s_h));
+        unis.add_vec4("OutputSize", (d_w, d_h, 1.0 / d_w, 1.0 / d_h));
+
+        for p in self.program.parameters.iter() {
+            unis.add_f32(p.name, p.value);
+        }
 
         unis
     }

@@ -217,10 +217,26 @@ pub trait AsUniform {
     fn delete(&self, _ctx: &GlowContext) {}
 }
 
+impl AsUniform for f32 {
+    fn bind(&self, ctx: &GlowContext, _program: &Program, location: Option<&UniformLocation>) {
+        unsafe {
+            ctx.uniform_1_f32(location, *self);
+        }
+    }
+}
+
 impl AsUniform for (f32, f32) {
     fn bind(&self, ctx: &GlowContext, _program: &Program, location: Option<&UniformLocation>) {
         unsafe {
             ctx.uniform_2_f32(location, self.0, self.1);
+        }
+    }
+}
+
+impl AsUniform for (f32, f32, f32, f32) {
+    fn bind(&self, ctx: &GlowContext, _program: &Program, location: Option<&UniformLocation>) {
+        unsafe {
+            ctx.uniform_4_f32(location, self.0, self.1, self.2, self.3);
         }
     }
 }

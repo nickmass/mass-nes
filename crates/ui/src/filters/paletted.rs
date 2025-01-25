@@ -1,12 +1,19 @@
-use super::{Filter, FilterContext, FilterUniforms, TextureFilter, TextureFormat, TextureParams};
+use super::{
+    Filter, FilterContext, FilterUniforms, Preprocessor, Program, TextureFilter, TextureFormat,
+    TextureParams,
+};
 
 pub struct PalettedFilter {
+    program: Program<'static>,
     palette: [u8; 1536],
 }
 
 impl PalettedFilter {
     pub fn new(palette: [u8; 1536]) -> PalettedFilter {
-        PalettedFilter { palette }
+        let processor = Preprocessor::new(super::PALETTED_SHADER);
+        let program = processor.process().expect("valid shader source");
+
+        PalettedFilter { program, palette }
     }
 }
 
@@ -15,12 +22,12 @@ impl<C: FilterContext> Filter<C> for PalettedFilter {
         (256, 240)
     }
 
-    fn vertex_shader(&self) -> &'static str {
-        super::PALETTED_VERTEX_SHADER
+    fn vertex_shader(&self) -> &str {
+        &self.program.vertex
     }
 
-    fn fragment_shader(&self) -> &'static str {
-        super::PALETTED_FRAGMENT_SHADER
+    fn fragment_shader(&self) -> &str {
+        &self.program.fragment
     }
 
     #[tracing::instrument(skip_all)]

@@ -24,7 +24,8 @@ impl WorkerSpawn for OffscreenGfxSpawner {
     async fn run(self, transferables: Array) {
         let canvas = web_worker::unpack_transferable(&transferables).unwrap_throw();
         let setup = ui::filters::NesNtscSetup::composite();
-        let filter = ui::filters::NtscFilter::new(&setup);
+        let filter = ui::filters::CrtFilter::new(&setup);
+        //let filter = ui::filters::NtscFilter::new(&setup);
         //let filter = ui::filters::PalettedFilter::new(setup.generate_palette());
 
         let gfx = crate::gfx::Gfx::new(filter, self, canvas);

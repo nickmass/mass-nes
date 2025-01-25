@@ -86,7 +86,7 @@ impl Default for UiState {
             recent_files: Vec::new(),
             debug_interval: 10,
             selected_palette: 0,
-            filter: Filter::Ntsc,
+            filter: Filter::Crt,
             bios: None,
         }
     }
@@ -526,6 +526,12 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
                     }
                     if ui
                         .radio_value(&mut self.state.filter, Filter::Ntsc, "NTSC")
+                        .changed()
+                    {
+                        self.nes_screen.filter(self.state.filter);
+                    }
+                    if ui
+                        .radio_value(&mut self.state.filter, Filter::Crt, "CRT")
                         .changed()
                     {
                         self.nes_screen.filter(self.state.filter);

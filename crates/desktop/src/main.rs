@@ -33,7 +33,8 @@ fn run(path: PathBuf, region: nes::Region) {
     let cart = Cartridge::load(&mut file, None, file_name).unwrap();
 
     let setup = NesNtscSetup::composite();
-    let filter = ui::filters::NtscFilter::new(&setup);
+    let filter = ui::filters::CrtFilter::new(&setup);
+    //let filter = ui::filters::NscFilter::new(&setup);
     //let filter = ui::filters::PalettedFilter::new(setup.generate_palette());
 
     let (audio, samples_tx) = init_audio(region);

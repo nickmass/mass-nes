@@ -375,6 +375,12 @@ impl AsGlUniform for [f32; 4] {
     }
 }
 
+impl AsGlUniform for (f32, f32, f32, f32) {
+    fn bind(&self, gl: &GL, program: &GlProgram, location: Option<&WebGlUniformLocation>) {
+        [self.0, self.1, self.2, self.3].bind(gl, program, location);
+    }
+}
+
 impl AsGlUniform for [f32; 9] {
     fn bind(&self, gl: &GL, _program: &GlProgram, location: Option<&WebGlUniformLocation>) {
         gl.uniform_matrix3fv_with_f32_array(location, false, &self[..]);

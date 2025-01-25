@@ -15,6 +15,7 @@ use crate::gl::{self, Vertex as _};
 pub enum Filter {
     Paletted,
     Ntsc,
+    Crt,
 }
 
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -121,6 +122,7 @@ impl Gfx {
                         ntsc_setup.generate_palette(),
                     )),
                     Filter::Ntsc => Box::new(ui::filters::NtscFilter::new(&ntsc_setup)),
+                    Filter::Crt => Box::new(ui::filters::CrtFilter::new(&ntsc_setup)),
                 };
 
                 match gl::Program::new(&ctx, filter.vertex_shader(), filter.fragment_shader()) {
@@ -242,7 +244,15 @@ impl FilterContext for GlowContext {
 }
 
 impl FilterUniforms<GlowContext> for gl::Uniforms {
+    fn add_f32(&mut self, name: &'static str, value: f32) {
+        self.add(name, value);
+    }
+
     fn add_vec2(&mut self, name: &'static str, value: (f32, f32)) {
+        self.add(name, value);
+    }
+
+    fn add_vec4(&mut self, name: &'static str, value: (f32, f32, f32, f32)) {
         self.add(name, value);
     }
 
