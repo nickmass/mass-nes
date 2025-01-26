@@ -48,6 +48,7 @@ impl Into<nes::Region> for Region {
         }
     }
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default = "Default::default")]
 struct UiState {
@@ -63,8 +64,10 @@ struct UiState {
     show_all_sprites: bool,
     show_messages: bool,
     show_code: bool,
+    show_events: bool,
     show_filter_config: bool,
     auto_open_most_recent: bool,
+    interests: Interests,
     recent_files: Vec<PathBuf>,
     debug_interval: u64,
     selected_palette: u8,
@@ -87,8 +90,10 @@ impl Default for UiState {
             show_all_sprites: false,
             show_messages: false,
             show_code: false,
+            show_events: false,
             show_filter_config: false,
             auto_open_most_recent: true,
+            interests: Interests::new(),
             recent_files: Vec::new(),
             debug_interval: 10,
             selected_palette: 0,
@@ -114,6 +119,7 @@ pub struct DebuggerApp<A> {
     sprite_viewer: SpriteViewer,
     messages: Messages,
     code_viewer: CodeViewer,
+    event_viewer: EventViewer,
     breakpoints: Breakpoints,
     first_update: bool,
     help: Help,
@@ -206,6 +212,7 @@ impl<A: Audio> DebuggerApp<A> {
             sprite_viewer,
             messages,
             code_viewer: CodeViewer::new(),
+            event_viewer: EventViewer::new(),
             breakpoints: Breakpoints::new(),
             recents: Recents::new(&[], 10),
             help,
@@ -415,9 +422,19 @@ impl<A: Audio> DebuggerApp<A> {
             sprite_ram: self.state.show_sprites,
             state: self.state.show_code | self.state.show_nametables | self.state.show_sprites,
             breakpoints: self.breakpoints.clone(),
+            events: self.state.show_events,
+            interests: self.state.interests.interests().to_vec(),
+            frame: self.state.show_events,
         };
 
-        if !debug.cpu_mem && !debug.ppu_mem && !debug.pal_ram && !debug.sprite_ram && !debug.state {
+        if !debug.cpu_mem
+            && !debug.ppu_mem
+            && !debug.pal_ram
+            && !debug.sprite_ram
+            && !debug.state
+            && !debug.events
+            && !debug.frame
+        {
             debug.interval = 0;
         }
 
@@ -497,6 +514,9 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
                 });
                 ui.menu_button("Windows", |ui| {
                     ui.checkbox(&mut self.state.show_screen, "Screen");
+                    if ui.checkbox(&mut self.state.show_events, "Events").changed() {
+                        self.update_debug_req();
+                    }
                     if ui
                         .checkbox(&mut self.state.show_nametables, "Nametables")
                         .changed()
@@ -642,6 +662,17 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
                 self.state.debug_interval,
                 ctx,
             );
+        }
+
+        if self.state.show_events {
+            if self.event_viewer.show(
+                &self.debug,
+                self.state.debug_interval,
+                &mut self.state.interests,
+                ctx,
+            ) {
+                self.update_debug_req();
+            }
         }
 
         if self.state.show_messages {

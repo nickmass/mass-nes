@@ -1,5 +1,6 @@
 mod chr_tiles;
 mod code_viewer;
+mod event_viewer;
 mod help;
 mod memory;
 mod messages;
@@ -13,6 +14,7 @@ mod volume;
 
 pub use chr_tiles::ChrTiles;
 pub use code_viewer::{Breakpoints, CodeViewer};
+pub use event_viewer::{EventViewer, Interests};
 pub use help::Help;
 pub use memory::MemoryViewer;
 pub use messages::{EguiMessageLayer, MessageStore, Messages};

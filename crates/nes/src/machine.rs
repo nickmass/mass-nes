@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 
@@ -5,7 +7,7 @@ use crate::apu::Apu;
 use crate::bus::{AddressBus, BusKind, DeviceKind, RangeAndMask};
 use crate::cartridge::Cartridge;
 use crate::cpu::{Cpu, CpuPinIn, TickResult};
-use crate::debug::Debug;
+use crate::debug::{Debug, DebugEvent};
 use crate::input::Input;
 use crate::mapper::{RcMapper, SaveWram};
 use crate::memory::MemoryBlock;
@@ -75,19 +77,20 @@ pub struct Machine {
     #[cfg_attr(feature = "save-states", save(nested))]
     pub(crate) mapper: RcMapper,
     #[cfg_attr(feature = "save-states", save(skip))]
-    debug: Debug,
+    debug: Rc<Debug>,
     cpu_pin_in: CpuPinIn,
 }
 
 impl Machine {
     pub fn new(region: Region, cartridge: Cartridge) -> Machine {
         let cpu = Cpu::new();
+        let debug = Rc::new(Debug::new());
         let mut cpu_bus = AddressBus::new(0, 0xffff);
         let cpu_mem = MemoryBlock::new(2);
         let input = Input::new();
         let mapper = cartridge.build_mapper();
         let apu = Apu::new(region, mapper.clone());
-        let ppu = Ppu::new(region, mapper.clone());
+        let ppu = Ppu::new(region, mapper.clone(), debug.clone());
 
         cpu_bus.register_read(DeviceKind::CpuRam, RangeAndMask(0x0000, 0x2000, 0x07ff));
         cpu_bus.register_write(DeviceKind::CpuRam, RangeAndMask(0x0000, 0x2000, 0x07ff));
@@ -107,7 +110,7 @@ impl Machine {
             apu,
             input,
             mapper,
-            debug: Debug::new(),
+            debug,
             cpu_pin_in: CpuPinIn::default(),
         };
 
@@ -168,8 +171,9 @@ impl Machine {
 
             match tick_result {
                 TickResult::Fetch(addr) => {
-                    let value = self.read(addr);
+                    self.debug.event(DebugEvent::CpuExec(addr));
                     self.debug.fetch(addr);
+                    let value = self.read(addr);
                     self.cpu_pin_in.data = value;
                 }
                 TickResult::Read(addr) => {
@@ -226,6 +230,7 @@ impl Machine {
     }
 
     fn read(&mut self, addr: u16) -> u8 {
+        self.debug.event(DebugEvent::CpuRead(addr));
         let value = match self.cpu_bus.read_addr(addr) {
             Some((addr, DeviceKind::CpuRam)) => self.cpu_mem.read(addr),
             Some((addr, DeviceKind::Ppu)) => self.ppu.read(addr),
@@ -242,6 +247,7 @@ impl Machine {
     }
 
     fn write(&mut self, addr: u16, value: u8) {
+        self.debug.event(DebugEvent::CpuWrite(addr));
         use crate::channel::Channel;
         // Loop through potential mappings to allow MMC5 to snoop on PPU register writes
         for mapping in self.cpu_bus.write_addrs(addr) {
@@ -278,6 +284,16 @@ impl Machine {
     #[cfg(feature = "debugger")]
     pub fn peek_ppu(&self, addr: u16) -> u8 {
         self.ppu.ppu_peek(addr)
+    }
+
+    #[cfg(feature = "debugger")]
+    pub fn set_debug_interest<I: Iterator<Item = DebugEvent>>(&self, iter: I) {
+        self.debug.set_interest(iter);
+    }
+
+    #[cfg(feature = "debugger")]
+    pub fn read_debug_events<F: FnMut(&[u16])>(&self, reader: F) {
+        self.debug.read_events(reader);
     }
 
     pub fn get_debug(&self) -> &Debug {

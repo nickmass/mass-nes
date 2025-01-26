@@ -67,6 +67,8 @@ pub struct DebugSwapState {
     pub sprite_ram: SwapBuffer<Vec<u8>>,
     pub state: SwapBuffer<State>,
     pub breakpoint: Arc<AtomicBool>,
+    pub events: SwapBuffer<Vec<u16>>,
+    pub frame: SwapBuffer<Vec<u16>>,
 }
 
 impl DebugSwapState {
@@ -79,6 +81,8 @@ impl DebugSwapState {
             sprite_ram: SwapBuffer::new(vec![0; 256]),
             state: SwapBuffer::new(State::default()),
             breakpoint: Arc::new(false.into()),
+            events: SwapBuffer::new(vec![0; 312 * 341]),
+            frame: SwapBuffer::new(vec![0; 256 * 240]),
         }
     }
 
@@ -99,6 +103,8 @@ pub struct DebugUiState {
     sprite_ram: Vec<u8>,
     state: State,
     palette: Palette,
+    events: Vec<u16>,
+    frame: Vec<u16>,
 }
 
 impl DebugUiState {
@@ -111,6 +117,8 @@ impl DebugUiState {
             sprite_ram: vec![0; 256],
             state: State::default(),
             palette,
+            events: vec![0; 312 * 341],
+            frame: vec![0; 256 * 240],
         }
     }
 
@@ -146,6 +154,14 @@ impl DebugUiState {
         &self.state
     }
 
+    pub fn events(&self) -> &[u16] {
+        &self.events
+    }
+
+    pub fn frame(&self) -> &[u16] {
+        &self.frame
+    }
+
     pub fn ppu(&self) -> PpuView {
         PpuView(self)
     }
@@ -156,6 +172,8 @@ impl DebugUiState {
         self.swap.pal_ram.attempt_swap(&mut self.pal_ram);
         self.swap.sprite_ram.attempt_swap(&mut self.sprite_ram);
         self.swap.state.attempt_swap(&mut self.state);
+        self.swap.events.attempt_swap(&mut self.events);
+        self.swap.frame.attempt_swap(&mut self.frame);
     }
 }
 
@@ -170,7 +188,7 @@ impl Palette {
         }
     }
 
-    pub fn lookup(&self, idx: u8) -> (u8, u8, u8) {
+    pub fn lookup(&self, idx: u16) -> (u8, u8, u8) {
         let idx = idx as usize * 3;
         let r = self.bytes[idx + 0];
         let g = self.bytes[idx + 1];
@@ -227,7 +245,7 @@ impl<'a> PpuView<'a> {
     pub fn pal_entry(&self, idx: u8) -> (u8, u8, u8) {
         let idx = if idx & 3 == 0 { 0 } else { idx };
         let idx = self.pal_ram()[idx as usize];
-        self.palette().lookup(idx)
+        self.palette().lookup(idx as u16)
     }
 
     pub fn pal_entry_color(&self, idx: u8) -> egui::Color32 {

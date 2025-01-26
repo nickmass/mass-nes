@@ -1,9 +1,12 @@
+use std::rc::Rc;
+
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 #[cfg(feature = "save-states")]
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::bus::{AddressBus, BusKind, DeviceKind, RangeAndMask};
+use crate::debug::{Debug, DebugEvent};
 use crate::mapper::{Nametable, RcMapper};
 use crate::memory::MemoryBlock;
 use crate::ppu_step::*;
@@ -61,6 +64,8 @@ pub struct Ppu {
     region: Region,
     #[cfg_attr(feature = "save-states", save(skip))]
     mapper: RcMapper,
+    #[cfg_attr(feature = "save-states", save(skip))]
+    debug: Rc<Debug>,
     nt_internal_a: MemoryBlock,
     nt_internal_b: MemoryBlock,
     #[cfg_attr(feature = "save-states", save(skip))]
@@ -130,10 +135,11 @@ pub struct Ppu {
 }
 
 impl Ppu {
-    pub fn new(region: Region, mapper: RcMapper) -> Ppu {
+    pub fn new(region: Region, mapper: RcMapper, debug: Rc<Debug>) -> Ppu {
         Ppu {
             region,
             mapper,
+            debug,
             nt_internal_a: MemoryBlock::new(1),
             nt_internal_b: MemoryBlock::new(1),
             screen: vec![0x0f; 256 * 240],
@@ -465,12 +471,14 @@ impl Ppu {
 
         let mut step = self.ppu_steps.step();
 
+        self.debug.event(DebugEvent::Dot(step.scanline, step.dot));
         match step.state {
             Some(StateChange::SkippedTick) => {
                 if self.frame % 2 == 1 && self.is_rendering() {
                     let skipped = self.ppu_steps.step();
                     step.scanline = 0;
                     step.dot = 0;
+                    self.debug.event(DebugEvent::Dot(step.scanline, step.dot));
 
                     // Need to assign this to ensure sprite reset still happens on dot 0 after a skip
                     step.sprite = skipped.sprite;
@@ -660,6 +668,7 @@ impl Ppu {
             color != 0 && (dot > 7 || self.is_left_background()) && self.is_background_enabled();
         let sprite_colored = sprite_pixel != 0;
 
+        let was_sprite_zero_hit = self.sprite_zero_hit;
         let pixel = match (bg_colored, sprite_colored, behind_bg) {
             (false, false, _) => 0x3f00,
             (false, true, _) => 0x3f10 | sprite_pixel as u16,
@@ -677,6 +686,10 @@ impl Ppu {
                 0x3f00 | palette as u16
             }
         };
+
+        if !was_sprite_zero_hit && self.sprite_zero_hit {
+            self.debug.event(DebugEvent::SpriteZero);
+        }
 
         let pixel = if !self.is_rendering() && self.vram_addr & 0x3f00 == 0x3f00 {
             self.vram_addr & 0x3f1f
@@ -807,6 +820,9 @@ impl Ppu {
                 }
                 self.sprite_reads -= 1;
             } else if self.sprite_on_line(self.next_sprite_byte, scanline) {
+                if !self.sprite_overflow {
+                    self.debug.event(DebugEvent::SpriteOverflow);
+                }
                 self.sprite_overflow = true;
                 self.sprite_m += 1;
                 self.sprite_m &= 3;
@@ -992,6 +1008,7 @@ impl Ppu {
     }
 
     fn ppu_read(&self, address: u16) -> u8 {
+        self.debug.event(DebugEvent::PpuRead(address));
         let bank = self.mapper.ppu_fetch(address & 0x3fff, PpuFetchKind::Read);
         match bank {
             Nametable::InternalA => self.nt_internal_a.read(address & 0x3ff),
@@ -1001,6 +1018,7 @@ impl Ppu {
     }
 
     fn ppu_write(&self, address: u16, value: u8) {
+        self.debug.event(DebugEvent::PpuWrite(address));
         let bank = self.mapper.ppu_fetch(address & 0x3fff, PpuFetchKind::Write);
         match bank {
             Nametable::InternalA => self.nt_internal_a.write(address & 0x3ff, value),

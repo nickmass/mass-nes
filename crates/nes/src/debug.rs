@@ -4,6 +4,22 @@ pub use debugger::*;
 #[cfg(not(feature = "debugger"))]
 pub use no_debugger::*;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum DebugEvent {
+    CpuRead(u16),
+    CpuWrite(u16),
+    CpuExec(u16),
+    PpuRead(u16),
+    PpuWrite(u16),
+    SpriteZero,
+    SpriteOverflow,
+    Dot(u32, u32),
+}
+
 #[cfg(feature = "debugger")]
 mod debugger {
     use std::cell::RefCell;
@@ -14,6 +30,8 @@ mod debugger {
     use crate::memory::MemoryBlock;
     use crate::ppu::PpuDebugState;
     use crate::Machine;
+
+    use super::DebugEvent;
 
     const INST_HISTORY_BUF_SIZE: usize = 100;
 
@@ -32,6 +50,11 @@ mod debugger {
         inst_ring: RingBuffer<(CpuDebugState, PpuDebugState)>,
         trace_fn: Option<Box<dyn FnMut(CpuDebugState, PpuDebugState)>>,
         machine_state: MachineState,
+        mem: Option<MemoryBlock>,
+        scanline: u32,
+        dot: u32,
+        interest: [Option<DebugEvent>; 16],
+        events: Vec<u16>,
     }
 
     impl Default for DebugState {
@@ -45,6 +68,11 @@ mod debugger {
                 inst_ring: RingBuffer::new(INST_HISTORY_BUF_SIZE),
                 trace_fn: None,
                 machine_state: MachineState::default(),
+                mem: None,
+                scanline: 0,
+                dot: 0,
+                interest: [None; 16],
+                events: vec![0; 312 * 341],
             }
         }
     }
@@ -56,6 +84,30 @@ mod debugger {
 
         fn log_iter(&self) -> RingIter<(CpuDebugState, PpuDebugState)> {
             self.inst_ring.iter()
+        }
+
+        fn event(&mut self, event: DebugEvent) {
+            if let DebugEvent::Dot(scanline, dot) = event {
+                self.scanline = scanline;
+                self.dot = dot;
+                let idx = (self.scanline * 341 + self.dot) as usize;
+                self.events[idx] = 0;
+            } else {
+                let idx = (self.scanline * 341 + self.dot) as usize;
+                if let Some(v) = self.interest.iter().position(|ev| ev == &Some(event)) {
+                    self.events[idx] |= 1 << v;
+                }
+            }
+        }
+
+        fn set_interest<I: IntoIterator<Item = DebugEvent>>(&mut self, iter: I) {
+            let new_interests = iter
+                .into_iter()
+                .map(|i| Some(i))
+                .chain(std::iter::repeat(None));
+            for (a, b) in self.interest.iter_mut().zip(new_interests) {
+                *a = b;
+            }
         }
     }
 
@@ -147,27 +199,27 @@ mod debugger {
 
     pub struct Debug {
         state: RefCell<DebugState>,
-        mem: Option<MemoryBlock>,
     }
 
     impl Debug {
         pub fn new() -> Self {
             Self {
                 state: RefCell::new(DebugState::default()),
-                mem: None,
             }
         }
 
-        pub fn register(&mut self, bus: &mut AddressBus, addr: u16, size_kb: u16) {
+        pub fn register(&self, bus: &mut AddressBus, addr: u16, size_kb: u16) {
+            let mut state = self.state.borrow_mut();
             let end = addr + (size_kb * 0x400);
             let mask = size_kb * 0x400 - 1;
-            self.mem = Some(MemoryBlock::new(size_kb as usize));
+            state.mem = Some(MemoryBlock::new(size_kb as usize));
             bus.register_read(DeviceKind::Debug, RangeAndMask(addr, addr + end, mask));
             bus.register_write(DeviceKind::Debug, RangeAndMask(addr, addr + end, mask));
         }
 
         pub fn read(&self, addr: u16) -> u8 {
-            if let Some(mem) = &self.mem {
+            let state = self.state.borrow();
+            if let Some(mem) = &state.mem {
                 mem.read(addr)
             } else {
                 0x00
@@ -175,7 +227,8 @@ mod debugger {
         }
 
         pub fn write(&self, addr: u16, value: u8) {
-            if let Some(mem) = &self.mem {
+            let state = self.state.borrow();
+            if let Some(mem) = &state.mem {
                 mem.write(addr, value);
             }
         }
@@ -448,6 +501,21 @@ mod debugger {
             let state = self.state.borrow();
             handler.breakpoint(&state.machine_state)
         }
+
+        pub fn event(&self, event: DebugEvent) {
+            let mut state = self.state.borrow_mut();
+            state.event(event);
+        }
+
+        pub fn set_interest<I: IntoIterator<Item = DebugEvent>>(&self, iter: I) {
+            let mut state = self.state.borrow_mut();
+            state.set_interest(iter);
+        }
+
+        pub fn read_events<F: FnMut(&[u16])>(&self, mut reader: F) {
+            let state = self.state.borrow();
+            reader(&state.events)
+        }
     }
 }
 
@@ -482,5 +550,7 @@ pub mod no_debugger {
         pub fn breakpoint<H: BreakpointHandler>(&self, _handler: &H) -> bool {
             false
         }
+
+        pub fn event(&self, _event: super::DebugEvent) {}
     }
 }

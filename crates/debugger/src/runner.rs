@@ -2,7 +2,8 @@ use std::{collections::VecDeque, time::Duration};
 
 use blip_buf_rs::Blip;
 use nes::{
-    Cartridge, FdsInput, Machine, MachineState, MapperInput, Region, RunResult, SaveWram, UserInput,
+    Cartridge, DebugEvent, FdsInput, Machine, MachineState, MapperInput, Region, RunResult,
+    SaveWram, UserInput,
 };
 use tracing::instrument;
 use ui::{audio::SamplesSender, wram::CartridgeId};
@@ -91,6 +92,9 @@ pub struct DebugRequest {
     pub sprite_ram: bool,
     pub state: bool,
     pub breakpoints: Breakpoints,
+    pub events: bool,
+    pub interests: Vec<DebugEvent>,
+    pub frame: bool,
 }
 
 use crate::{
@@ -157,7 +161,10 @@ impl Runner {
                 pal_ram: false,
                 sprite_ram: false,
                 state: false,
+                events: false,
                 breakpoints: Breakpoints::new(),
+                interests: Vec::new(),
+                frame: false,
             },
         }
     }
@@ -220,7 +227,11 @@ impl Runner {
                                 self.save_store.clear();
                                 self.frame = 0;
                                 self.cart_id = Some(cart_id);
-                                self.machine = Some(Machine::new(region, cart));
+                                let machine = Machine::new(region, cart);
+                                machine.set_debug_interest(
+                                    self.debug_request.interests.iter().copied(),
+                                );
+                                self.machine = Some(machine);
                                 self.blip.set_rates(
                                     region.frame_ticks() * region.refresh_rate(),
                                     self.sample_rate as f64,
@@ -232,6 +243,10 @@ impl Runner {
                     }
                     EmulatorInput::DebugRequest(req) => {
                         self.debug_request = req;
+                        if let Some(machine) = self.machine.as_mut() {
+                            machine
+                                .set_debug_interest(self.debug_request.interests.iter().copied());
+                        }
                     }
                     EmulatorInput::FastForward => {
                         playback = Playback::FastForward;
@@ -380,6 +395,18 @@ impl Runner {
             if self.debug_request.state {
                 self.debug.state.update(|data| {
                     *data = debug.machine_state();
+                });
+            }
+
+            if self.debug_request.events {
+                self.debug.events.update(|data| {
+                    machine.read_debug_events(|events| data.copy_from_slice(events));
+                });
+            }
+
+            if self.debug_request.frame {
+                self.debug.frame.update(|data| {
+                    data.copy_from_slice(machine.get_screen());
                 });
             }
 
