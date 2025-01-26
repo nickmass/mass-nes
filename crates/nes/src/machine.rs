@@ -7,7 +7,7 @@ use crate::cartridge::Cartridge;
 use crate::cpu::{Cpu, CpuPinIn, TickResult};
 use crate::debug::Debug;
 use crate::input::Input;
-use crate::mapper::RcMapper;
+use crate::mapper::{RcMapper, SaveWram};
 use crate::memory::MemoryBlock;
 use crate::ppu::Ppu;
 use crate::region::Region;
@@ -324,6 +324,10 @@ impl Machine {
         self.cpu_pin_in.reset = true;
         self.apu.reset();
         self.ppu.reset();
+    }
+
+    pub fn save_wram(&self) -> Option<SaveWram> {
+        self.mapper.save_wram()
     }
 
     #[cfg(feature = "save-states")]

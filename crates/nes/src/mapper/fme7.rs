@@ -78,7 +78,7 @@ pub struct Fme7 {
 }
 
 impl Fme7 {
-    pub fn new(cartridge: INes) -> Fme7 {
+    pub fn new(mut cartridge: INes) -> Fme7 {
         let chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
         let mut prg = MappedMemory::new(&cartridge, 0x6000, 16, 40, MemKind::Prg);
         prg.map(0x6000, 8, 0, BankKind::Ram);
@@ -88,6 +88,11 @@ impl Fme7 {
             (cartridge.prg_rom.len() / 0x2000) - 1,
             BankKind::Rom,
         );
+
+        if let Some(wram) = cartridge.wram.take() {
+            prg.restore_wram(wram);
+        }
+
         let mirroring = SimpleMirroring::new(cartridge.mirroring.into());
 
         let inc = 10.0f32.powf(1.0 / 10.0);
@@ -391,5 +396,13 @@ impl Mapper for Fme7 {
 
     fn get_sample(&self) -> Option<i16> {
         Some(self.sample)
+    }
+
+    fn save_wram(&self) -> Option<super::SaveWram> {
+        if self.cartridge.battery {
+            self.prg.save_wram()
+        } else {
+            None
+        }
     }
 }

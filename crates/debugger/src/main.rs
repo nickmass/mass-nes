@@ -23,7 +23,7 @@ fn main() {
     audio.pause();
 
     eframe::run_native(
-        "Mass Emu",
+        debugger::APP_NAME,
         options,
         Box::new(|cc| {
             Ok(Box::new(DebuggerApp::new(

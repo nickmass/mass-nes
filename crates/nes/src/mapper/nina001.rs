@@ -21,11 +21,15 @@ pub struct Nina001 {
 }
 
 impl Nina001 {
-    pub fn new(cartridge: INes) -> Nina001 {
+    pub fn new(mut cartridge: INes) -> Nina001 {
         let mut prg = MappedMemory::new(&cartridge, 0x6000, 8, 40, MemKind::Prg);
 
         prg.map(0x6000, 8, 0, BankKind::Ram);
         prg.map(0x8000, 32, 0, BankKind::Rom);
+
+        if let Some(wram) = cartridge.wram.take() {
+            prg.restore_wram(wram);
+        }
 
         let prg_count = cartridge.prg_rom.len() / 32 * 1024;
 
@@ -103,5 +107,13 @@ impl Mapper for Nina001 {
 
     fn peek_ppu_fetch(&self, address: u16, _kind: PpuFetchKind) -> super::Nametable {
         self.mirroring.ppu_fetch(address)
+    }
+
+    fn save_wram(&self) -> Option<super::SaveWram> {
+        if self.cartridge.battery {
+            self.prg.save_wram()
+        } else {
+            None
+        }
     }
 }

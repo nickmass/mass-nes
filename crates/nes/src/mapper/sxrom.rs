@@ -26,7 +26,7 @@ pub struct Sxrom {
 }
 
 impl Sxrom {
-    pub fn new(cartridge: INes) -> Sxrom {
+    pub fn new(mut cartridge: INes) -> Sxrom {
         let chr_type = if cartridge.chr_rom.is_empty() {
             BankKind::Ram
         } else {
@@ -37,7 +37,10 @@ impl Sxrom {
             BankKind::Ram => MappedMemory::new(&cartridge, 0x0000, 8, 8, MemKind::Chr),
         };
 
-        let prg = MappedMemory::new(&cartridge, 0x6000, 8, 40, MemKind::Prg);
+        let mut prg = MappedMemory::new(&cartridge, 0x6000, 8, 40, MemKind::Prg);
+        if let Some(wram) = cartridge.wram.take() {
+            prg.restore_wram(wram);
+        }
 
         let mirroring = SimpleMirroring::new(cartridge.mirroring.into());
         let last = (cartridge.prg_rom.len() / 0x4000) - 1;
@@ -196,5 +199,13 @@ impl Mapper for Sxrom {
 
     fn peek_ppu_fetch(&self, address: u16, _kind: PpuFetchKind) -> super::Nametable {
         self.mirroring.ppu_fetch(address)
+    }
+
+    fn save_wram(&self) -> Option<super::SaveWram> {
+        if self.cartridge.battery {
+            self.prg.save_wram()
+        } else {
+            None
+        }
     }
 }

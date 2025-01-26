@@ -144,7 +144,7 @@ pub struct Vrc6 {
 }
 
 impl Vrc6 {
-    pub fn new(cartridge: INes, variant: Vrc6Variant) -> Self {
+    pub fn new(mut cartridge: INes, variant: Vrc6Variant) -> Self {
         let mirroring = SimpleMirroring::new(cartridge.mirroring.into());
         let mut prg = MappedMemory::new(&cartridge, 0x6000, 8, 40, MemKind::Prg);
         let chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
@@ -154,6 +154,10 @@ impl Vrc6 {
         prg.map(0x8000, 16, 0, BankKind::Rom);
         prg.map(0xc000, 8, 0, BankKind::Rom);
         prg.map(0xe000, 8, last, BankKind::Rom);
+
+        if let Some(wram) = cartridge.wram.take() {
+            prg.restore_wram(wram);
+        }
 
         let mix = (i16::MAX as f32 / 64.0) as i16;
 
@@ -342,6 +346,14 @@ impl Mapper for Vrc6 {
             (self.pulse_a.sample as i16 + self.pulse_b.sample as i16 + self.sawtooth.sample as i16)
                 * self.mix;
         Some(val)
+    }
+
+    fn save_wram(&self) -> Option<super::SaveWram> {
+        if self.cartridge.battery {
+            self.prg.save_wram()
+        } else {
+            None
+        }
     }
 }
 

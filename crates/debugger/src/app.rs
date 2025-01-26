@@ -2,7 +2,7 @@ use eframe::{
     egui::{Event, Widget},
     CreationContext,
 };
-use nes::UserInput;
+use nes::{SaveWram, UserInput};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use ui::{
@@ -10,6 +10,7 @@ use ui::{
     filters::NesNtscSetup,
     gamepad::{GamepadChannel, GamepadEvent, GilrsInput},
     input::{InputMap, InputType},
+    wram::{CartridgeId, WramStorage},
 };
 
 use std::{
@@ -20,11 +21,14 @@ use std::{
     },
 };
 
-use crate::debug_state::{DebugSwapState, DebugUiState, Palette};
 use crate::egui;
 use crate::gfx::{Filter, Gfx, GfxBackBuffer};
 use crate::runner::{DebugRequest, EmulatorInput};
 use crate::widgets::*;
+use crate::{
+    debug_state::{DebugSwapState, DebugUiState, Palette},
+    platform,
+};
 use crate::{
     gfx::Repainter,
     spawner::{MachineSpawner, Spawn},
@@ -115,6 +119,7 @@ pub struct DebuggerApp<A> {
     help: Help,
     fds_disk_sides: usize,
     fds_current_side: Option<usize>,
+    wram: Option<ui::wram::WramStorage>,
 }
 
 impl<A: Audio> DebuggerApp<A> {
@@ -134,9 +139,11 @@ impl<A: Audio> DebuggerApp<A> {
         let nes_screen = NesScreen::new(gfx);
         let palette = Palette::new(palette);
 
+        let wram = platform::wram_storage();
         let input = SharedInput::new();
         let last_input = input.state();
-        let (emu_control, emu_commands) = EmulatorControl::new(app_events.create_proxy());
+        let (emu_control, emu_commands) =
+            EmulatorControl::new(app_events.create_proxy(), wram.clone());
         let gamepad_channel = GilrsInput::new(app_events.create_proxy()).ok();
         let debug_swap = DebugSwapState::new();
         let debug = DebugUiState::new(debug_swap.clone(), palette);
@@ -204,6 +211,7 @@ impl<A: Audio> DebuggerApp<A> {
             help,
             fds_disk_sides: 0,
             fds_current_side: None,
+            wram,
         };
 
         app.hydrate();
@@ -372,6 +380,11 @@ impl<A: Audio> DebuggerApp<A> {
                     self.fds_current_side = current_side;
                 }
             },
+            AppEvent::SaveWram(cart, wram) => {
+                if let Some(store) = self.wram.as_ref() {
+                    store.save_wram(cart, wram);
+                }
+            }
         }
     }
 
@@ -646,6 +659,7 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        self.emu_control.save_wram();
         let state = ron::to_string(&self.state);
         if let Ok(state) = state {
             storage.set_string("debugger_ui_state", state);
@@ -676,6 +690,7 @@ pub enum AppEvent {
     Gamepad(GamepadEvent),
     BiosLoaded(Vec<u8>),
     CartridgeInfo(CartridgeKind),
+    SaveWram(CartridgeId, SaveWram),
 }
 
 impl From<GamepadEvent> for AppEvent {
@@ -733,13 +748,17 @@ impl GamepadChannel for AppEventsProxy {
 
 #[derive(Debug, Clone)]
 pub struct EmulatorControl {
+    wram: Option<WramStorage>,
     tx: Sender<EmulatorInput>,
 }
 
 impl EmulatorControl {
-    pub fn new(proxy: AppEventsProxy) -> (EmulatorControl, EmulatorCommands) {
+    pub fn new(
+        proxy: AppEventsProxy,
+        wram: Option<WramStorage>,
+    ) -> (EmulatorControl, EmulatorCommands) {
         let (tx, rx) = channel();
-        (EmulatorControl { tx }, EmulatorCommands { rx, proxy })
+        (EmulatorControl { tx, wram }, EmulatorCommands { rx, proxy })
     }
 
     pub fn player_one(&self, controller: nes::Controller) {
@@ -755,9 +774,16 @@ impl EmulatorControl {
         file_name: String,
         bios: Option<Vec<u8>>,
     ) {
-        let _ = self
-            .tx
-            .send(EmulatorInput::LoadCartridge(region, rom, file_name, bios));
+        self.save_wram();
+        let cart_id = ui::wram::CartridgeId::new(&rom);
+        let wram = if let Some(wram) = self.wram.as_ref() {
+            wram.load_wram(cart_id)
+        } else {
+            None
+        };
+        let _ = self.tx.send(EmulatorInput::LoadCartridge(
+            cart_id, region, rom, file_name, wram, bios,
+        ));
     }
 
     pub fn step_back(&self) {
@@ -799,6 +825,10 @@ impl EmulatorControl {
     pub fn set_disk_side(&self, side: Option<usize>) {
         let _ = self.tx.send(EmulatorInput::SetFdsDisk(side));
     }
+
+    fn save_wram(&self) {
+        let _ = self.tx.send(EmulatorInput::SaveWram);
+    }
 }
 
 pub struct EmulatorCommands {
@@ -813,6 +843,10 @@ impl EmulatorCommands {
 
     pub fn send_cartridge_info(&self, cartridge: CartridgeKind) {
         self.proxy.send(AppEvent::CartridgeInfo(cartridge));
+    }
+
+    pub fn send_wram(&self, cart_id: CartridgeId, wram: SaveWram) {
+        self.proxy.send(AppEvent::SaveWram(cart_id, wram))
     }
 }
 

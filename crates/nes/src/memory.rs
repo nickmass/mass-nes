@@ -1,7 +1,7 @@
 #[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
 
-use crate::cartridge::INes;
+use crate::{cartridge::INes, SaveWram};
 
 use std::cell::Cell;
 
@@ -207,6 +207,27 @@ impl MappedMemory {
                 let page = self.pages[p % self.pages.len()];
                 self.mem.write(page, addr & 0x3ff, val);
             }
+        }
+    }
+
+    pub fn save_wram(&self) -> Option<SaveWram> {
+        if self.mem.data.is_empty() {
+            return None;
+        }
+
+        let mut data = Vec::with_capacity(self.mem.data.len());
+        for b in self.mem.data.iter() {
+            data.push(b.get())
+        }
+
+        Some(SaveWram::from_bytes(data))
+    }
+
+    pub fn restore_wram(&mut self, wram: SaveWram) {
+        let data = wram.to_bytes();
+
+        for (a, b) in self.mem.data.iter().zip(data) {
+            a.set(b);
         }
     }
 }

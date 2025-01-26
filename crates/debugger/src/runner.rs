@@ -1,9 +1,11 @@
 use std::{collections::VecDeque, time::Duration};
 
 use blip_buf_rs::Blip;
-use nes::{Cartridge, FdsInput, Machine, MachineState, MapperInput, Region, RunResult, UserInput};
+use nes::{
+    Cartridge, FdsInput, Machine, MachineState, MapperInput, Region, RunResult, SaveWram, UserInput,
+};
 use tracing::instrument;
-use ui::audio::SamplesSender;
+use ui::{audio::SamplesSender, wram::CartridgeId};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum Playback {
@@ -64,12 +66,20 @@ pub enum EmulatorInput {
     Rewind(bool),
     SaveState(u32),
     RestoreState(u32),
-    LoadCartridge(Region, Vec<u8>, String, Option<Vec<u8>>),
+    LoadCartridge(
+        CartridgeId,
+        Region,
+        Vec<u8>,
+        String,
+        Option<SaveWram>,
+        Option<Vec<u8>>,
+    ),
     DebugRequest(DebugRequest),
     StepBack,
     StepForward,
     FastForward,
     SetFdsDisk(Option<usize>),
+    SaveWram,
 }
 
 #[derive(Debug)]
@@ -92,6 +102,7 @@ use crate::{
 
 pub struct Runner {
     machine: Option<Machine>,
+    cart_id: Option<CartridgeId>,
     back_buffer: GfxBackBuffer,
     commands: EmulatorCommands,
     samples_tx: SamplesSender,
@@ -127,6 +138,7 @@ impl Runner {
 
         Self {
             machine: None,
+            cart_id: None,
             back_buffer,
             commands,
             samples_tx,
@@ -193,10 +205,10 @@ impl Runner {
                         playback = Playback::StepForward;
                         self.step(playback);
                     }
-                    EmulatorInput::LoadCartridge(region, rom, file_name, bios) => {
+                    EmulatorInput::LoadCartridge(cart_id, region, rom, file_name, wram, bios) => {
                         let mut rom = std::io::Cursor::new(rom);
                         let mut bios = bios.map(std::io::Cursor::new);
-                        match Cartridge::load(&mut rom, bios.as_mut(), file_name) {
+                        match Cartridge::load(&mut rom, wram, bios.as_mut(), file_name) {
                             Ok(cart) => {
                                 let cart_info = match cart.info() {
                                     nes::CartridgeInfo::Cartridge => CartridgeKind::Cartridge,
@@ -207,6 +219,7 @@ impl Runner {
                                 };
                                 self.save_store.clear();
                                 self.frame = 0;
+                                self.cart_id = Some(cart_id);
                                 self.machine = Some(Machine::new(region, cart));
                                 self.blip.set_rates(
                                     region.frame_ticks() * region.refresh_rate(),
@@ -228,6 +241,16 @@ impl Runner {
                             machine.handle_input(UserInput::Mapper(MapperInput::Fds(
                                 FdsInput::SetDisk(disk),
                             )));
+                        }
+                    }
+                    EmulatorInput::SaveWram => {
+                        if let Some((wram, cart_id)) = self
+                            .machine
+                            .as_ref()
+                            .and_then(|m| m.save_wram())
+                            .zip(self.cart_id.clone())
+                        {
+                            self.commands.send_wram(cart_id, wram);
                         }
                     }
                 }

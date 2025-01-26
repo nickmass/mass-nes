@@ -37,7 +37,7 @@ pub struct Txrom {
 }
 
 impl Txrom {
-    pub fn new(cartridge: INes) -> Txrom {
+    pub fn new(mut cartridge: INes) -> Txrom {
         let chr_type = if cartridge.chr_rom.is_empty() {
             BankKind::Ram
         } else {
@@ -59,6 +59,10 @@ impl Txrom {
 
         let mut prg = MappedMemory::new(&cartridge, 0x6000, 16, 48, MemKind::Prg);
         prg.map(0x6000, 16, 0, BankKind::Ram);
+
+        if let Some(wram) = cartridge.wram.take() {
+            prg.restore_wram(wram);
+        }
 
         let ext_nt = if cartridge.mirroring == CartMirroring::FourScreen {
             Some([MemoryBlock::new(1), MemoryBlock::new(1)])
@@ -320,5 +324,13 @@ impl Mapper for Txrom {
     fn ppu_fetch(&mut self, address: u16, kind: PpuFetchKind) -> super::Nametable {
         self.irq_addr(address);
         self.peek_ppu_fetch(address, kind)
+    }
+
+    fn save_wram(&self) -> Option<super::SaveWram> {
+        if self.cartridge.battery {
+            self.prg.save_wram()
+        } else {
+            None
+        }
     }
 }

@@ -471,16 +471,16 @@ void main()
     float clamp = 0.0;
     vec3 clampColor = vec3(0.0, 0.0, 0.0);
     if (pos.y > 1.0) {
-        clamp = min(((pos.y - 1.0) * OutputSize.y) / clampFalloff, 1.0);
+        clamp = (pos.y - 1.0) * OutputSize.y;
     } else if (pos.y < 0.0) {
-        clamp = min((abs(pos.y) * OutputSize.y) / clampFalloff, 1.0);
+        clamp = abs(pos.y) * OutputSize.y;
     } else if (pos.x > 1.0) {
-        clamp = min(((pos.x - 1.0) * OutputSize.x) / clampFalloff, 1.0);
+        clamp = (pos.x - 1.0) * OutputSize.x;
     } else if (pos.x < 0.0) {
-        clamp = min((abs(pos.x) * OutputSize.x) / clampFalloff, 1.0);
+        clamp = abs(pos.x) * OutputSize.x;
     }
 
-    color = mix(color, clampColor, clamp);
+    color = mix(color, clampColor, min(clamp / max(clampFalloff, 0.001), 1.0));
 
     FragColor = vec4(color, 1.0);
 }

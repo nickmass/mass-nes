@@ -20,6 +20,11 @@
             const url_params = new URL(window.location.href).searchParams;
             if (url_params.has("bench")) {
                 bench = parseInt(url_params.get("bench"));
+            } else if (url_params.has("load_url")) {
+                loading.show();
+                await emu.load_rom_url(url_params.get("load_url"));
+                loading.close();
+                canvas.focus();
             }
 
             const load_url = document.getElementById("load_url");

@@ -27,6 +27,19 @@ use std::rc::Rc;
 
 pub use traits::MapperState;
 
+#[derive(Debug, Clone)]
+pub struct SaveWram(Vec<u8>);
+
+impl SaveWram {
+    pub fn from_bytes<B: ToOwned<Owned = Vec<u8>>>(bytes: B) -> Self {
+        Self(bytes.to_owned())
+    }
+
+    pub fn to_bytes(self) -> Vec<u8> {
+        self.0
+    }
+}
+
 #[cfg(feature = "save-states")]
 mod traits {
     use super::{Mapper, RcMapper};
@@ -80,6 +93,10 @@ pub trait Mapper {
     }
 
     fn input(&mut self, _input: MapperInput) {}
+
+    fn save_wram(&self) -> Option<SaveWram> {
+        None
+    }
 }
 
 #[derive(Clone)]
@@ -128,6 +145,10 @@ impl RcMapper {
 
     pub fn input(&self, input: MapperInput) {
         self.0.borrow_mut().input(input);
+    }
+
+    pub fn save_wram(&self) -> Option<SaveWram> {
+        self.0.borrow().save_wram()
     }
 }
 

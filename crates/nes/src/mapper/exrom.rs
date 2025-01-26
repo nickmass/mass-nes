@@ -96,7 +96,7 @@ impl PpuState {
     }
 
     fn fetch(&mut self, addr: u16) {
-        self.line_fetches += 1;
+        self.line_fetches = self.line_fetches.saturating_add(1);
 
         if addr >= 0x2000 && addr <= 0x2fff && Some(addr) == self.last_address {
             self.match_count += 1;
@@ -230,9 +230,9 @@ pub struct Exrom {
 }
 
 impl Exrom {
-    pub fn new(cartridge: INes) -> Self {
+    pub fn new(mut cartridge: INes) -> Self {
         let prg_ram_count = cartridge.prg_ram_bytes / (1024 * 8);
-        let prg = if prg_ram_count > 0 {
+        let mut prg = if prg_ram_count > 0 {
             MappedMemory::new(
                 &cartridge,
                 0x6000,
@@ -243,6 +243,11 @@ impl Exrom {
         } else {
             MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg)
         };
+
+        if let Some(wram) = cartridge.wram.take() {
+            prg.restore_wram(wram);
+        }
+
         let chr_spr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
         let chr_bg = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
         let mut chr_vert = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
@@ -785,6 +790,14 @@ impl Mapper for Exrom {
 
         let out = self.pulse_table[pulse_1 + pulse_2] + self.pcm.output() as i16;
         Some(out)
+    }
+
+    fn save_wram(&self) -> Option<super::SaveWram> {
+        if self.cartridge.battery {
+            self.prg.save_wram()
+        } else {
+            None
+        }
     }
 }
 

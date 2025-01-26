@@ -7,6 +7,8 @@ use web as platform;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod desktop {
+    use ui::wram::WramStorage;
+
     #[derive(Copy, Debug, Clone)]
     pub struct Timestamp(std::time::Instant);
 
@@ -19,12 +21,26 @@ mod desktop {
             self.0.duration_since(start)
         }
     }
+
+    pub fn wram_storage() -> Option<WramStorage> {
+        let wram_dir = eframe::storage_dir(crate::APP_NAME);
+        if let Some(mut dir) = wram_dir {
+            dir.push("wram");
+            let wram = ui::wram::WramStorage::directory(dir);
+            Some(wram)
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 mod web {
     use wasm_bindgen::prelude::*;
     use web_sys::{js_sys, WorkerGlobalScope};
+
+    use ui::wram::WramStorage;
+
     #[derive(Copy, Debug, Clone)]
     pub struct Timestamp(f64);
 
@@ -45,5 +61,9 @@ mod web {
             let ms = self.0 - start;
             std::time::Duration::from_secs_f64(ms / 1000.0)
         }
+    }
+
+    pub fn wram_storage() -> Option<WramStorage> {
+        ui::wram::WramStorage::local_storage()
     }
 }

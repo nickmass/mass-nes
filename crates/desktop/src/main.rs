@@ -30,7 +30,7 @@ fn run(path: PathBuf, region: nes::Region) {
         .and_then(|s| s.to_str())
         .map(|s| s.to_string())
         .unwrap_or_default();
-    let cart = Cartridge::load(&mut file, None, file_name).unwrap();
+    let cart = Cartridge::load(&mut file, None, None, file_name).unwrap();
 
     let setup = NesNtscSetup::composite();
     let filter = ui::filters::CrtFilter::new(&setup);
@@ -62,7 +62,7 @@ fn bench(path: PathBuf, region: nes::Region, mut frames: u32) {
         .and_then(|s| s.to_str())
         .map(|s| s.to_string())
         .unwrap_or_default();
-    let cart = Cartridge::load(&mut file, None, file_name).unwrap();
+    let cart = Cartridge::load(&mut file, None, None, file_name).unwrap();
     let mut machine = Machine::new(region, cart);
     loop {
         machine.run();

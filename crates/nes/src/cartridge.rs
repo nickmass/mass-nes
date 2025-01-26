@@ -1,4 +1,4 @@
-use crate::mapper::{self};
+use crate::mapper::{self, SaveWram};
 
 use std::{fmt, io};
 
@@ -61,6 +61,8 @@ pub struct INes {
     pub mirroring: CartMirroring,
     pub mapper: u32,
     pub submapper: Option<u32>,
+    pub wram: Option<SaveWram>,
+    pub battery: bool,
 }
 
 pub struct Fds {
@@ -81,6 +83,7 @@ pub enum Cartridge {
 impl Cartridge {
     pub fn load<T: io::Read, S: AsRef<str>>(
         file: &mut T,
+        wram: Option<SaveWram>,
         bios: Option<&mut T>,
         file_name: S,
     ) -> Result<Cartridge, CartridgeError> {
@@ -89,15 +92,20 @@ impl Cartridge {
         let file_name = file_name.as_ref();
 
         match Cartridge::get_rom_type(&ident, file_name) {
-            Some(RomType::Ines) => Cartridge::load_ines(file),
+            Some(RomType::Ines) => Cartridge::load_ines(file, ident, wram),
             Some(RomType::Fds) => Cartridge::load_fds(file, ident, bios),
             Some(RomType::Unif) => Cartridge::load_unif(file),
             None => Err(CartridgeError::InvalidFileType),
         }
     }
 
-    fn load_ines<T: io::Read>(file: &mut T) -> Result<Cartridge, CartridgeError> {
+    fn load_ines<T: io::Read>(
+        file: &mut T,
+        ident: [u8; 4],
+        mut wram: Option<SaveWram>,
+    ) -> Result<Cartridge, CartridgeError> {
         let mut header = [0; 16];
+        header[0..4].copy_from_slice(&ident);
         file.read_exact(&mut header[4..])?;
 
         let nes_2 = header[7] & 0xc == 0x8;
@@ -152,8 +160,16 @@ impl Cartridge {
         };
 
         let mut prg_ram_bytes = 0;
+        let mut battery = false;
         if header[6] & 0x02 != 0 {
-            prg_ram_bytes = 0x2000;
+            battery = true;
+            if mapper == 5 {
+                prg_ram_bytes = 0x8000;
+            } else {
+                prg_ram_bytes = 0x2000;
+            }
+        } else {
+            wram = None;
         }
 
         let mut prg_rom = vec![0; prg_rom_bytes];
@@ -170,6 +186,8 @@ impl Cartridge {
             mirroring,
             mapper,
             submapper,
+            wram,
+            battery,
         };
 
         let format = if nes_2 { "NES 2.0" } else { "iNES" };
@@ -188,6 +206,18 @@ impl Cartridge {
             chr_ram_bytes,
             mapper
         );
+
+        let mut header_str = String::with_capacity(16 * 3);
+        use std::fmt::Write;
+        for (idx, &n) in header.iter().enumerate() {
+            if idx < 3 {
+                let _ = write!(&mut header_str, "{} ", n as char);
+            } else {
+                let _ = write!(&mut header_str, "{:02x} ", n);
+            }
+        }
+
+        tracing::debug!("Header: [ {}]", header_str);
         Ok(Cartridge::INes(cartridge))
     }
 

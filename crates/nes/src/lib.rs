@@ -15,6 +15,7 @@ mod region;
 pub use cartridge::{Cartridge, CartridgeInfo};
 pub use debug::MachineState;
 pub use machine::{Controller, FdsInput, Machine, MapperInput, RunResult, UserInput};
+pub use mapper::SaveWram;
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 pub use region::Region;
