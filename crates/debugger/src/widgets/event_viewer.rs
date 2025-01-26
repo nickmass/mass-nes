@@ -1,4 +1,4 @@
-use eframe::egui::{self, Pos2};
+use eframe::egui::{self, Pos2, Rect};
 use egui::{ecolor::Hsva, Color32, Context, Ui, Vec2, Widget};
 use nes::DebugEvent;
 use serde::{Deserialize, Serialize};
@@ -166,12 +166,7 @@ impl EventViewer {
 
                 let mut events = debug.events()[event_idx];
                 let (r, g, b) = if events == 0 {
-                    if scanline > 261 {
-                        let (r, g, b, _) = ctx.style().visuals.window_fill.to_tuple();
-                        (r, g, b)
-                    } else {
-                        debug.palette().lookup(pal_id)
-                    }
+                    debug.palette().lookup(pal_id)
                 } else {
                     let mut color = interests.colors[0];
                     let mut n = 0;
@@ -311,6 +306,7 @@ impl EventViewer {
 
     pub fn show(
         &mut self,
+        region: &crate::app::Region,
         debug: &DebugUiState,
         debug_interval: u64,
         interests: &mut Interests,
@@ -322,13 +318,23 @@ impl EventViewer {
             self.render_events(debug, now, ctx, interests);
         }
 
+        let max_lines = match region {
+            crate::app::Region::Ntsc => 261,
+            crate::app::Region::Pal => 312,
+        };
+
         egui::Window::new("Event Viewer")
             .resizable(false)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     if let Some(tex) = &self.texture {
                         let mut res = egui::Image::new(tex)
-                            .fit_to_exact_size(Vec2::new(341.0, 312.0) * 3.0)
+                            .maintain_aspect_ratio(false)
+                            .fit_to_exact_size(Vec2::new(341.0, max_lines as f32) * 3.0)
+                            .uv(Rect::from_two_pos(
+                                Pos2::ZERO,
+                                (1.0, 1.0 / 312.0 * max_lines as f32).into(),
+                            ))
                             .ui(ui);
                         if let Some(pos) = res.hover_pos() {
                             let pos = Pos2::new(pos.x - res.rect.left(), pos.y - res.rect.top());

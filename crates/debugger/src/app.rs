@@ -35,7 +35,7 @@ use crate::{
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
-enum Region {
+pub enum Region {
     Ntsc,
     Pal,
 }
@@ -666,6 +666,7 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
 
         if self.state.show_events {
             if self.event_viewer.show(
+                &self.state.region,
                 &self.debug,
                 self.state.debug_interval,
                 &mut self.state.interests,
