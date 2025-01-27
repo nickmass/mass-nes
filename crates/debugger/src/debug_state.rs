@@ -93,6 +93,10 @@ impl DebugSwapState {
     pub fn set_breakpoint(&self) {
         self.breakpoint.store(true, Ordering::Relaxed)
     }
+
+    pub fn on_breakpoint(&self) -> bool {
+        self.breakpoint.load(Ordering::Relaxed)
+    }
 }
 
 pub struct DebugUiState {
@@ -127,7 +131,11 @@ impl DebugUiState {
     }
 
     pub fn breakpoint(&self) -> bool {
-        self.swap.breakpoint.swap(false, Ordering::Relaxed)
+        self.swap.breakpoint.load(Ordering::Relaxed)
+    }
+
+    pub fn clear_breakpoint(&self) {
+        self.swap.breakpoint.store(false, Ordering::Relaxed);
     }
 
     pub fn cpu_mem(&self) -> &[u8] {

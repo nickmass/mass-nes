@@ -4,8 +4,11 @@ use nes_traits::SaveState;
 #[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
 
+use std::rc::Rc;
+
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::{CartMirroring, INes};
+use crate::debug::Debug;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
 use crate::ppu::PpuFetchKind;
@@ -190,6 +193,8 @@ impl PpuState {
 pub struct Exrom {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
+    #[cfg_attr(feature = "save-states", save(skip))]
+    debug: Rc<Debug>,
     prg: MappedMemory,
     chr_spr: MappedMemory,
     chr_bg: MappedMemory,
@@ -230,7 +235,7 @@ pub struct Exrom {
 }
 
 impl Exrom {
-    pub fn new(mut cartridge: INes) -> Self {
+    pub fn new(mut cartridge: INes, debug: Rc<Debug>) -> Self {
         let prg_ram_count = cartridge.prg_ram_bytes / (1024 * 8);
         let mut prg = if prg_ram_count > 0 {
             MappedMemory::new(
@@ -271,6 +276,7 @@ impl Exrom {
 
         let mut rom = Self {
             cartridge,
+            debug,
             prg,
             chr_spr,
             chr_bg,
@@ -763,7 +769,11 @@ impl Mapper for Exrom {
 
     fn ppu_fetch(&mut self, address: u16, kind: PpuFetchKind) -> super::Nametable {
         if kind != PpuFetchKind::Idle {
+            let was_irq = self.ppu_state.irq_pending;
             self.ppu_state.fetch(address);
+            if self.irq_enabled && !was_irq && self.ppu_state.irq_pending {
+                self.debug.event(crate::DebugEvent::MapperIrq);
+            }
         }
 
         if self.ex_ram_mode == 0x01 && self.ppu_substitution {

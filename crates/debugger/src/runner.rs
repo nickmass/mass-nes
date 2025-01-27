@@ -2,8 +2,7 @@ use std::{collections::VecDeque, time::Duration};
 
 use blip_buf_rs::Blip;
 use nes::{
-    Cartridge, DebugEvent, FdsInput, Machine, MachineState, MapperInput, Region, RunResult,
-    SaveWram, UserInput,
+    Cartridge, DebugEvent, FdsInput, Machine, MapperInput, Region, RunResult, SaveWram, UserInput,
 };
 use tracing::instrument;
 use ui::{audio::SamplesSender, wram::CartridgeId};
@@ -94,6 +93,7 @@ pub struct DebugRequest {
     pub breakpoints: Breakpoints,
     pub events: bool,
     pub interests: Vec<DebugEvent>,
+    pub interest_breakpoints: u16,
     pub frame: bool,
 }
 
@@ -164,6 +164,7 @@ impl Runner {
                 events: false,
                 breakpoints: Breakpoints::new(),
                 interests: Vec::new(),
+                interest_breakpoints: 0,
                 frame: false,
             },
         }
@@ -271,7 +272,10 @@ impl Runner {
                 }
             }
 
-            if !playback.skip_step() && self.samples_tx.wants_samples() {
+            if !playback.skip_step()
+                && self.samples_tx.wants_samples()
+                && !self.debug.on_breakpoint()
+            {
                 if rewinding {
                     if let Some((machine, (frame, data))) =
                         self.machine.as_mut().zip(self.save_store.pop())
@@ -296,7 +300,13 @@ impl Runner {
             if playback.save_state() {
                 self.save_store.push(self.frame, || machine.save_state());
             }
-            match machine.run_with_breakpoints(|s: &MachineState| {
+            match machine.run_with_breakpoints(|debug: &nes::Debug| {
+                let event_notif = debug.take_interest_notification();
+                if event_notif & self.debug_request.interest_breakpoints != 0 {
+                    return true;
+                }
+
+                let s = debug.machine_state();
                 if let Some(addr) = s.cpu.instruction_addr {
                     self.debug_request.breakpoints.is_set(addr)
                 } else {

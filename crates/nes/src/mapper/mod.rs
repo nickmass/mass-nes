@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bus::{AddressBus, BusKind};
 use crate::cartridge::{Fds, INes};
+use crate::debug::Debug;
 use crate::machine::MapperInput;
 use crate::ppu::PpuFetchKind;
 
@@ -152,14 +153,14 @@ impl RcMapper {
     }
 }
 
-pub fn ines(cart: INes) -> RcMapper {
+pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
     match cart.mapper {
         0 => RcMapper::new(nrom::Nrom::new(cart)),
         1 | 65 => RcMapper::new(sxrom::Sxrom::new(cart)),
         2 => RcMapper::new(uxrom::Uxrom::new(cart)),
         3 => RcMapper::new(cnrom::Cnrom::new(cart)),
-        4 => RcMapper::new(txrom::Txrom::new(cart)),
-        5 => RcMapper::new(exrom::Exrom::new(cart)),
+        4 => RcMapper::new(txrom::Txrom::new(cart, debug)),
+        5 => RcMapper::new(exrom::Exrom::new(cart, debug)),
         7 => RcMapper::new(axrom::Axrom::new(cart)),
         9 => RcMapper::new(pxrom::Pxrom::new(cart)),
         24 => RcMapper::new(vrc6::Vrc6::new(cart, vrc6::Vrc6Variant::A)),
@@ -180,7 +181,7 @@ pub fn ines(cart: INes) -> RcMapper {
         71 | 232 => RcMapper::new(bf909x::Bf909x::new(cart)),
         206 => {
             tracing::warn!("limited mapper support");
-            RcMapper::new(txrom::Txrom::new(cart))
+            RcMapper::new(txrom::Txrom::new(cart, debug))
         }
         _ => {
             tracing::error!("mapper not implemented");

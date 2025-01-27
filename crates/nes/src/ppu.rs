@@ -733,6 +733,7 @@ impl Ppu {
     }
 
     fn sprite_fetch(&mut self, scanline: u32, high: bool) {
+        self.debug.event(DebugEvent::FetchSprite);
         let index = self.sprite_render_index;
         let sprite_y = self.line_oam_data[index * 4];
         let sprite_tile = self.line_oam_data[(index * 4) + 1] as u16;
@@ -952,11 +953,13 @@ impl Ppu {
     }
 
     fn fetch_nametable(&mut self) {
+        self.debug.event(DebugEvent::FetchNt);
         let nt_addr = 0x2000 | (self.vram_addr & 0xfff);
         self.nametable_tile = self.ppu_read(nt_addr);
     }
 
     fn fetch_attribute(&mut self) {
+        self.debug.event(DebugEvent::FetchAttr);
         let v = self.vram_addr;
         let at_addr = 0x23c0 | (v & 0x0c00) | ((v >> 4) & 0x38) | ((v >> 2) & 0x07);
         let attr = self.ppu_read(at_addr);
@@ -979,6 +982,7 @@ impl Ppu {
     }
 
     fn fetch_low_bg_pattern(&mut self) {
+        self.debug.event(DebugEvent::FetchBg);
         let v = self.vram_addr;
         let tile_addr = ((v >> 12) & 0x07)
             | ((self.nametable_tile as u16) << 4)
@@ -987,6 +991,7 @@ impl Ppu {
     }
 
     fn fetch_high_bg_pattern(&mut self) {
+        self.debug.event(DebugEvent::FetchBg);
         let v = self.vram_addr;
         let tile_addr = ((v >> 12) & 0x07)
             | ((self.nametable_tile as u16) << 4)

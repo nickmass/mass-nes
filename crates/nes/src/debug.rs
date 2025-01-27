@@ -18,6 +18,11 @@ pub enum DebugEvent {
     SpriteZero,
     SpriteOverflow,
     Dot(u32, u32),
+    FetchNt,
+    FetchAttr,
+    FetchBg,
+    FetchSprite,
+    MapperIrq,
 }
 
 #[cfg(feature = "debugger")]
@@ -54,6 +59,7 @@ mod debugger {
         scanline: u32,
         dot: u32,
         interest: [Option<DebugEvent>; 16],
+        interest_notif: u16,
         events: Vec<u16>,
     }
 
@@ -72,6 +78,7 @@ mod debugger {
                 scanline: 0,
                 dot: 0,
                 interest: [None; 16],
+                interest_notif: 0,
                 events: vec![0; 312 * 341],
             }
         }
@@ -95,9 +102,17 @@ mod debugger {
             } else {
                 let idx = (self.scanline * 341 + self.dot) as usize;
                 if let Some(v) = self.interest.iter().position(|ev| ev == &Some(event)) {
-                    self.events[idx] |= 1 << v;
+                    let n = 1 << v;
+                    self.events[idx] |= n;
+                    self.interest_notif |= n;
                 }
             }
+        }
+
+        fn take_interest_notification(&mut self) -> u16 {
+            let n = self.interest_notif;
+            self.interest_notif = 0;
+            n
         }
 
         fn set_interest<I: IntoIterator<Item = DebugEvent>>(&mut self, iter: I) {
@@ -498,8 +513,7 @@ mod debugger {
         }
 
         pub fn breakpoint<H: BreakpointHandler>(&self, handler: &mut H) -> bool {
-            let state = self.state.borrow();
-            handler.breakpoint(&state.machine_state)
+            handler.breakpoint(self)
         }
 
         pub fn event(&self, event: DebugEvent) {
@@ -515,6 +529,11 @@ mod debugger {
         pub fn read_events<F: FnMut(&[u16])>(&self, mut reader: F) {
             let state = self.state.borrow();
             reader(&state.events)
+        }
+
+        pub fn take_interest_notification(&self) -> u16 {
+            let mut state = self.state.borrow_mut();
+            state.take_interest_notification()
         }
     }
 }

@@ -1,6 +1,7 @@
+use crate::debug::Debug;
 use crate::mapper::{self, SaveWram};
 
-use std::{fmt, io};
+use std::{fmt, io, rc::Rc};
 
 #[derive(Debug)]
 pub enum CartridgeError {
@@ -307,9 +308,9 @@ impl Cartridge {
         None
     }
 
-    pub fn build_mapper(self) -> mapper::RcMapper {
+    pub fn build_mapper(self, debug: Rc<Debug>) -> mapper::RcMapper {
         match self {
-            Cartridge::INes(ines) => mapper::ines(ines),
+            Cartridge::INes(ines) => mapper::ines(ines, debug),
             Cartridge::Fds(fds) => mapper::fds(fds),
         }
     }

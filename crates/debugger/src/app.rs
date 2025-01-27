@@ -95,7 +95,7 @@ impl Default for UiState {
             auto_open_most_recent: true,
             interests: Interests::new(),
             recent_files: Vec::new(),
-            debug_interval: 10,
+            debug_interval: 1,
             selected_palette: 0,
             filter: Filter::Crt,
             bios: None,
@@ -327,6 +327,7 @@ impl<A: Audio> DebuggerApp<A> {
         if self.pause {
             self.audio.pause();
         } else {
+            self.debug.clear_breakpoint();
             self.audio.play();
         }
     }
@@ -423,7 +424,8 @@ impl<A: Audio> DebuggerApp<A> {
             state: self.state.show_code | self.state.show_nametables | self.state.show_sprites,
             breakpoints: self.breakpoints.clone(),
             events: self.state.show_events,
-            interests: self.state.interests.interests().to_vec(),
+            interests: self.state.interests.events().collect(),
+            interest_breakpoints: self.state.interests.breakpoint_mask(),
             frame: self.state.show_events,
         };
 

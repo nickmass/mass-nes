@@ -13,7 +13,7 @@ mod ppu_step;
 mod region;
 
 pub use cartridge::{Cartridge, CartridgeInfo};
-pub use debug::{DebugEvent, MachineState};
+pub use debug::{Debug, DebugEvent, MachineState};
 pub use machine::{Controller, FdsInput, Machine, MapperInput, RunResult, UserInput};
 pub use mapper::SaveWram;
 #[cfg(feature = "save-states")]

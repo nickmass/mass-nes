@@ -19,40 +19,47 @@ const KNOWN_EVENTS: &[(&str, DebugEvent)] = &[
     ("OAMDMA (4014) W", DebugEvent::CpuWrite(0x4014)),
     ("Sprite Zero", DebugEvent::SpriteZero),
     ("Sprite Overflow", DebugEvent::SpriteOverflow),
+    ("Fetch Nametable", DebugEvent::FetchNt),
+    ("Fetch Attribute", DebugEvent::FetchAttr),
+    ("Fetch Background", DebugEvent::FetchBg),
+    ("Fetch Sprite", DebugEvent::FetchSprite),
+    ("Mapper IRQ", DebugEvent::MapperIrq),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct Interest {
+    event: DebugEvent,
+    breakpoint: bool,
+    color: Color32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Interests {
-    interests: Vec<DebugEvent>,
-    colors: [Color32; 16],
+    interests: Vec<Interest>,
 }
 
 impl Interests {
     pub fn new() -> Self {
-        let mut colors = [None; 16];
-
-        for n in 0..16 {
-            let h = ((n * 7) as f32 / 16.0).fract();
-            let [r, g, b] = Hsva::new(h, 1.0, 1.0, 1.0).to_srgb();
-            colors[n] = Some(Color32::from_rgb(r, g, b));
-        }
-
-        let colors = colors.map(|c| c.unwrap());
-
         Self {
             interests: Vec::new(),
-            colors,
         }
-    }
-
-    pub fn interests(&self) -> &[DebugEvent] {
-        &self.interests
     }
 
     fn push(&mut self, event: DebugEvent) {
-        if self.interests.len() < 16 {
-            self.interests.push(event);
+        let n = self.interests.len();
+        if n == 16 {
+            return;
         }
+        let h = ((n * 7) as f32 / 16.0).fract();
+        let [r, g, b] = Hsva::new(h, 1.0, 1.0, 1.0).to_srgb();
+        let color = Color32::from_rgb(r, g, b);
+
+        let interest = Interest {
+            event,
+            color,
+            breakpoint: false,
+        };
+        self.interests.push(interest);
     }
 
     fn remove(&mut self, idx: usize) {
@@ -61,12 +68,29 @@ impl Interests {
         }
     }
 
-    fn iter_pairs_mut(&mut self) -> impl Iterator<Item = (&mut Color32, &mut DebugEvent)> + '_ {
-        self.colors.iter_mut().zip(self.interests.iter_mut())
+    fn contains(&self, event: &DebugEvent) -> bool {
+        self.interests.iter().any(|i| i.event == *event)
     }
 
-    fn contains(&self, event: &DebugEvent) -> bool {
-        self.interests.contains(event)
+    fn iter_mut(&mut self) -> impl Iterator<Item = &mut Interest> + '_ {
+        self.interests.iter_mut()
+    }
+
+    pub fn events(&self) -> impl Iterator<Item = DebugEvent> + '_ {
+        self.interests.iter().map(|i| i.event)
+    }
+
+    pub fn breakpoint_mask(&self) -> u16 {
+        let mut v = 0;
+        let mut n = 1;
+        for i in self.interests.iter() {
+            if i.breakpoint {
+                v |= n;
+            }
+            n <<= 1;
+        }
+
+        v
     }
 }
 
@@ -121,6 +145,11 @@ impl std::fmt::Display for DisplayEvent {
             DebugEvent::PpuWrite(a) => write!(f, "PPU Write {a:04X}"),
             DebugEvent::SpriteZero => write!(f, "Sprite Zero"),
             DebugEvent::SpriteOverflow => write!(f, "Sprite Overflow"),
+            DebugEvent::FetchNt => write!(f, "Fetch Nametable"),
+            DebugEvent::FetchAttr => write!(f, "Fetch Attribute"),
+            DebugEvent::FetchBg => write!(f, "Fetch Background"),
+            DebugEvent::FetchSprite => write!(f, "Fetch Sprite"),
+            DebugEvent::MapperIrq => write!(f, "Mapper IRQ"),
             DebugEvent::Dot(s, d) => write!(f, "Dot {s}x{d}"),
         }
     }
@@ -168,14 +197,18 @@ impl EventViewer {
                 let (r, g, b) = if events == 0 {
                     debug.palette().lookup(pal_id)
                 } else {
-                    let mut color = interests.colors[0];
+                    let mut color = Color32::BLACK;
                     let mut n = 0;
                     while events != 0 {
                         if events & 1 == 1 {
                             events >>= 1;
 
                             if events == 0 {
-                                color = interests.colors[n];
+                                color = interests
+                                    .interests
+                                    .get(n)
+                                    .map(|i| i.color)
+                                    .unwrap_or_default();
                             } else {
                                 color = Color32::WHITE;
                             }
@@ -215,26 +248,30 @@ impl EventViewer {
     fn interest_picker(&mut self, ui: &mut Ui, interests: &mut Interests) -> bool {
         let mut changed = false;
         ui.vertical(|ui| {
-            egui::Grid::new("interest_picker").show(ui, |ui| {
-                let mut to_remove = None;
-                for (idx, (color, event)) in interests.iter_pairs_mut().enumerate() {
-                    egui::color_picker::color_edit_button_srgba(
-                        ui,
-                        color,
-                        egui::color_picker::Alpha::Opaque,
-                    );
-                    ui.label(format!("{}", DisplayEvent(*event)));
-                    if ui.small_button("❌").clicked() {
-                        to_remove = Some(idx);
+            egui::Grid::new("interest_picker")
+                .striped(true)
+                .show(ui, |ui| {
+                    let mut to_remove = None;
+                    for (idx, interest) in interests.iter_mut().enumerate() {
+                        changed |=
+                            super::BreakpointToggle::ui(&mut interest.breakpoint, ui).changed();
+                        egui::color_picker::color_edit_button_srgba(
+                            ui,
+                            &mut interest.color,
+                            egui::color_picker::Alpha::Opaque,
+                        );
+                        ui.label(format!("{}", DisplayEvent(interest.event)));
+                        if ui.small_button("❌").clicked() {
+                            to_remove = Some(idx);
+                        }
+                        ui.end_row();
                     }
-                    ui.end_row();
-                }
 
-                if let Some(to_remove) = to_remove {
-                    interests.remove(to_remove);
-                    changed = true;
-                }
-            });
+                    if let Some(to_remove) = to_remove {
+                        interests.remove(to_remove);
+                        changed = true;
+                    }
+                });
 
             ui.separator();
 
@@ -319,7 +356,7 @@ impl EventViewer {
         }
 
         let max_lines = match region {
-            crate::app::Region::Ntsc => 261,
+            crate::app::Region::Ntsc => 262,
             crate::app::Region::Pal => 312,
         };
 
@@ -355,8 +392,10 @@ impl EventViewer {
                             }
                             while ev != 0 {
                                 if ev & 1 == 1 {
-                                    let display = DisplayEvent(interests.interests[n]);
-                                    res = res.on_hover_text_at_pointer(format!("{display}"));
+                                    if let Some(interest) = interests.interests.get(n) {
+                                        let display = DisplayEvent(interest.event);
+                                        res = res.on_hover_text_at_pointer(format!("{display}"));
+                                    }
                                 }
                                 ev >>= 1;
                                 n += 1;

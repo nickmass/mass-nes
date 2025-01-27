@@ -13,7 +13,7 @@ mod sprite_viewer;
 mod volume;
 
 pub use chr_tiles::ChrTiles;
-pub use code_viewer::{Breakpoints, CodeViewer};
+pub use code_viewer::{BreakpointToggle, Breakpoints, CodeViewer};
 pub use event_viewer::{EventViewer, Interests};
 pub use help::Help;
 pub use memory::MemoryViewer;

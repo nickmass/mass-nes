@@ -1,8 +1,11 @@
+use std::rc::Rc;
+
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::{CartMirroring, INes};
+use crate::debug::Debug;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
 use crate::ppu::PpuFetchKind;
@@ -15,6 +18,8 @@ const MMC3_ALT_IRQ_BEHAVIOR: bool = false;
 pub struct Txrom {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
+    #[cfg_attr(feature = "save-states", save(skip))]
+    debug: Rc<Debug>,
     mirroring: SimpleMirroring,
     prg: MappedMemory,
     chr: MappedMemory,
@@ -37,7 +42,7 @@ pub struct Txrom {
 }
 
 impl Txrom {
-    pub fn new(mut cartridge: INes) -> Txrom {
+    pub fn new(mut cartridge: INes, debug: Rc<Debug>) -> Txrom {
         let chr_type = if cartridge.chr_rom.is_empty() {
             BankKind::Ram
         } else {
@@ -75,6 +80,7 @@ impl Txrom {
 
         let mut rom = Txrom {
             cartridge,
+            debug,
             mirroring,
             prg,
             chr,
@@ -218,6 +224,9 @@ impl Txrom {
                 }
             }
             if is_zero && self.irq_enabled && !was_zero {
+                if !self.irq {
+                    self.debug.event(crate::DebugEvent::MapperIrq);
+                }
                 self.irq = true;
             }
         }

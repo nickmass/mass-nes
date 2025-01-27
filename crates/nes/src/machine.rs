@@ -14,22 +14,21 @@ use crate::memory::MemoryBlock;
 use crate::ppu::Ppu;
 use crate::region::Region;
 
-use crate::debug::MachineState;
 pub use crate::input::{Controller, InputDevice};
 
 pub trait BreakpointHandler {
-    fn breakpoint(&mut self, state: &MachineState) -> bool;
+    fn breakpoint(&mut self, debug: &Debug) -> bool;
 }
 
 impl BreakpointHandler for () {
-    fn breakpoint(&mut self, _state: &MachineState) -> bool {
+    fn breakpoint(&mut self, _debug: &Debug) -> bool {
         false
     }
 }
 
-impl<T: FnMut(&MachineState) -> bool> BreakpointHandler for T {
-    fn breakpoint(&mut self, state: &MachineState) -> bool {
-        self(state)
+impl<T: FnMut(&Debug) -> bool> BreakpointHandler for T {
+    fn breakpoint(&mut self, debug: &Debug) -> bool {
+        self(debug)
     }
 }
 
@@ -88,7 +87,7 @@ impl Machine {
         let mut cpu_bus = AddressBus::new(0, 0xffff);
         let cpu_mem = MemoryBlock::new(2);
         let input = Input::new();
-        let mapper = cartridge.build_mapper();
+        let mapper = cartridge.build_mapper(debug.clone());
         let apu = Apu::new(region, mapper.clone());
         let ppu = Ppu::new(region, mapper.clone(), debug.clone());
 
@@ -152,6 +151,8 @@ impl Machine {
 
     #[tracing::instrument(skip_all)]
     fn do_run<H: BreakpointHandler>(&mut self, mut break_handler: H) -> RunResult {
+        #[cfg(feature = "debugger")]
+        let _ = self.debug.take_interest_notification();
         let last_frame = self.ppu.frame();
         while self.ppu.frame() == last_frame {
             let tick_result = self.cpu.tick(self.cpu_pin_in);

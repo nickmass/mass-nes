@@ -58,7 +58,11 @@ impl InstructionUi {
         let mut changed = false;
         let op_code = &self.0.op_code;
         ui.horizontal(|row_ui| {
-            changed = BreakpointToggle::ui(&self.0, breakpoints, row_ui);
+            let mut set = breakpoints.is_set(self.0.pc());
+            if BreakpointToggle::ui(&mut set, row_ui).changed() {
+                breakpoints.toggle(self.0.pc());
+                changed = true;
+            }
             let bg_color = if self.pc() == reg_pc {
                 egui::Color32::DARK_RED
             } else {
@@ -95,20 +99,19 @@ impl InstructionUi {
     }
 }
 
-struct BreakpointToggle;
+pub struct BreakpointToggle;
 
 impl BreakpointToggle {
-    fn ui(inst: &Instruction, breakpoints: &mut Breakpoints, ui: &mut egui::Ui) -> bool {
-        let mut changed = false;
+    pub fn ui(value: &mut bool, ui: &mut egui::Ui) -> egui::Response {
         let mut frame = egui::Frame::none().begin(ui);
         let height = ui.text_style_height(&egui::TextStyle::Monospace);
         let size = egui::Vec2::splat(height);
 
-        let (rect, res) = frame
+        let (rect, mut res) = frame
             .content_ui
             .allocate_exact_size(size, egui::Sense::click());
 
-        if breakpoints.is_set(inst.pc()) {
+        if *value {
             let origin = rect.min + (size / 2.0);
             frame
                 .content_ui
@@ -117,15 +120,15 @@ impl BreakpointToggle {
         }
 
         if res.clicked() {
-            breakpoints.toggle(inst.pc());
-            changed = true;
+            res.mark_changed();
+            *value = !*value;
         }
         if res.hovered() {
             ui.output_mut(|platform| platform.cursor_icon = egui::CursorIcon::PointingHand);
         }
 
         frame.end(ui);
-        changed
+        res
     }
 }
 
