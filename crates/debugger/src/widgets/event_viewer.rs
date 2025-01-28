@@ -253,14 +253,16 @@ impl EventViewer {
                 .show(ui, |ui| {
                     let mut to_remove = None;
                     for (idx, interest) in interests.iter_mut().enumerate() {
-                        changed |=
-                            super::BreakpointToggle::ui(&mut interest.breakpoint, ui).changed();
-                        egui::color_picker::color_edit_button_srgba(
-                            ui,
-                            &mut interest.color,
-                            egui::color_picker::Alpha::Opaque,
-                        );
-                        ui.label(format!("{}", DisplayEvent(interest.event)));
+                        ui.horizontal(|ui| {
+                            changed |=
+                                super::BreakpointToggle::ui(&mut interest.breakpoint, ui).changed();
+                            egui::color_picker::color_edit_button_srgba(
+                                ui,
+                                &mut interest.color,
+                                egui::color_picker::Alpha::Opaque,
+                            );
+                            ui.label(format!("{}", DisplayEvent(interest.event)));
+                        });
                         if ui.small_button("❌").clicked() {
                             to_remove = Some(idx);
                         }
@@ -273,28 +275,32 @@ impl EventViewer {
                     }
                 });
 
-            ui.separator();
-
-            egui::ComboBox::from_id_salt("add_interest_device")
-                .selected_text(format!("{}", self.add_device))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.add_device, Device::Cpu, "CPU");
-                    ui.selectable_value(&mut self.add_device, Device::Ppu, "PPU");
-                });
-
-            if self.add_device == Device::Ppu && self.add_access == Access::Execute {
-                self.add_access = Access::Read;
+            if interests.events().any(|_| true) {
+                ui.separator();
             }
 
-            egui::ComboBox::from_id_salt("add_interest_access")
-                .selected_text(format!("{}", self.add_access))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.add_access, Access::Read, "Read");
-                    ui.selectable_value(&mut self.add_access, Access::Write, "Write");
-                    if self.add_device != Device::Ppu {
-                        ui.selectable_value(&mut self.add_access, Access::Execute, "Execute");
-                    }
-                });
+            ui.horizontal(|ui| {
+                egui::ComboBox::from_id_salt("add_interest_device")
+                    .selected_text(format!("{}", self.add_device))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.add_device, Device::Cpu, "CPU");
+                        ui.selectable_value(&mut self.add_device, Device::Ppu, "PPU");
+                    });
+
+                if self.add_device == Device::Ppu && self.add_access == Access::Execute {
+                    self.add_access = Access::Read;
+                }
+
+                egui::ComboBox::from_id_salt("add_interest_access")
+                    .selected_text(format!("{}", self.add_access))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.add_access, Access::Read, "Read");
+                        ui.selectable_value(&mut self.add_access, Access::Write, "Write");
+                        if self.add_device != Device::Ppu {
+                            ui.selectable_value(&mut self.add_access, Access::Execute, "Execute");
+                        }
+                    });
+            });
 
             ui.horizontal(|ui| {
                 self.add_address.retain(|c| c.is_ascii_hexdigit());
