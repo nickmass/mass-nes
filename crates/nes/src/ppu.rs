@@ -707,12 +707,6 @@ impl Ppu {
             pixel_result &= 0x30;
         }
 
-        /*
-        if system.debug.color {
-            pixel_result = 0x14
-        }
-        */
-
         self.screen[((scanline * 256) + dot) as usize] = pixel_result as u16 | self.emph_bits();
 
         self.low_attr_shift <<= 1;

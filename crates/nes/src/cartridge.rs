@@ -112,14 +112,22 @@ impl Cartridge {
         let nes_2 = header[7] & 0xc == 0x8;
 
         let prg_hi = if nes_2 { header[9] as usize & 0xf } else { 0 };
-        let prg_rom_bytes = (header[4] as usize | (prg_hi << 8)) << 14;
-
-        let chr_hi = if nes_2 {
-            (header[9] as usize >> 4) & 0xf
+        let prg_rom_bytes = if prg_hi == 0xf {
+            let mul = ((header[4] & 3) * 2 + 1) as usize;
+            let exp = (header[4] >> 2) as u32;
+            2usize.pow(exp) * mul
         } else {
-            0
+            (header[4] as usize | (prg_hi << 8)) << 14
         };
-        let chr_rom_bytes = (header[5] as usize | (chr_hi << 8)) << 13;
+
+        let chr_hi = if nes_2 { header[9] as usize >> 4 } else { 0 };
+        let chr_rom_bytes = if chr_hi == 0xf {
+            let mul = ((header[5] & 3) * 2 + 1) as usize;
+            let exp = (header[5] >> 2) as u32;
+            2usize.pow(exp) * mul
+        } else {
+            (header[5] as usize | (chr_hi << 8)) << 13
+        };
 
         let chr_ram_bytes = if nes_2 {
             if header[11] & 0x0f != 0 {
