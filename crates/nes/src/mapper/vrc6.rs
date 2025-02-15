@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 #[cfg(feature = "save-states")]
@@ -5,101 +7,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
+use crate::debug::Debug;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind};
 use crate::ppu::PpuFetchKind;
 
+use super::vrc_irq::VrcIrq;
 use super::{Nametable, SimpleMirroring};
-
-#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
-#[derive(Debug, Copy, Clone)]
-pub enum VrcIrqMode {
-    Cycle,
-    Scanline,
-}
-
-#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
-#[derive(Debug, Clone)]
-pub struct VrcIrq {
-    counter: u8,
-    scanline_counter: i16,
-    latch: u8,
-    mode: VrcIrqMode,
-    enabled: bool,
-    renable: bool,
-    triggered: bool,
-}
-
-impl VrcIrq {
-    pub fn new() -> Self {
-        Self {
-            counter: 0,
-            scanline_counter: 341,
-            latch: 0,
-            mode: VrcIrqMode::Cycle,
-            enabled: false,
-            renable: false,
-            triggered: false,
-        }
-    }
-
-    pub fn tick(&mut self) {
-        self.scanline_counter -= 3;
-        match self.mode {
-            VrcIrqMode::Cycle => {
-                self.scanline_counter += 341;
-                self.trigger();
-            }
-            VrcIrqMode::Scanline => {
-                if self.scanline_counter <= 0 {
-                    self.scanline_counter += 341;
-                    self.trigger();
-                }
-            }
-        }
-    }
-
-    fn trigger(&mut self) {
-        if self.counter == 0xff {
-            if self.enabled {
-                self.triggered = true;
-            }
-            self.counter = self.latch;
-            self.enabled = self.renable;
-        } else {
-            self.counter += 1;
-        }
-    }
-
-    pub fn irq(&self) -> bool {
-        self.triggered
-    }
-
-    pub fn latch(&mut self, value: u8) {
-        self.latch = value;
-    }
-
-    pub fn control(&mut self, value: u8) {
-        self.renable = value & 0x1 != 0;
-        self.enabled = value & 0x2 != 0;
-        self.mode = if value & 0x4 != 0 {
-            VrcIrqMode::Cycle
-        } else {
-            VrcIrqMode::Scanline
-        };
-
-        self.triggered = false;
-        self.scanline_counter = 341;
-
-        if self.enabled {
-            self.counter = self.latch;
-        }
-    }
-
-    pub fn acknowledge(&mut self) {
-        self.triggered = false;
-    }
-}
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Copy, Clone)]
@@ -128,6 +42,7 @@ pub struct Vrc6 {
     cartridge: INes,
     variant: Vrc6Variant,
     mirroring: SimpleMirroring,
+    #[cfg_attr(feature = "save-states", save(nested))]
     irq: VrcIrq,
     prg: MappedMemory,
     chr: MappedMemory,
@@ -144,7 +59,7 @@ pub struct Vrc6 {
 }
 
 impl Vrc6 {
-    pub fn new(mut cartridge: INes, variant: Vrc6Variant) -> Self {
+    pub fn new(mut cartridge: INes, variant: Vrc6Variant, debug: Rc<Debug>) -> Self {
         let mirroring = SimpleMirroring::new(cartridge.mirroring.into());
         let mut prg = MappedMemory::new(&cartridge, 0x6000, 8, 40, MemKind::Prg);
         let chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
@@ -165,7 +80,7 @@ impl Vrc6 {
             cartridge,
             variant,
             mirroring,
-            irq: VrcIrq::new(),
+            irq: VrcIrq::new(debug),
             prg,
             chr,
             ram_protect: false,

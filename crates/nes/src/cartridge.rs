@@ -181,6 +181,20 @@ impl Cartridge {
             wram = None;
         }
 
+        // This is big simplification but it is better for roms to have an
+        // incorrect amount of ram vs. no ram at all
+        if nes_2 && header[10] != 0 {
+            let volatile = header[10] as usize & 0xf;
+            let non_volatile = header[10] as usize >> 4;
+            let volatile = if volatile > 0 { 64 << volatile } else { 0 };
+            let non_volatile = if non_volatile > 0 {
+                64 << non_volatile
+            } else {
+                0
+            };
+            prg_ram_bytes = volatile + non_volatile;
+        }
+
         let mut prg_rom = vec![0; prg_rom_bytes];
         let mut chr_rom = vec![0; chr_rom_bytes];
 

@@ -12,7 +12,9 @@ mod pxrom;
 mod sxrom;
 mod txrom;
 mod uxrom;
+mod vrc4;
 mod vrc6;
+mod vrc_irq;
 
 #[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
@@ -163,8 +165,23 @@ pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
         5 => RcMapper::new(exrom::Exrom::new(cart, debug)),
         7 => RcMapper::new(axrom::Axrom::new(cart)),
         9 => RcMapper::new(pxrom::Pxrom::new(cart)),
-        24 => RcMapper::new(vrc6::Vrc6::new(cart, vrc6::Vrc6Variant::A)),
-        26 => RcMapper::new(vrc6::Vrc6::new(cart, vrc6::Vrc6Variant::B)),
+        21 => match cart.submapper {
+            Some(2) => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4c, debug)),
+            _ => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4a, debug)),
+        },
+        22 => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc2a, debug)),
+        23 => match cart.submapper {
+            Some(2) => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4e, debug)),
+            Some(3) => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc2b, debug)),
+            _ => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4f, debug)),
+        },
+        24 => RcMapper::new(vrc6::Vrc6::new(cart, vrc6::Vrc6Variant::A, debug)),
+        25 => match cart.submapper {
+            Some(2) => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4d, debug)),
+            Some(3) => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc2c, debug)),
+            _ => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4b, debug)),
+        },
+        26 => RcMapper::new(vrc6::Vrc6::new(cart, vrc6::Vrc6Variant::B, debug)),
         28 => RcMapper::new(action53::Action53::new(cart)),
         34 => match cart.submapper.unwrap_or_default() {
             1 => RcMapper::new(nina001::Nina001::new(cart)),
@@ -238,6 +255,10 @@ impl SimpleMirroring {
 
     pub fn vertical(&self) {
         self.mirroring.set(Mirroring::Vertical);
+    }
+
+    pub fn set(&self, mirroring: Mirroring) {
+        self.mirroring.set(mirroring);
     }
 
     pub fn ppu_fetch(&self, address: u16) -> Nametable {
