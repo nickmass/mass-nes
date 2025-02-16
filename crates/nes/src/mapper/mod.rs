@@ -6,6 +6,7 @@ mod cnrom;
 mod exrom;
 mod fds;
 mod fme7;
+mod namco163;
 mod nina001;
 mod nrom;
 mod pxrom;
@@ -165,6 +166,7 @@ pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
         5 => RcMapper::new(exrom::Exrom::new(cart, debug)),
         7 => RcMapper::new(axrom::Axrom::new(cart)),
         9 => RcMapper::new(pxrom::Pxrom::new(cart)),
+        19 => RcMapper::new(namco163::Namco163::new(cart, debug)),
         21 => match cart.submapper {
             Some(2) => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4c, debug)),
             _ => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4a, debug)),
