@@ -10,7 +10,7 @@ use crate::ppu::PpuFetchKind;
 use super::SimpleMirroring;
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
-pub struct Pxrom {
+pub struct Mmc2 {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
     prg_bank_count: usize,
@@ -23,7 +23,7 @@ pub struct Pxrom {
     mirroring: SimpleMirroring,
 }
 
-impl Pxrom {
+impl Mmc2 {
     pub fn new(cartridge: INes) -> Self {
         let prg = MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg);
         let chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
@@ -120,7 +120,7 @@ impl Pxrom {
     }
 }
 
-impl Mapper for Pxrom {
+impl Mapper for Mmc2 {
     fn register(&self, cpu: &mut AddressBus) {
         cpu.register_read(DeviceKind::Mapper, AndAndMask(0x8000, 0xffff));
         cpu.register_write(DeviceKind::Mapper, AndAndMask(0x8000, 0xf000));

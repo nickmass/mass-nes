@@ -10,7 +10,7 @@ use crate::ppu::PpuFetchKind;
 use super::SimpleMirroring;
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
-pub struct Sxrom {
+pub struct Mmc1 {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
     prg: MappedMemory,
@@ -25,8 +25,8 @@ pub struct Sxrom {
     wide_prg: bool,
 }
 
-impl Sxrom {
-    pub fn new(mut cartridge: INes) -> Sxrom {
+impl Mmc1 {
+    pub fn new(mut cartridge: INes) -> Mmc1 {
         let chr_type = if cartridge.chr_rom.is_empty() {
             BankKind::Ram
         } else {
@@ -46,7 +46,7 @@ impl Sxrom {
         let last = (cartridge.prg_rom.len() / 0x4000) - 1;
         let wide_prg = cartridge.prg_rom.len() == 512 * 1024;
 
-        let mut rom = Sxrom {
+        let mut rom = Mmc1 {
             cartridge,
             prg,
             chr,
@@ -168,7 +168,7 @@ impl Sxrom {
     }
 }
 
-impl Mapper for Sxrom {
+impl Mapper for Mmc1 {
     fn register(&self, cpu: &mut AddressBus) {
         cpu.register_read(DeviceKind::Mapper, AndEqualsAndMask(0xe000, 0x6000, 0x7fff));
         cpu.register_write(DeviceKind::Mapper, AndEqualsAndMask(0xe000, 0x6000, 0x7fff));

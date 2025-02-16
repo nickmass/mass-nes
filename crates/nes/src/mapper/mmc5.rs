@@ -190,7 +190,7 @@ impl PpuState {
 }
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
-pub struct Exrom {
+pub struct Mmc5 {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
     #[cfg_attr(feature = "save-states", save(skip))]
@@ -234,7 +234,7 @@ pub struct Exrom {
     pcm: Pcm,
 }
 
-impl Exrom {
+impl Mmc5 {
     pub fn new(mut cartridge: INes, debug: Rc<Debug>) -> Self {
         let prg_ram_count = cartridge.prg_ram_bytes / (1024 * 8);
         let mut prg = if prg_ram_count > 0 {
@@ -697,7 +697,7 @@ impl Exrom {
     }
 }
 
-impl Mapper for Exrom {
+impl Mapper for Mmc5 {
     fn register(&self, cpu: &mut AddressBus) {
         cpu.register_read(DeviceKind::Mapper, AndAndMask(0x8000, 0xffff));
         cpu.register_write(DeviceKind::Mapper, AndAndMask(0x8000, 0xffff));

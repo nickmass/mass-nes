@@ -265,7 +265,8 @@ impl Mapper for Namco163 {
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
 struct Sound {
-    mem: Vec<u8>,
+    #[cfg_attr(feature = "save-states", serde(with = "serde_arrays"))]
+    mem: [u8; 128],
     addr: u8,
     increment: bool,
     enabled: bool,
@@ -277,7 +278,7 @@ struct Sound {
 impl Sound {
     fn new() -> Self {
         Self {
-            mem: vec![0; 128],
+            mem: [0; 128],
             addr: 0,
             increment: false,
             enabled: false,

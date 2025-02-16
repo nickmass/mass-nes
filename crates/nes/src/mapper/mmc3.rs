@@ -15,7 +15,7 @@ use super::{Nametable, SimpleMirroring};
 const MMC3_ALT_IRQ_BEHAVIOR: bool = false;
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
-pub struct Txrom {
+pub struct Mmc3 {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
     #[cfg_attr(feature = "save-states", save(skip))]
@@ -41,8 +41,8 @@ pub struct Txrom {
     ext_nt: Option<[MemoryBlock; 2]>,
 }
 
-impl Txrom {
-    pub fn new(mut cartridge: INes, debug: Rc<Debug>) -> Txrom {
+impl Mmc3 {
+    pub fn new(mut cartridge: INes, debug: Rc<Debug>) -> Mmc3 {
         let chr_type = if cartridge.chr_rom.is_empty() {
             BankKind::Ram
         } else {
@@ -78,7 +78,7 @@ impl Txrom {
         let mirroring = SimpleMirroring::new(cartridge.mirroring.into());
         let last = (cartridge.prg_rom.len() / 0x2000) - 1;
 
-        let mut rom = Txrom {
+        let mut rom = Mmc3 {
             cartridge,
             debug,
             mirroring,
@@ -272,7 +272,7 @@ impl Txrom {
     }
 }
 
-impl Mapper for Txrom {
+impl Mapper for Mmc3 {
     fn register(&self, cpu: &mut AddressBus) {
         cpu.register_read(DeviceKind::Mapper, AndEqualsAndMask(0xe000, 0x6000, 0x7fff));
         cpu.register_write(DeviceKind::Mapper, AndEqualsAndMask(0xe000, 0x6000, 0x7fff));

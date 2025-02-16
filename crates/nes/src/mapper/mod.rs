@@ -3,15 +3,15 @@ mod axrom;
 mod bf909x;
 mod bxrom;
 mod cnrom;
-mod exrom;
 mod fds;
 mod fme7;
+mod mmc1;
+mod mmc2;
+mod mmc3;
+mod mmc5;
 mod namco163;
 mod nina001;
 mod nrom;
-mod pxrom;
-mod sxrom;
-mod txrom;
 mod uxrom;
 mod vrc4;
 mod vrc6;
@@ -159,13 +159,13 @@ impl RcMapper {
 pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
     match cart.mapper {
         0 => RcMapper::new(nrom::Nrom::new(cart)),
-        1 | 65 => RcMapper::new(sxrom::Sxrom::new(cart)),
+        1 | 65 => RcMapper::new(mmc1::Mmc1::new(cart)),
         2 => RcMapper::new(uxrom::Uxrom::new(cart)),
         3 => RcMapper::new(cnrom::Cnrom::new(cart)),
-        4 => RcMapper::new(txrom::Txrom::new(cart, debug)),
-        5 => RcMapper::new(exrom::Exrom::new(cart, debug)),
+        4 => RcMapper::new(mmc3::Mmc3::new(cart, debug)),
+        5 => RcMapper::new(mmc5::Mmc5::new(cart, debug)),
         7 => RcMapper::new(axrom::Axrom::new(cart)),
-        9 => RcMapper::new(pxrom::Pxrom::new(cart)),
+        9 => RcMapper::new(mmc2::Mmc2::new(cart)),
         19 => RcMapper::new(namco163::Namco163::new(cart, debug)),
         21 => match cart.submapper {
             Some(2) => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4c, debug)),
@@ -200,7 +200,7 @@ pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
         71 | 232 => RcMapper::new(bf909x::Bf909x::new(cart)),
         206 => {
             tracing::warn!("limited mapper support");
-            RcMapper::new(txrom::Txrom::new(cart, debug))
+            RcMapper::new(mmc3::Mmc3::new(cart, debug))
         }
         _ => {
             tracing::error!("mapper not implemented");
