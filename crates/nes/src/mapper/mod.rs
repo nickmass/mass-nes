@@ -3,14 +3,17 @@ mod axrom;
 mod bf909x;
 mod bxrom;
 mod cnrom;
+mod color_dreams;
 mod fds;
 mod fme7;
+mod gxrom;
 mod mmc1;
 mod mmc2;
 mod mmc3;
 mod mmc5;
 mod namco163;
 mod nina001;
+mod nina006;
 mod nrom;
 mod uxrom;
 mod vrc4;
@@ -166,6 +169,7 @@ pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
         5 => RcMapper::new(mmc5::Mmc5::new(cart, debug)),
         7 => RcMapper::new(axrom::Axrom::new(cart)),
         9 => RcMapper::new(mmc2::Mmc2::new(cart)),
+        11 => RcMapper::new(color_dreams::ColorDreams::new(cart)),
         19 => RcMapper::new(namco163::Namco163::new(cart, debug)),
         21 => match cart.submapper {
             Some(2) => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4c, debug)),
@@ -196,8 +200,10 @@ pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
                 }
             }
         },
+        66 => RcMapper::new(gxrom::Gxrom::new(cart)),
         69 => RcMapper::new(fme7::Fme7::new(cart)),
         71 | 232 => RcMapper::new(bf909x::Bf909x::new(cart)),
+        79 | 146 => RcMapper::new(nina006::Nina006::new(cart)),
         206 => {
             tracing::warn!("limited mapper support");
             RcMapper::new(mmc3::Mmc3::new(cart, debug))
