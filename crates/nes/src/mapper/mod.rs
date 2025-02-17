@@ -168,7 +168,8 @@ pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
         4 => RcMapper::new(mmc3::Mmc3::new(cart, debug)),
         5 => RcMapper::new(mmc5::Mmc5::new(cart, debug)),
         7 => RcMapper::new(axrom::Axrom::new(cart)),
-        9 => RcMapper::new(mmc2::Mmc2::new(cart)),
+        9 => RcMapper::new(mmc2::Mmc2::new(cart, mmc2::Mmc2Variant::Mmc2)),
+        10 => RcMapper::new(mmc2::Mmc2::new(cart, mmc2::Mmc2Variant::Mmc4)),
         11 => RcMapper::new(color_dreams::ColorDreams::new(cart)),
         19 => RcMapper::new(namco163::Namco163::new(cart, debug)),
         21 => match cart.submapper {
