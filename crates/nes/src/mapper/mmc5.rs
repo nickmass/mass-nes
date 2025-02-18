@@ -185,6 +185,8 @@ impl PpuState {
 
     fn leave_frame(&mut self) {
         self.in_frame = false;
+        self.irq_pending = false;
+        self.scanline = 0;
         self.last_address = None;
     }
 }
