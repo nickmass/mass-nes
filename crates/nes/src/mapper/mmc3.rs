@@ -14,18 +14,21 @@ use crate::ppu::PpuFetchKind;
 
 use super::{Nametable, SimpleMirroring};
 
-const MMC3_ALT_IRQ_BEHAVIOR: bool = false;
-
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Copy, Clone)]
 pub enum Mmc3Variant {
     Mmc3,
+    Mmc3AltIrq,
     Mmc6,
 }
 
 impl Mmc3Variant {
     fn is_mmc6(&self) -> bool {
         matches!(self, Mmc3Variant::Mmc6)
+    }
+
+    fn is_alt_irq(&self) -> bool {
+        matches!(self, Mmc3Variant::Mmc3AltIrq)
     }
 }
 
@@ -258,25 +261,21 @@ impl Mmc3 {
         }
         self.irq_a12 = a12;
 
-        let mut is_zero = false;
         if clock {
-            let was_zero =
-                MMC3_ALT_IRQ_BEHAVIOR && self.irq_counter == 0 && !self.irq_force_reload_pending;
-            if self.irq_reload_pending || self.irq_force_reload_pending {
+            let was_zero = self.variant.is_alt_irq()
+                && self.irq_counter == 0
+                && !self.irq_force_reload_pending;
+            if self.irq_reload_pending || self.irq_force_reload_pending || self.irq_counter == 0 {
                 self.irq_counter = self.irq_latch;
-                if self.irq_counter == 0 {
-                    is_zero = true;
-                }
                 self.irq_reload_pending = false;
                 self.irq_force_reload_pending = false;
             } else {
                 self.irq_counter = self.irq_counter.saturating_sub(1);
                 if self.irq_counter == 0 {
-                    is_zero = true;
                     self.irq_reload_pending = true;
                 }
             }
-            if is_zero && self.irq_enabled && !was_zero {
+            if self.irq_counter == 0 && self.irq_enabled && !was_zero {
                 if !self.irq {
                     self.debug.event(crate::DebugEvent::MapperIrq);
                 }
