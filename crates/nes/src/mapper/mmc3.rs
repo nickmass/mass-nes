@@ -2,6 +2,8 @@ use std::rc::Rc;
 
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;
+#[cfg(feature = "save-states")]
+use serde::{Deserialize, Serialize};
 
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::{CartMirroring, INes};
@@ -14,12 +16,26 @@ use super::{Nametable, SimpleMirroring};
 
 const MMC3_ALT_IRQ_BEHAVIOR: bool = false;
 
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
+pub enum Mmc3Variant {
+    Mmc3,
+    Mmc6,
+}
+
+impl Mmc3Variant {
+    fn is_mmc6(&self) -> bool {
+        matches!(self, Mmc3Variant::Mmc6)
+    }
+}
+
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Mmc3 {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
     #[cfg_attr(feature = "save-states", save(skip))]
     debug: Rc<Debug>,
+    variant: Mmc3Variant,
     mirroring: SimpleMirroring,
     prg: MappedMemory,
     chr: MappedMemory,
@@ -27,8 +43,8 @@ pub struct Mmc3 {
     chr_count: usize,
     bank_data: [u8; 8],
     bank_select: u8,
-    ram_protect: bool,
     ram_enabled: bool,
+    ram_reg: u8,
     irq: bool,
     irq_enabled: bool,
     irq_latch: u8,
@@ -42,7 +58,7 @@ pub struct Mmc3 {
 }
 
 impl Mmc3 {
-    pub fn new(mut cartridge: INes, debug: Rc<Debug>) -> Mmc3 {
+    pub fn new(mut cartridge: INes, variant: Mmc3Variant, debug: Rc<Debug>) -> Mmc3 {
         let chr_type = if cartridge.chr_rom.is_empty() {
             BankKind::Ram
         } else {
@@ -62,8 +78,18 @@ impl Mmc3 {
             BankKind::Rom => cartridge.chr_rom.len() / 1024,
         };
 
-        let mut prg = MappedMemory::new(&cartridge, 0x6000, 16, 48, MemKind::Prg);
-        prg.map(0x6000, 16, 0, BankKind::Ram);
+        let mut prg = if variant.is_mmc6() {
+            let mut prg = MappedMemory::new(&cartridge, 0x7000, 1, 36, MemKind::Prg);
+            prg.map(0x7000, 1, 0, BankKind::Ram);
+            prg.map(0x7400, 1, 0, BankKind::Ram);
+            prg.map(0x7800, 1, 0, BankKind::Ram);
+            prg.map(0x7c00, 1, 0, BankKind::Ram);
+            prg
+        } else {
+            let mut prg = MappedMemory::new(&cartridge, 0x6000, 8, 40, MemKind::Prg);
+            prg.map(0x6000, 8, 0, BankKind::Ram);
+            prg
+        };
 
         if let Some(wram) = cartridge.wram.take() {
             prg.restore_wram(wram);
@@ -81,6 +107,7 @@ impl Mmc3 {
         let mut rom = Mmc3 {
             cartridge,
             debug,
+            variant,
             mirroring,
             prg,
             chr,
@@ -88,8 +115,8 @@ impl Mmc3 {
             chr_count,
             bank_data: [0; 8],
             bank_select: 0,
-            ram_protect: false,
             ram_enabled: true,
+            ram_reg: 0,
             irq: false,
             irq_enabled: false,
             irq_latch: 0,
@@ -108,8 +135,18 @@ impl Mmc3 {
     }
 
     fn read_cpu(&self, addr: u16) -> u8 {
-        if addr & 0xe000 == 0x6000 && !self.ram_enabled {
-            (addr & 0xff) as u8
+        if addr & 0xe000 == 0x6000 {
+            match addr {
+                _ if !self.ram_enabled => addr as u8,
+                _ if !self.variant.is_mmc6() => self.prg.read(&self.cartridge, addr),
+                _ if self.variant.is_mmc6() => match addr & 0x7200 {
+                    0x7000 if self.ram_reg & 0x20 != 0 => self.prg.read(&self.cartridge, addr),
+                    0x7200 if self.ram_reg & 0x80 != 0 => self.prg.read(&self.cartridge, addr),
+                    _ if self.ram_reg & 0xa0 != 0 => 0,
+                    _ => addr as u8,
+                },
+                _ => addr as u8,
+            }
         } else {
             self.prg.read(&self.cartridge, addr)
         }
@@ -133,8 +170,19 @@ impl Mmc3 {
 
     fn write_cpu(&mut self, addr: u16, value: u8) {
         if addr & 0xe000 == 0x6000 {
-            if self.ram_enabled && !self.ram_protect {
-                self.prg.write(addr, value);
+            match addr {
+                _ if !self.ram_enabled => (),
+                _ if !self.variant.is_mmc6() => {
+                    if self.ram_reg & 0x40 == 0 {
+                        self.prg.write(addr, value);
+                    }
+                }
+                _ if self.variant.is_mmc6() => match addr & 0x7200 {
+                    0x7000 if self.ram_reg & 0x30 == 0x30 => self.prg.write(addr, value),
+                    0x7200 if self.ram_reg & 0xc0 == 0xc0 => self.prg.write(addr, value),
+                    _ => (),
+                },
+                _ => (),
             }
             return;
         }
@@ -142,6 +190,9 @@ impl Mmc3 {
         match addr {
             0x8000 => {
                 self.bank_select = value;
+                if self.variant.is_mmc6() {
+                    self.ram_enabled = value & 0x20 != 0;
+                }
                 self.sync();
             }
             0x8001 => {
@@ -161,8 +212,10 @@ impl Mmc3 {
                 }
             }
             0xa001 => {
-                self.ram_protect = value & 0x40 != 0;
-                self.ram_enabled = value & 0x80 != 0;
+                if !self.variant.is_mmc6() {
+                    self.ram_enabled = value & 0x80 != 0;
+                }
+                self.ram_reg = value;
             }
             0xc000 => {
                 self.irq_latch = value;

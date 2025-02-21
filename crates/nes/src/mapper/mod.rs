@@ -165,7 +165,10 @@ pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
         1 | 65 => RcMapper::new(mmc1::Mmc1::new(cart)),
         2 => RcMapper::new(uxrom::Uxrom::new(cart)),
         3 => RcMapper::new(cnrom::Cnrom::new(cart)),
-        4 => RcMapper::new(mmc3::Mmc3::new(cart, debug)),
+        4 => match cart.submapper {
+            Some(1) => RcMapper::new(mmc3::Mmc3::new(cart, mmc3::Mmc3Variant::Mmc6, debug)),
+            _ => RcMapper::new(mmc3::Mmc3::new(cart, mmc3::Mmc3Variant::Mmc3, debug)),
+        },
         5 => RcMapper::new(mmc5::Mmc5::new(cart, debug)),
         7 => RcMapper::new(axrom::Axrom::new(cart)),
         9 => RcMapper::new(mmc2::Mmc2::new(cart, mmc2::Mmc2Variant::Mmc2)),
@@ -207,7 +210,7 @@ pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
         79 | 146 => RcMapper::new(nina006::Nina006::new(cart)),
         206 => {
             tracing::warn!("limited mapper support");
-            RcMapper::new(mmc3::Mmc3::new(cart, debug))
+            RcMapper::new(mmc3::Mmc3::new(cart, mmc3::Mmc3Variant::Mmc3, debug))
         }
         _ => {
             tracing::error!("mapper not implemented");
