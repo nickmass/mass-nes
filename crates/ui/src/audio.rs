@@ -1,4 +1,4 @@
-use direct_ring_buffer::{create_ring_buffer, Consumer, Producer};
+use direct_ring_buffer::{Consumer, Producer, create_ring_buffer};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod cpal;

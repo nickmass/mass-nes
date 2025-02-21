@@ -26,7 +26,7 @@ mod web {
     use serde::Deserialize;
     use std::{
         path::PathBuf,
-        sync::mpsc::{channel, Receiver, Sender},
+        sync::mpsc::{Receiver, Sender, channel},
     };
 
     use eframe::egui::{self, Response, Ui};

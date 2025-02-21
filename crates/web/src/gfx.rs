@@ -1,6 +1,6 @@
 use futures::{
-    channel::mpsc::{Receiver, Sender},
     StreamExt,
+    channel::mpsc::{Receiver, Sender},
 };
 use web_sys::OffscreenCanvas;
 

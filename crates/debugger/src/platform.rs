@@ -37,7 +37,7 @@ mod desktop {
 #[cfg(target_arch = "wasm32")]
 mod web {
     use wasm_bindgen::prelude::*;
-    use web_sys::{js_sys, WorkerGlobalScope};
+    use web_sys::{WorkerGlobalScope, js_sys};
 
     use ui::wram::WramStorage;
 

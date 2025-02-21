@@ -2,7 +2,7 @@ use glium::glutin::surface::WindowSurface;
 use glium::texture::{ClientFormat, MipmapsOption, RawImage2d, Texture2d, UnsignedTexture2d};
 use glium::uniforms::{SamplerWrapFunction, UniformValue, Uniforms};
 use glium::winit::event_loop::EventLoopProxy;
-use glium::{implement_vertex, Display, Program, Surface, VertexBuffer};
+use glium::{Display, Program, Surface, VertexBuffer, implement_vertex};
 
 use std::borrow::Cow;
 use std::sync::{Arc, Mutex};

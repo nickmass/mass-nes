@@ -1,5 +1,5 @@
 use eframe::egui::{self, Pos2, Rect};
-use egui::{ecolor::Hsva, Color32, Context, Ui, Vec2, Widget};
+use egui::{Color32, Context, Ui, Vec2, Widget, ecolor::Hsva};
 use nes::DebugEvent;
 use serde::{Deserialize, Serialize};
 

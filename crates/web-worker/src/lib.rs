@@ -1,8 +1,9 @@
 use js_sys::Array;
-use wasm_bindgen::{closure::Closure, prelude::*, JsValue};
+use wasm_bindgen::{JsValue, closure::Closure, prelude::*};
 use web_sys::{
+    DedicatedWorkerGlobalScope, MessageEvent, Worker, WorkerOptions,
     js_sys::{self, Object},
-    wasm_bindgen, DedicatedWorkerGlobalScope, MessageEvent, Worker, WorkerOptions,
+    wasm_bindgen,
 };
 
 pub trait WorkerSpawn: Send + Sized + 'static {

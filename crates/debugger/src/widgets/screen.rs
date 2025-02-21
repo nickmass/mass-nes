@@ -1,6 +1,6 @@
 use std::sync::{
-    atomic::{AtomicU32, Ordering},
     Arc, Mutex,
+    atomic::{AtomicU32, Ordering},
 };
 
 use crate::{
@@ -123,7 +123,7 @@ impl NesScreen {
             vertical_arrows: true,
             escape: false,
         };
-        let res = egui::Frame::none().show(ui, |ui| {
+        let res = egui::Frame::new().show(ui, |ui| {
             self.paint(ctx, ui);
 
             let res = ui.interact(ui.min_rect(), SCREEN_INTERACT.into(), egui::Sense::click());

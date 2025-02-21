@@ -123,11 +123,7 @@ impl Channel for Dmc {
             self.timer_counter = self.rate() - 1;
             if !self.silence {
                 let offset = if self.output_shifter & 1 == 1 {
-                    if self.output_value <= 125 {
-                        2
-                    } else {
-                        0
-                    }
+                    if self.output_value <= 125 { 2 } else { 0 }
                 } else if self.output_value >= 2 {
                     -2
                 } else {

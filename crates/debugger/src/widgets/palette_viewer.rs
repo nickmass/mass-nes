@@ -26,7 +26,7 @@ impl<'a> PaletteViewer<'a> {
                             egui::Color32::TRANSPARENT
                         };
 
-                        let mut frame = egui::Frame::none().fill(color).inner_margin(2.0).begin(ui);
+                        let mut frame = egui::Frame::new().fill(color).inner_margin(2.0).begin(ui);
                         frame.content_ui.spacing_mut().item_spacing = Vec2::ZERO;
 
                         for idx in 0..4 {

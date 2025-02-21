@@ -3,8 +3,8 @@ use glow::HasContext;
 use serde::{Deserialize, Serialize};
 
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
 };
 
 use ui::filters::{Filter as FilterTrait, FilterContext, FilterUniforms, Parameter};
@@ -354,8 +354,8 @@ mod desktop {
 #[cfg(target_arch = "wasm32")]
 mod web {
     use eframe::egui;
-    use futures::channel::mpsc::{channel, Sender};
     use futures::StreamExt;
+    use futures::channel::mpsc::{Sender, channel};
 
     #[derive(Clone)]
     pub struct Repainter {

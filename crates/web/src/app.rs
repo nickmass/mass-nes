@@ -1,8 +1,8 @@
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 use futures::StreamExt;
-use web_sys::wasm_bindgen::JsError;
 use web_sys::HtmlCanvasElement;
+use web_sys::wasm_bindgen::JsError;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};

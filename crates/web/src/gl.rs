@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 use wasm_bindgen::prelude::*;
 use web_sys::{
-    js_sys, wasm_bindgen, OffscreenCanvas, WebGlBuffer, WebGlFramebuffer, WebGlProgram,
-    WebGlShader, WebGlTexture, WebGlUniformLocation, WebGlVertexArrayObject,
+    OffscreenCanvas, WebGlBuffer, WebGlFramebuffer, WebGlProgram, WebGlShader, WebGlTexture,
+    WebGlUniformLocation, WebGlVertexArrayObject, js_sys, wasm_bindgen,
 };
 
 pub use web_sys::WebGl2RenderingContext as GL;

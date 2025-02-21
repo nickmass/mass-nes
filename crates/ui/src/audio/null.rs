@@ -1,12 +1,12 @@
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
 };
 
-use super::{samples_channel, Audio, SamplesSender};
+use super::{Audio, SamplesSender, samples_channel};
 
 pub struct Null {
     sample_rate: u32,

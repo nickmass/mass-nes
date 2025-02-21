@@ -129,8 +129,10 @@ impl<F: Filter<GliumContext>, A: Audio> App<F, A> {
         if let Some(mut gamepad) = self.gamepad.take() {
             let _ = std::thread::Builder::new()
                 .name("gamepad".into())
-                .spawn(move || loop {
-                    gamepad.poll();
+                .spawn(move || {
+                    loop {
+                        gamepad.poll();
+                    }
                 });
         }
 

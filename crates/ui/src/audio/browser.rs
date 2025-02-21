@@ -1,13 +1,13 @@
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::u32;
 
 use wasm_bindgen_futures::JsFuture;
 use web_sys::js_sys::{Array, Object, Reflect};
 use web_sys::wasm_bindgen::prelude::*;
-use web_sys::{wasm_bindgen, AudioContext, AudioWorkletNode, AudioWorkletNodeOptions};
+use web_sys::{AudioContext, AudioWorkletNode, AudioWorkletNodeOptions, wasm_bindgen};
 
-use super::{samples_channel, SamplesReceiver, SamplesSender};
+use super::{SamplesReceiver, SamplesSender, samples_channel};
 
 pub struct BrowserAudio {
     ctx: AudioContext,

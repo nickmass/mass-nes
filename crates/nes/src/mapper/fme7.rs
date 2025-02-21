@@ -241,11 +241,7 @@ impl Fme7 {
         let high = self.audio_regs[channel.period_high_reg()] as u16 & 0xf;
 
         let period = high << 8 | low;
-        if period == 0 {
-            1
-        } else {
-            period
-        }
+        period.max(1)
     }
 
     fn noise_period(&self) -> u16 {
@@ -284,11 +280,7 @@ impl Fme7 {
 
     fn volume(&self, channel: Channel) -> u8 {
         let val = self.audio_regs[channel.envelope_reg()] & 0xf;
-        if val == 0 {
-            0
-        } else {
-            val * 2 + 1
-        }
+        if val == 0 { 0 } else { val * 2 + 1 }
     }
 
     fn noise(&self) -> bool {

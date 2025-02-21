@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned};
-use syn::{parse_macro_input, spanned::Spanned, Data, DeriveInput, Field, Fields, Ident};
+use syn::{Data, DeriveInput, Field, Fields, Ident, parse_macro_input, spanned::Spanned};
 
 #[proc_macro_derive(SaveState, attributes(save))]
 pub fn derive_save_state(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -23,7 +23,7 @@ pub fn derive_save_state(input: proc_macro::TokenStream) -> proc_macro::TokenStr
 
 fn save_data(container_name: &Ident, data: &Data) -> TokenStream {
     match data {
-        Data::Struct(ref data) => match data.fields {
+        Data::Struct(data) => match data.fields {
             Fields::Named(ref fields) => {
                 let fields = fields.named.iter().filter_map(|f| {
                     let name = &f.ident;
@@ -77,7 +77,7 @@ fn save_data(container_name: &Ident, data: &Data) -> TokenStream {
 
 fn save_impl(name: &Ident, container_name: &Ident, data: &Data) -> TokenStream {
     let (save_fields, restore_fields) = match data {
-        Data::Struct(ref data) => match data.fields {
+        Data::Struct(data) => match data.fields {
             Fields::Named(ref fields) => {
                 let (save, restore) = fields
                     .named

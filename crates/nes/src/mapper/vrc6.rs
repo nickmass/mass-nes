@@ -288,11 +288,7 @@ impl FreqMode {
             FreqMode::X256 => period >> 8,
         };
 
-        if period == 0 {
-            1
-        } else {
-            period
-        }
+        period.max(1)
     }
 }
 

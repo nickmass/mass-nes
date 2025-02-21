@@ -3,7 +3,7 @@ use std::rc::Rc;
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 #[cfg(feature = "save-states")]
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::bus::{AddressBus, BusKind, DeviceKind, RangeAndMask};
 use crate::debug::{Debug, DebugEvent};
@@ -1058,11 +1058,7 @@ impl Ppu {
     }
 
     fn vram_inc(&self) -> u16 {
-        if self.regs[0] & 0x04 != 0 {
-            0x20
-        } else {
-            0x01
-        }
+        if self.regs[0] & 0x04 != 0 { 0x20 } else { 0x01 }
     }
 
     fn base_nametable(&self) -> u16 {
@@ -1157,10 +1153,10 @@ struct DelayReg<
 }
 
 impl<
-        const DELAY: usize,
-        #[cfg(feature = "save-states")] T: Copy + Default + Serialize + DeserializeOwned,
-        #[cfg(not(feature = "save-states"))] T: Copy + Default,
-    > Default for DelayReg<DELAY, T>
+    const DELAY: usize,
+    #[cfg(feature = "save-states")] T: Copy + Default + Serialize + DeserializeOwned,
+    #[cfg(not(feature = "save-states"))] T: Copy + Default,
+> Default for DelayReg<DELAY, T>
 {
     fn default() -> Self {
         Self {
@@ -1170,10 +1166,10 @@ impl<
 }
 
 impl<
-        const DELAY: usize,
-        #[cfg(feature = "save-states")] T: Copy + Default + Serialize + DeserializeOwned,
-        #[cfg(not(feature = "save-states"))] T: Copy + Default,
-    > DelayReg<DELAY, T>
+    const DELAY: usize,
+    #[cfg(feature = "save-states")] T: Copy + Default + Serialize + DeserializeOwned,
+    #[cfg(not(feature = "save-states"))] T: Copy + Default,
+> DelayReg<DELAY, T>
 {
     fn new(value: T) -> Self {
         const {

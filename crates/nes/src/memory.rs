@@ -1,7 +1,7 @@
 #[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
 
-use crate::{cartridge::INes, SaveWram};
+use crate::{SaveWram, cartridge::INes};
 
 use std::cell::Cell;
 

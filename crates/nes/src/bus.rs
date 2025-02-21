@@ -95,11 +95,7 @@ pub struct Address(pub u16);
 
 impl Address {
     fn map(&self, addr: u16) -> Option<u16> {
-        if self.0 == addr {
-            Some(addr)
-        } else {
-            None
-        }
+        if self.0 == addr { Some(addr) } else { None }
     }
 }
 

@@ -136,11 +136,7 @@ impl Cartridge {
                 0
             }
         } else {
-            if chr_rom_bytes == 0 {
-                0x2000
-            } else {
-                0
-            }
+            if chr_rom_bytes == 0 { 0x2000 } else { 0 }
         };
 
         let mapper = ((header[6] >> 4) | (header[7] & 0xF0)) as u32;

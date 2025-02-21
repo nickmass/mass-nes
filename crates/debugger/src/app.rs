@@ -1,6 +1,6 @@
 use eframe::{
-    egui::{Event, Widget},
     CreationContext,
+    egui::{Event, Widget},
 };
 use nes::{SaveWram, UserInput};
 use serde::{Deserialize, Serialize};
@@ -16,8 +16,8 @@ use ui::{
 use std::{
     path::PathBuf,
     sync::{
-        mpsc::{channel, Receiver, Sender},
         Arc, Mutex,
+        mpsc::{Receiver, Sender, channel},
     },
 };
 
@@ -600,7 +600,7 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
         let bg = if self.state.show_screen {
             egui::Frame::central_panel(&*ctx.style())
         } else {
-            egui::Frame::none()
+            egui::Frame::new()
                 .inner_margin(0.0)
                 .outer_margin(0.0)
                 .fill(egui::Color32::BLACK)

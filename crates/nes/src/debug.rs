@@ -29,12 +29,12 @@ pub enum DebugEvent {
 mod debugger {
     use std::cell::RefCell;
 
+    use crate::Machine;
     use crate::bus::{AddressBus, DeviceKind, RangeAndMask};
-    use crate::cpu::{ops::*, CpuDebugState};
+    use crate::cpu::{CpuDebugState, ops::*};
     use crate::machine::BreakpointHandler;
     use crate::memory::MemoryBlock;
     use crate::ppu::PpuDebugState;
-    use crate::Machine;
 
     use super::DebugEvent;
 
@@ -540,10 +540,10 @@ mod debugger {
 
 #[cfg(not(feature = "debugger"))]
 pub mod no_debugger {
+    use crate::Machine;
     use crate::cpu::CpuDebugState;
     use crate::machine::BreakpointHandler;
     use crate::ppu::PpuDebugState;
-    use crate::Machine;
     pub struct Debug;
 
     #[derive(Debug, Clone, Default)]

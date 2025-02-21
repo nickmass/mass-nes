@@ -1,7 +1,7 @@
 #[cfg(target_arch = "wasm32")]
 use crate as debugger;
 use tracing::Level;
-use tracing_subscriber::{filter, layer::SubscriberExt, Layer};
+use tracing_subscriber::{Layer, filter, layer::SubscriberExt};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 

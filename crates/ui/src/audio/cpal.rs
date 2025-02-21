@@ -1,11 +1,11 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, OutputCallbackInfo, Sample};
 use std::sync::{
-    atomic::{AtomicU32, Ordering},
     Arc,
+    atomic::{AtomicU32, Ordering},
 };
 
-use super::{samples_channel, Audio, SamplesReceiver, SamplesSender};
+use super::{Audio, SamplesReceiver, SamplesSender, samples_channel};
 
 // Number of frames to store samples for across all buffers
 const BUFFER_FRAMES: f64 = 1.1;

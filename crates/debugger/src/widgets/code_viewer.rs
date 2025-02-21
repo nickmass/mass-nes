@@ -69,7 +69,7 @@ impl InstructionUi {
                 egui::Color32::TRANSPARENT
             };
 
-            let mut frame = egui::Frame::none().fill(bg_color).begin(row_ui);
+            let mut frame = egui::Frame::new().fill(bg_color).begin(row_ui);
             let ui = &mut frame.content_ui;
             ui.label(format!(
                 "0x{:04X}: {:02X} {}",
@@ -103,7 +103,7 @@ pub struct BreakpointToggle;
 
 impl BreakpointToggle {
     pub fn ui(value: &mut bool, ui: &mut egui::Ui) -> egui::Response {
-        let mut frame = egui::Frame::none().begin(ui);
+        let mut frame = egui::Frame::new().begin(ui);
         let height = ui.text_style_height(&egui::TextStyle::Monospace);
         let size = egui::Vec2::splat(height);
 

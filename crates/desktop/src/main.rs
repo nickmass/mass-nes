@@ -90,7 +90,7 @@ fn init_audio(region: nes::Region) -> (AudioDevices, SamplesSender) {
 
 fn init_tracing() {
     use tracing::Level;
-    use tracing_subscriber::{filter, layer::SubscriberExt, Layer};
+    use tracing_subscriber::{Layer, filter, layer::SubscriberExt};
 
     let tracy =
         tracing_tracy::TracyLayer::default().with_filter(filter::Targets::new().with_targets([

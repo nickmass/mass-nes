@@ -35,19 +35,19 @@ impl Clone for nes_ntsc_setup_t {
         *self
     }
 }
-extern "C" {
+unsafe extern "C" {
     #[link_name = "nes_ntsc_composite"]
     pub static nes_ntsc_composite: nes_ntsc_setup_t;
 }
-extern "C" {
+unsafe extern "C" {
     #[link_name = "nes_ntsc_svideo"]
     pub static nes_ntsc_svideo: nes_ntsc_setup_t;
 }
-extern "C" {
+unsafe extern "C" {
     #[link_name = "nes_ntsc_rgb"]
     pub static nes_ntsc_rgb: nes_ntsc_setup_t;
 }
-extern "C" {
+unsafe extern "C" {
     #[link_name = "nes_ntsc_monochrome"]
     pub static nes_ntsc_monochrome: nes_ntsc_setup_t;
 }
@@ -66,10 +66,10 @@ fn bindgen_test_layout_nes_ntsc_t() {
     assert_eq!(::std::mem::size_of::<nes_ntsc_t>(), 524288usize);
     assert_eq!(::std::mem::align_of::<nes_ntsc_t>(), 8usize);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn nes_ntsc_init(ntsc: *mut nes_ntsc_t, setup: *const nes_ntsc_setup_t);
 }
-extern "C" {
+unsafe extern "C" {
     pub fn nes_ntsc_blit(
         ntsc: *const nes_ntsc_t,
         nes_in: *const ::std::os::raw::c_ushort,

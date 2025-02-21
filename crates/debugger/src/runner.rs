@@ -458,8 +458,8 @@ impl SaveStore {
     }
 
     fn pop(&mut self) -> Option<(usize, nes::SaveData)> {
-        for gen in self.generations.iter_mut() {
-            if let Some(state) = gen.pop() {
+        for save_gen in self.generations.iter_mut() {
+            if let Some(state) = save_gen.pop() {
                 return Some(state);
             }
         }
@@ -470,11 +470,11 @@ impl SaveStore {
     fn push<F: FnOnce() -> nes::SaveData>(&mut self, frame: usize, func: F) {
         let mut carry_over = None;
         let mut func = Some(func);
-        for gen in self.generations.iter_mut() {
+        for save_gen in self.generations.iter_mut() {
             if let Some(func) = func.take() {
-                carry_over = gen.push(frame, func);
+                carry_over = save_gen.push(frame, func);
             } else if let Some((frame, data)) = carry_over {
-                carry_over = gen.push(frame, || data);
+                carry_over = save_gen.push(frame, || data);
             }
 
             if carry_over.is_none() {
@@ -484,8 +484,8 @@ impl SaveStore {
     }
 
     fn clear(&mut self) {
-        for gen in self.generations.iter_mut() {
-            gen.clear();
+        for save_gen in self.generations.iter_mut() {
+            save_gen.clear();
         }
     }
 }

@@ -1,6 +1,6 @@
 use gloo::net::http;
 use wasm_bindgen::prelude::*;
-use web_sys::{js_sys, wasm_bindgen, HtmlCanvasElement};
+use web_sys::{HtmlCanvasElement, js_sys, wasm_bindgen};
 use winit::event_loop::EventLoopProxy;
 
 use nes::Region;

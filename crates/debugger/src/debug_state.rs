@@ -2,8 +2,8 @@ use crate::egui;
 use std::{
     ops::{Deref, DerefMut},
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 

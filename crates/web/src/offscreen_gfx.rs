@@ -1,8 +1,8 @@
-use futures::channel::mpsc::{channel, Receiver, Sender};
+use futures::channel::mpsc::{Receiver, Sender, channel};
 use web_sys::{
+    HtmlCanvasElement,
     js_sys::Array,
     wasm_bindgen::{self, prelude::*},
-    HtmlCanvasElement,
 };
 use web_worker::WorkerSpawn;
 

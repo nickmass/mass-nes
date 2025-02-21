@@ -1,4 +1,4 @@
-use crate::helper::{self, rom, Input};
+use crate::helper::{self, Input, rom};
 
 const DIR: &'static str = "nestest/";
 
