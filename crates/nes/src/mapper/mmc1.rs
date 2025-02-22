@@ -113,8 +113,8 @@ impl Mmc1 {
         self.prg.map(0x6000, 8, 0, BankKind::Ram);
 
         match self.regs[0] & 3 {
-            0 => self.mirroring.internal_a(),
-            1 => self.mirroring.internal_b(),
+            0 => self.mirroring.internal_b(),
+            1 => self.mirroring.internal_a(),
             2 => self.mirroring.vertical(),
             3 => self.mirroring.horizontal(),
             _ => unreachable!(),
