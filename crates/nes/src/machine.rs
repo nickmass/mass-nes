@@ -172,9 +172,9 @@ impl Machine {
 
             match tick_result {
                 TickResult::Fetch(addr) => {
-                    self.debug.event(DebugEvent::CpuExec(addr));
-                    self.debug.fetch(addr);
                     let value = self.read(addr);
+                    self.debug.event_with_data(DebugEvent::CpuExec(addr), value);
+                    self.debug.fetch(addr);
                     self.cpu_pin_in.data = value;
                 }
                 TickResult::Read(addr) => {
@@ -231,7 +231,6 @@ impl Machine {
     }
 
     fn read(&mut self, addr: u16) -> u8 {
-        self.debug.event(DebugEvent::CpuRead(addr));
         let value = match self.cpu_bus.read_addr(addr) {
             Some((addr, DeviceKind::CpuRam)) => self.cpu_mem.read(addr),
             Some((addr, DeviceKind::Ppu)) => self.ppu.read(addr),
@@ -242,13 +241,15 @@ impl Machine {
             None => self.cpu_bus.open_bus.get(),
             _ => unimplemented!(),
         };
+        self.debug.event_with_data(DebugEvent::CpuRead(addr), value);
         self.cpu_bus.open_bus.set(value);
 
         value
     }
 
     fn write(&mut self, addr: u16, value: u8) {
-        self.debug.event(DebugEvent::CpuWrite(addr));
+        self.debug
+            .event_with_data(DebugEvent::CpuWrite(addr), value);
         use crate::channel::Channel;
         // Loop through potential mappings to allow MMC5 to snoop on PPU register writes
         for mapping in self.cpu_bus.write_addrs(addr) {
@@ -293,7 +294,7 @@ impl Machine {
     }
 
     #[cfg(feature = "debugger")]
-    pub fn read_debug_events<F: FnMut(&[u16])>(&self, reader: F) {
+    pub fn read_debug_events<F: FnMut(&[(u8, u16)])>(&self, reader: F) {
         self.debug.read_events(reader);
     }
 

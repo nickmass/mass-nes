@@ -60,7 +60,7 @@ mod debugger {
         dot: u32,
         interest: [Option<DebugEvent>; 16],
         interest_notif: u16,
-        events: Vec<u16>,
+        events: Vec<(u8, u16)>,
     }
 
     impl Default for DebugState {
@@ -79,7 +79,7 @@ mod debugger {
                 dot: 0,
                 interest: [None; 16],
                 interest_notif: 0,
-                events: vec![0; 312 * 341],
+                events: vec![(0, 0); 312 * 341],
             }
         }
     }
@@ -93,17 +93,18 @@ mod debugger {
             self.inst_ring.iter()
         }
 
-        fn event(&mut self, event: DebugEvent) {
+        fn event(&mut self, event: DebugEvent, data: Option<u8>) {
             if let DebugEvent::Dot(scanline, dot) = event {
                 self.scanline = scanline;
                 self.dot = dot;
                 let idx = (self.scanline * 341 + self.dot) as usize;
-                self.events[idx] = 0;
+                self.events[idx] = (0, 0);
             } else {
                 let idx = (self.scanline * 341 + self.dot) as usize;
                 if let Some(v) = self.interest.iter().position(|ev| ev == &Some(event)) {
                     let n = 1 << v;
-                    self.events[idx] |= n;
+                    let (d, e) = self.events[idx];
+                    self.events[idx] = (data.unwrap_or(d), e | n);
                     self.interest_notif |= n;
                 }
             }
@@ -518,7 +519,12 @@ mod debugger {
 
         pub fn event(&self, event: DebugEvent) {
             let mut state = self.state.borrow_mut();
-            state.event(event);
+            state.event(event, None);
+        }
+
+        pub fn event_with_data(&self, event: DebugEvent, data: u8) {
+            let mut state = self.state.borrow_mut();
+            state.event(event, Some(data));
         }
 
         pub fn set_interest<I: IntoIterator<Item = DebugEvent>>(&self, iter: I) {
@@ -526,7 +532,7 @@ mod debugger {
             state.set_interest(iter);
         }
 
-        pub fn read_events<F: FnMut(&[u16])>(&self, mut reader: F) {
+        pub fn read_events<F: FnMut(&[(u8, u16)])>(&self, mut reader: F) {
             let state = self.state.borrow();
             reader(&state.events)
         }
@@ -571,5 +577,7 @@ pub mod no_debugger {
         }
 
         pub fn event(&self, _event: super::DebugEvent) {}
+
+        pub fn event_with_data(&self, _event: super::DebugEvent, _data: u8) {}
     }
 }

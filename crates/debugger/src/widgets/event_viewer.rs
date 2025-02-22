@@ -1,5 +1,5 @@
-use eframe::egui::{self, Pos2, Rect};
-use egui::{Color32, Context, Ui, Vec2, Widget, ecolor::Hsva};
+use eframe::egui;
+use egui::{Color32, Context, Pos2, Rect, Ui, Vec2, Widget, ecolor::Hsva};
 use nes::DebugEvent;
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +30,7 @@ const KNOWN_EVENTS: &[(&str, DebugEvent)] = &[
 struct Interest {
     event: DebugEvent,
     breakpoint: bool,
+    log: bool,
     color: Color32,
 }
 
@@ -57,6 +58,7 @@ impl Interests {
         let interest = Interest {
             event,
             color,
+            log: false,
             breakpoint: false,
         };
         self.interests.push(interest);
@@ -126,76 +128,123 @@ impl std::fmt::Display for Access {
     }
 }
 
-struct DisplayEvent(DebugEvent);
+struct DisplayEvent(DebugEvent, Option<u8>);
 
 impl std::fmt::Display for DisplayEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let ev = self.0;
+        let DisplayEvent(ev, data) = *self;
         for &(txt, event) in KNOWN_EVENTS.iter() {
             if ev == event {
-                return write!(f, "{}", txt);
+                return match (ev, data) {
+                    (
+                        DebugEvent::CpuRead(_) | DebugEvent::CpuWrite(_) | DebugEvent::CpuExec(_),
+                        Some(d),
+                    ) => write!(f, "{txt} = {d:02X}"),
+                    _ => write!(f, "{txt}"),
+                };
             }
         }
 
-        match ev {
-            DebugEvent::CpuRead(a) => write!(f, "CPU Read {a:04X}"),
-            DebugEvent::CpuWrite(a) => write!(f, "CPU Write {a:04X}"),
-            DebugEvent::CpuExec(a) => write!(f, "CPU Exec {a:04X}"),
-            DebugEvent::PpuRead(a) => write!(f, "PPU Read {a:04X}"),
-            DebugEvent::PpuWrite(a) => write!(f, "PPU Write {a:04X}"),
-            DebugEvent::SpriteZero => write!(f, "Sprite Zero"),
-            DebugEvent::SpriteOverflow => write!(f, "Sprite Overflow"),
-            DebugEvent::FetchNt => write!(f, "Fetch Nametable"),
-            DebugEvent::FetchAttr => write!(f, "Fetch Attribute"),
-            DebugEvent::FetchBg => write!(f, "Fetch Background"),
-            DebugEvent::FetchSprite => write!(f, "Fetch Sprite"),
-            DebugEvent::MapperIrq => write!(f, "Mapper IRQ"),
-            DebugEvent::Dot(s, d) => write!(f, "Dot {s}x{d}"),
+        match (ev, data) {
+            (DebugEvent::CpuRead(a), Some(d)) => write!(f, "CPU Read {a:04X} = {d:02X}"),
+            (DebugEvent::CpuWrite(a), Some(d)) => write!(f, "CPU Write {a:04X} = {d:02X}"),
+            (DebugEvent::CpuExec(a), Some(d)) => write!(f, "CPU Exec {a:04X} = {d:02X}"),
+            (DebugEvent::CpuRead(a), _) => write!(f, "CPU Read {a:04X}"),
+            (DebugEvent::CpuWrite(a), _) => write!(f, "CPU Write {a:04X}"),
+            (DebugEvent::CpuExec(a), _) => write!(f, "CPU Exec {a:04X}"),
+            (DebugEvent::PpuRead(a), _) => write!(f, "PPU Read {a:04X}"),
+            (DebugEvent::PpuWrite(a), _) => write!(f, "PPU Write {a:04X}"),
+            (DebugEvent::SpriteZero, _) => write!(f, "Sprite Zero"),
+            (DebugEvent::SpriteOverflow, _) => write!(f, "Sprite Overflow"),
+            (DebugEvent::FetchNt, _) => write!(f, "Fetch Nametable"),
+            (DebugEvent::FetchAttr, _) => write!(f, "Fetch Attribute"),
+            (DebugEvent::FetchBg, _) => write!(f, "Fetch Background"),
+            (DebugEvent::FetchSprite, _) => write!(f, "Fetch Sprite"),
+            (DebugEvent::MapperIrq, _) => write!(f, "Mapper IRQ"),
+            (DebugEvent::Dot(s, d), _) => write!(f, "Dot {s}x{d}"),
         }
+    }
+}
+
+struct EventEntry {
+    event: DebugEvent,
+    color: Color32,
+    scanline: u16,
+    dot: u16,
+    data: u8,
+}
+
+impl EventEntry {
+    fn ui(&self, ui: &mut Ui) -> egui::Response {
+        let res = ui.horizontal(|ui| {
+            let height = ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y;
+            let (rect, res) = ui.allocate_exact_size(
+                Vec2::new(ui.style().spacing.item_spacing.x, height),
+                egui::Sense::hover(),
+            );
+            ui.painter().rect_filled(rect, 0.0, self.color);
+            let label_res = ui.label(format!("{} x {}", self.scanline, self.dot));
+
+            res.union(label_res)
+        });
+        let label_res = ui.label(format!("{}", DisplayEvent(self.event, Some(self.data))));
+
+        res.inner.union(label_res)
     }
 }
 
 pub struct EventViewer {
     texture: Option<egui::TextureHandle>,
+    event_log: Vec<EventEntry>,
     age: u64,
     pixel_buf: Vec<u8>,
     add_device: Device,
     add_access: Access,
     add_address: String,
+    highlight: Option<(u16, u16, Color32)>,
 }
 
 impl EventViewer {
     pub fn new() -> Self {
         Self {
             texture: None,
+            event_log: Vec::new(),
             age: 0,
             pixel_buf: vec![0; 312 * 341 * 3],
             add_device: Device::Cpu,
             add_access: Access::Read,
             add_address: String::new(),
+            highlight: None,
         }
     }
 
-    fn render_events(
-        &mut self,
-        debug: &DebugUiState,
-        now: u64,
-        ctx: &Context,
-        interests: &Interests,
-    ) {
+    fn render_events(&mut self, debug: &DebugUiState, ctx: &Context, interests: &Interests) {
         for scanline in 0..312 {
             for dot in 0..341 {
-                let frame_idx = (scanline * 256 + dot) as usize;
-                let event_idx = (scanline * 341 + dot) as usize;
+                let frame_idx = scanline * 256 + dot;
+                let event_idx = scanline * 341 + dot;
+
+                let scanline = scanline as u16;
+                let dot = dot as u16;
+
                 let pal_id = if scanline < 240 && dot < 256 {
                     debug.frame()[frame_idx]
                 } else {
                     0
                 };
 
-                let mut events = debug.events()[event_idx];
+                let (_data, mut events) = debug.events()[event_idx];
                 let (r, g, b) = if events == 0 {
-                    debug.palette().lookup(pal_id)
+                    if let Some((hi_line, hi_dot, hi_color)) = self.highlight.clone() {
+                        if hi_line.abs_diff(scanline) <= 1 && hi_dot.abs_diff(dot) <= 1 {
+                            let (r, g, b, _) = hi_color.to_tuple();
+                            (r, g, b)
+                        } else {
+                            debug.palette().lookup(pal_id)
+                        }
+                    } else {
+                        debug.palette().lookup(pal_id)
+                    }
                 } else {
                     let mut color = Color32::BLACK;
                     let mut n = 0;
@@ -234,7 +283,39 @@ impl EventViewer {
         let image = egui::ColorImage::from_rgb([341, 312], &self.pixel_buf);
 
         self.texture = Some(ctx.load_texture("events", image, egui::TextureOptions::NEAREST));
-        self.age = now;
+    }
+
+    fn populate_log(&mut self, debug: &DebugUiState, interests: &Interests) {
+        self.event_log.clear();
+
+        for scanline in 0..312 {
+            for dot in 0..341 {
+                let event_idx = scanline * 341 + dot;
+                let scanline = scanline as u16;
+                let dot = dot as u16;
+
+                let (data, mut events) = debug.events()[event_idx];
+                let mut n = 0;
+                while events != 0 {
+                    if events & 1 == 1 {
+                        if let Some(interest) = interests.interests.get(n) {
+                            if interest.log {
+                                let entry = EventEntry {
+                                    data,
+                                    event: interest.event,
+                                    color: interest.color,
+                                    scanline,
+                                    dot,
+                                };
+                                self.event_log.push(entry);
+                            }
+                        }
+                    }
+                    events >>= 1;
+                    n += 1;
+                }
+            }
+        }
     }
 
     fn is_expired(&self, now: u64, debug_interval: u64) -> bool {
@@ -248,32 +329,31 @@ impl EventViewer {
     fn interest_picker(&mut self, ui: &mut Ui, interests: &mut Interests) -> bool {
         let mut changed = false;
         ui.vertical(|ui| {
-            egui::Grid::new("interest_picker")
-                .striped(true)
-                .show(ui, |ui| {
-                    let mut to_remove = None;
-                    for (idx, interest) in interests.iter_mut().enumerate() {
-                        ui.horizontal(|ui| {
-                            changed |=
-                                super::BreakpointToggle::ui(&mut interest.breakpoint, ui).changed();
-                            egui::color_picker::color_edit_button_srgba(
-                                ui,
-                                &mut interest.color,
-                                egui::color_picker::Alpha::Opaque,
-                            );
-                            ui.label(format!("{}", DisplayEvent(interest.event)));
-                        });
-                        if ui.small_button("❌").clicked() {
-                            to_remove = Some(idx);
-                        }
-                        ui.end_row();
+            egui::Grid::new("interest_picker").show(ui, |ui| {
+                let mut to_remove = None;
+                for (idx, interest) in interests.iter_mut().enumerate() {
+                    ui.horizontal(|ui| {
+                        changed |=
+                            super::BreakpointToggle::ui(&mut interest.breakpoint, ui).changed();
+                        egui::color_picker::color_edit_button_srgba(
+                            ui,
+                            &mut interest.color,
+                            egui::color_picker::Alpha::Opaque,
+                        );
+                        ui.checkbox(&mut interest.log, "");
+                        ui.label(format!("{}", DisplayEvent(interest.event, None)));
+                    });
+                    if ui.small_button("❌").clicked() {
+                        to_remove = Some(idx);
                     }
+                    ui.end_row();
+                }
 
-                    if let Some(to_remove) = to_remove {
-                        interests.remove(to_remove);
-                        changed = true;
-                    }
-                });
+                if let Some(to_remove) = to_remove {
+                    interests.remove(to_remove);
+                    changed = true;
+                }
+            });
 
             if interests.events().any(|_| true) {
                 ui.separator();
@@ -358,7 +438,9 @@ impl EventViewer {
         let mut changed = false;
         let now = debug.now();
         if self.is_expired(now, debug_interval) {
-            self.render_events(debug, now, ctx, interests);
+            self.render_events(debug, ctx, interests);
+            self.populate_log(debug, interests);
+            self.age = now;
         }
 
         let max_lines = match region {
@@ -366,6 +448,7 @@ impl EventViewer {
             crate::app::Region::Pal => 312,
         };
 
+        self.highlight = None;
         egui::Window::new("Event Viewer")
             .resizable(false)
             .show(ctx, |ui| {
@@ -385,7 +468,7 @@ impl EventViewer {
                             let dot = pos.x.floor() as usize / 3;
                             let idx = scanline * 341 + dot;
 
-                            let mut ev = debug.events()[idx];
+                            let (data, mut ev) = debug.events()[idx];
                             let mut n = 0;
                             if scanline > 261 {
                                 res = res.on_hover_text_at_pointer(format!(
@@ -399,7 +482,7 @@ impl EventViewer {
                             while ev != 0 {
                                 if ev & 1 == 1 {
                                     if let Some(interest) = interests.interests.get(n) {
-                                        let display = DisplayEvent(interest.event);
+                                        let display = DisplayEvent(interest.event, Some(data));
                                         res = res.on_hover_text_at_pointer(format!("{display}"));
                                     }
                                 }
@@ -409,7 +492,31 @@ impl EventViewer {
                         }
                     }
 
-                    changed |= self.interest_picker(ui, interests);
+                    ui.vertical(|ui| {
+                        changed |= self.interest_picker(ui, interests);
+
+                        if !self.event_log.is_empty() {
+                            ui.separator();
+
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                egui::Grid::new("event_viewer_log").show(ui, |ui| {
+                                    for log in self.event_log.iter() {
+                                        if log.ui(ui).hovered() {
+                                            self.highlight =
+                                                Some((log.scanline, log.dot, log.color));
+                                            self.age = 0;
+                                        }
+                                        ui.end_row();
+                                    }
+                                });
+
+                                ui.allocate_at_least(
+                                    Vec2::new(ui.available_width(), 0.0),
+                                    egui::Sense::empty(),
+                                );
+                            });
+                        }
+                    });
                 });
             });
 

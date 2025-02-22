@@ -67,7 +67,7 @@ pub struct DebugSwapState {
     pub sprite_ram: SwapBuffer<Vec<u8>>,
     pub state: SwapBuffer<State>,
     pub breakpoint: Arc<AtomicBool>,
-    pub events: SwapBuffer<Vec<u16>>,
+    pub events: SwapBuffer<Vec<(u8, u16)>>,
     pub frame: SwapBuffer<Vec<u16>>,
 }
 
@@ -81,7 +81,7 @@ impl DebugSwapState {
             sprite_ram: SwapBuffer::new(vec![0; 256]),
             state: SwapBuffer::new(State::default()),
             breakpoint: Arc::new(false.into()),
-            events: SwapBuffer::new(vec![0; 312 * 341]),
+            events: SwapBuffer::new(vec![(0, 0); 312 * 341]),
             frame: SwapBuffer::new(vec![0; 256 * 240]),
         }
     }
@@ -107,7 +107,7 @@ pub struct DebugUiState {
     sprite_ram: Vec<u8>,
     state: State,
     palette: Palette,
-    events: Vec<u16>,
+    events: Vec<(u8, u16)>,
     frame: Vec<u16>,
 }
 
@@ -121,7 +121,7 @@ impl DebugUiState {
             sprite_ram: vec![0; 256],
             state: State::default(),
             palette,
-            events: vec![0; 312 * 341],
+            events: vec![(0, 0); 312 * 341],
             frame: vec![0; 256 * 240],
         }
     }
@@ -162,7 +162,7 @@ impl DebugUiState {
         &self.state
     }
 
-    pub fn events(&self) -> &[u16] {
+    pub fn events(&self) -> &[(u8, u16)] {
         &self.events
     }
 
