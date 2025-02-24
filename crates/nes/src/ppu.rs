@@ -381,7 +381,7 @@ impl Ppu {
             0x2004 => {
                 //OAMDATA
                 if !self.in_vblank() && self.is_rendering() {
-                    //self.oam_addr += 4;
+                    self.oam_addr = self.oam_addr.wrapping_add(4);
                 } else {
                     // OAM byte 2 bits 2-4 dont exist in hardware are read back as 0
                     if self.oam_addr & 3 == 2 {
@@ -797,69 +797,61 @@ impl Ppu {
         if !self.block_oam_writes {
             self.line_oam_data[self.line_oam_index] = self.next_sprite_byte;
         }
-        if self.found_sprites == 8 {
-            if self.sprite_reads != 0 {
+
+        if dot == 66 {
+            self.sprite_zero_on_next_line = false;
+        }
+
+        // Reading remaining 3 bytes of sprite
+        if self.sprite_reads != 0 {
+            // Sprite X on line check, normally doesn't matter unless OAMADDR is misaligned
+            if self.sprite_reads == 1 && !self.sprite_on_line(self.next_sprite_byte, scanline) {
+                sprite_n += 1;
+                sprite_m = 0;
+            } else {
                 sprite_m += 1;
                 sprite_m &= 3;
                 if sprite_m == 0 {
                     sprite_n += 1;
-                    if sprite_n == 64 {
-                        self.sprite_read_loop = true;
-                        sprite_n = 0;
-                        sprite_m = 0;
-                    }
                 }
-                self.sprite_reads -= 1;
-            } else if self.sprite_on_line(self.next_sprite_byte, scanline) {
-                if !self.sprite_overflow {
-                    self.debug.event(DebugEvent::SpriteOverflow);
-                }
-                self.sprite_overflow = true;
-                sprite_m += 1;
-                sprite_m &= 3;
-                self.sprite_reads = 3;
-            } else {
-                sprite_n += 1;
-                sprite_m += 1;
-                sprite_m &= 3;
-                if sprite_n == 64 {
-                    self.sprite_read_loop = true;
-                    sprite_n = 0;
-                }
-            }
-        } else {
-            //Less then 8 sprites found
-            if dot == 66 {
-                self.sprite_zero_on_next_line = false;
             }
 
-            if self.sprite_reads != 0 {
-                sprite_m += 1;
-                sprite_m &= 3;
-                self.line_oam_index += 1;
-                self.sprite_reads -= 1;
-                if self.sprite_reads == 0 {
-                    self.found_sprites += 1;
-                }
-            } else if self.sprite_on_line(self.next_sprite_byte, scanline) {
-                if dot == 66 {
-                    self.sprite_zero_on_next_line = true;
-                }
-                sprite_m += 1;
-                sprite_m &= 3;
-                self.sprite_reads = 3;
-                self.line_oam_index += 1;
-            }
+            self.line_oam_index += 1;
+            self.sprite_reads -= 1;
             if self.sprite_reads == 0 {
-                sprite_n += 1;
-                sprite_m = 0;
-                if sprite_n == 64 {
-                    self.sprite_read_loop = true;
-                    sprite_n = 0;
-                } else if self.found_sprites == 8 {
+                self.found_sprites += 1;
+                if self.found_sprites == 8 {
                     self.block_oam_writes = true;
                 }
             }
+        } else if self.sprite_on_line(self.next_sprite_byte, scanline) {
+            // Next sprite Y is on line, set up read of remaining bytes
+            if dot == 66 {
+                self.sprite_zero_on_next_line = true;
+            }
+            if self.found_sprites == 8 {
+                self.debug.event(DebugEvent::SpriteOverflow);
+                self.sprite_overflow = true;
+            }
+            sprite_m += 1;
+            sprite_m &= 3;
+            self.sprite_reads = 3;
+            self.line_oam_index += 1;
+        } else {
+            // Sprite not on line, move to next sprite
+            sprite_n += 1;
+            if self.found_sprites >= 8 {
+                sprite_m += 1;
+                sprite_m &= 3;
+            } else {
+                sprite_m = 0;
+            }
+        }
+
+        if sprite_n == 64 {
+            self.sprite_read_loop = true;
+            sprite_n = 0;
+            sprite_m = 0;
         }
 
         self.oam_addr = (sprite_n << 2) | (sprite_m & 0x3);
