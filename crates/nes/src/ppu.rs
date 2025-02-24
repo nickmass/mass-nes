@@ -813,6 +813,16 @@ impl Ppu {
                 self.m = 0;
             }
 
+            // Everything I've read says that this should just be `self.advance_sprite()`,
+            // but running sprite_evaluation_test.nes on hardware matches this behavior
+            fn advance_sprite_x(&mut self) {
+                if self.m == 3 {
+                    self.advance_sprite();
+                } else {
+                    self.m = 0;
+                }
+            }
+
             fn advance_overflow(&mut self) {
                 self.n = self.n.wrapping_add(1);
                 self.m = self.m.wrapping_add(1);
@@ -842,7 +852,7 @@ impl Ppu {
         if self.sprite_reads != 0 {
             // Sprite X on line check, normally doesn't matter unless OAMADDR is misaligned
             if self.sprite_reads == 1 && !self.sprite_on_line(self.next_sprite_byte, scanline) {
-                cursor.advance_sprite();
+                cursor.advance_sprite_x();
             } else {
                 cursor.advance_byte();
             }
@@ -860,10 +870,8 @@ impl Ppu {
             if dot == 66 {
                 self.sprite_zero_on_next_line = true;
             }
-            if self.found_sprites == 8 {
-                if !self.sprite_overflow {
-                    self.debug.event(DebugEvent::SpriteOverflow);
-                }
+            if self.found_sprites == 8 && !self.sprite_overflow {
+                self.debug.event(DebugEvent::SpriteOverflow);
                 self.sprite_overflow = true;
             }
             cursor.advance_byte();

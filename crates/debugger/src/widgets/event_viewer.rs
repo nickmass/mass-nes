@@ -47,13 +47,20 @@ impl Interests {
     }
 
     fn push(&mut self, event: DebugEvent) {
-        let n = self.interests.len();
-        if n == 16 {
+        if self.interests.len() == 16 {
             return;
         }
-        let h = ((n * 7) as f32 / 16.0).fract();
-        let [r, g, b] = Hsva::new(h, 1.0, 1.0, 1.0).to_srgb();
-        let color = Color32::from_rgb(r, g, b);
+
+        let mut color = Color32::WHITE;
+        for n in 0..16 {
+            let h = ((n * 7) as f32 / 16.0).fract();
+            let [r, g, b] = Hsva::new(h, 1.0, 1.0, 1.0).to_srgb();
+            color = Color32::from_rgb(r, g, b);
+
+            if self.interests.iter().all(|i| i.color != color) {
+                break;
+            }
+        }
 
         let interest = Interest {
             event,
