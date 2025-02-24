@@ -404,8 +404,8 @@ impl Mmc5 {
                     self.ppu_state.leave_frame();
                 }
             }
-            addr if addr >= 0x5000 && addr <= 0x5003 => self.pulse_1.write(addr & 3, value),
-            addr if addr >= 0x5004 && addr <= 0x5007 => self.pulse_2.write(addr & 3, value),
+            0x5000..=0x5003 => self.pulse_1.write(addr & 3, value),
+            0x5004..=0x5007 => self.pulse_2.write(addr & 3, value),
             0x5010 => {
                 self.pcm.write_mode = value & 0x01 == 0;
                 self.pcm.irq_enabled = value & 0x80 != 0;

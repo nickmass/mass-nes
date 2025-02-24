@@ -111,8 +111,6 @@ pub struct Ppu {
     high_attr_shift: u16,
 
     next_sprite_byte: u8,
-    sprite_n: u32,
-    sprite_m: u32,
     sprite_read_loop: bool,
     block_oam_writes: bool,
     found_sprites: u32,
@@ -184,8 +182,6 @@ impl Ppu {
             high_attr_shift: 0,
 
             next_sprite_byte: 0,
-            sprite_n: 0,
-            sprite_m: 0,
             sprite_read_loop: false,
             block_oam_writes: false,
             found_sprites: 0,
@@ -385,10 +381,7 @@ impl Ppu {
             0x2004 => {
                 //OAMDATA
                 if !self.in_vblank() && self.is_rendering() {
-                    self.sprite_n += 1;
-                    if self.sprite_n == 64 {
-                        self.sprite_n = 0;
-                    }
+                    //self.oam_addr += 4;
                 } else {
                     // OAM byte 2 bits 2-4 dont exist in hardware are read back as 0
                     if self.oam_addr & 3 == 2 {
@@ -560,7 +553,7 @@ impl Ppu {
                     self.sprite_read();
                 }
                 Some(SpriteStep::Hblank) => {
-                    self.sprite_n = 0;
+                    self.oam_addr = 0;
                     self.sprite_eval(step.scanline, step.dot);
                     self.sprite_any_on_line = false;
                 }
@@ -781,11 +774,11 @@ impl Ppu {
     }
 
     fn sprite_read(&mut self) {
-        self.sprite_oam_read(self.sprite_m);
+        self.sprite_oam_read(self.oam_addr & 3);
     }
 
-    fn sprite_oam_read(&mut self, offset: u32) {
-        self.next_sprite_byte = self.oam_data[((self.sprite_n * 4) + offset) as usize];
+    fn sprite_oam_read(&mut self, offset: u8) {
+        self.next_sprite_byte = self.oam_data[((self.oam_addr & 0xfc) + offset) as usize];
 
         // OAM byte 2 bits 2-4 dont exist in hardware are read back as 0
         if offset == 2 {
@@ -798,19 +791,22 @@ impl Ppu {
             return;
         }
 
+        let mut sprite_n = self.oam_addr >> 2;
+        let mut sprite_m = self.oam_addr & 3;
+
         if !self.block_oam_writes {
             self.line_oam_data[self.line_oam_index] = self.next_sprite_byte;
         }
         if self.found_sprites == 8 {
             if self.sprite_reads != 0 {
-                self.sprite_m += 1;
-                self.sprite_m &= 3;
-                if self.sprite_m == 0 {
-                    self.sprite_n += 1;
-                    if self.sprite_n == 64 {
+                sprite_m += 1;
+                sprite_m &= 3;
+                if sprite_m == 0 {
+                    sprite_n += 1;
+                    if sprite_n == 64 {
                         self.sprite_read_loop = true;
-                        self.sprite_n = 0;
-                        self.sprite_m = 0;
+                        sprite_n = 0;
+                        sprite_m = 0;
                     }
                 }
                 self.sprite_reads -= 1;
@@ -819,16 +815,16 @@ impl Ppu {
                     self.debug.event(DebugEvent::SpriteOverflow);
                 }
                 self.sprite_overflow = true;
-                self.sprite_m += 1;
-                self.sprite_m &= 3;
+                sprite_m += 1;
+                sprite_m &= 3;
                 self.sprite_reads = 3;
             } else {
-                self.sprite_n += 1;
-                self.sprite_m += 1;
-                self.sprite_m &= 3;
-                if self.sprite_n == 64 {
+                sprite_n += 1;
+                sprite_m += 1;
+                sprite_m &= 3;
+                if sprite_n == 64 {
                     self.sprite_read_loop = true;
-                    self.sprite_n = 0;
+                    sprite_n = 0;
                 }
             }
         } else {
@@ -838,8 +834,8 @@ impl Ppu {
             }
 
             if self.sprite_reads != 0 {
-                self.sprite_m += 1;
-                self.sprite_m &= 3;
+                sprite_m += 1;
+                sprite_m &= 3;
                 self.line_oam_index += 1;
                 self.sprite_reads -= 1;
                 if self.sprite_reads == 0 {
@@ -849,21 +845,24 @@ impl Ppu {
                 if dot == 66 {
                     self.sprite_zero_on_next_line = true;
                 }
-                self.sprite_m += 1;
+                sprite_m += 1;
+                sprite_m &= 3;
                 self.sprite_reads = 3;
                 self.line_oam_index += 1;
             }
             if self.sprite_reads == 0 {
-                self.sprite_n += 1;
-                self.sprite_m = 0;
-                if self.sprite_n == 64 {
+                sprite_n += 1;
+                sprite_m = 0;
+                if sprite_n == 64 {
                     self.sprite_read_loop = true;
-                    self.sprite_n = 0;
+                    sprite_n = 0;
                 } else if self.found_sprites == 8 {
                     self.block_oam_writes = true;
                 }
             }
         }
+
+        self.oam_addr = (sprite_n << 2) | (sprite_m & 0x3);
     }
 
     fn init_line_oam(&mut self, addr: u32) {
@@ -873,8 +872,6 @@ impl Ppu {
 
     fn sprite_reset(&mut self) {
         self.sprite_render_index = 0;
-        self.sprite_n = 0;
-        self.sprite_m = 0;
         self.found_sprites = 0;
         self.sprite_reads = 0;
         self.line_oam_index = 0;
