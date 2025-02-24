@@ -214,7 +214,7 @@ impl Ppu {
         self.write(0x2006, 0);
 
         self.data_read_buffer = 0;
-        self.reset_delay = 29658 * 3;
+        self.reset_delay = 0;
     }
 
     pub fn reset(&mut self) {
