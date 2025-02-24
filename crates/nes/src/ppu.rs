@@ -791,8 +791,47 @@ impl Ppu {
             return;
         }
 
-        let mut sprite_n = self.oam_addr >> 2;
-        let mut sprite_m = self.oam_addr & 3;
+        struct Cursor {
+            n: u8,
+            m: u8,
+        }
+
+        impl Cursor {
+            fn new(oam_addr: u8) -> Self {
+                let n = oam_addr >> 2;
+                let m = oam_addr & 3;
+                Cursor { n, m }
+            }
+
+            fn advance_byte(&mut self) {
+                self.m = self.m.wrapping_add(1);
+                self.m &= 3;
+                if self.m == 0 {
+                    self.n = self.n.wrapping_add(1);
+                }
+            }
+
+            fn advance_sprite(&mut self) {
+                self.n = self.n.wrapping_add(1);
+                self.m = 0;
+            }
+
+            fn advance_overflow(&mut self) {
+                self.n = self.n.wrapping_add(1);
+                self.m = self.m.wrapping_add(1);
+                self.m &= 3;
+            }
+
+            fn is_at_end(&self) -> bool {
+                self.n >= 64
+            }
+
+            fn oam_addr(&self) -> u8 {
+                (self.n << 2) | (self.m & 3)
+            }
+        }
+
+        let mut cursor = Cursor::new(self.oam_addr);
 
         if !self.block_oam_writes {
             self.line_oam_data[self.line_oam_index] = self.next_sprite_byte;
@@ -806,14 +845,9 @@ impl Ppu {
         if self.sprite_reads != 0 {
             // Sprite X on line check, normally doesn't matter unless OAMADDR is misaligned
             if self.sprite_reads == 1 && !self.sprite_on_line(self.next_sprite_byte, scanline) {
-                sprite_n += 1;
-                sprite_m = 0;
+                cursor.advance_sprite();
             } else {
-                sprite_m += 1;
-                sprite_m &= 3;
-                if sprite_m == 0 {
-                    sprite_n += 1;
-                }
+                cursor.advance_byte();
             }
 
             self.line_oam_index += 1;
@@ -825,36 +859,34 @@ impl Ppu {
                 }
             }
         } else if self.sprite_on_line(self.next_sprite_byte, scanline) {
-            // Next sprite Y is on line, set up read of remaining bytes
+            // Sprite Y is on line, set up read of remaining bytes
             if dot == 66 {
                 self.sprite_zero_on_next_line = true;
             }
             if self.found_sprites == 8 {
-                self.debug.event(DebugEvent::SpriteOverflow);
+                if !self.sprite_overflow {
+                    self.debug.event(DebugEvent::SpriteOverflow);
+                }
                 self.sprite_overflow = true;
             }
-            sprite_m += 1;
-            sprite_m &= 3;
+            cursor.advance_byte();
             self.sprite_reads = 3;
             self.line_oam_index += 1;
         } else {
             // Sprite not on line, move to next sprite
-            sprite_n += 1;
             if self.found_sprites >= 8 {
-                sprite_m += 1;
-                sprite_m &= 3;
+                cursor.advance_overflow();
             } else {
-                sprite_m = 0;
+                cursor.advance_sprite();
             }
         }
 
-        if sprite_n == 64 {
+        if cursor.is_at_end() {
             self.sprite_read_loop = true;
-            sprite_n = 0;
-            sprite_m = 0;
+            self.oam_addr = 0
+        } else {
+            self.oam_addr = cursor.oam_addr();
         }
-
-        self.oam_addr = (sprite_n << 2) | (sprite_m & 0x3);
     }
 
     fn init_line_oam(&mut self, addr: u32) {
