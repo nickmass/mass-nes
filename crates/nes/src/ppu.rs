@@ -553,29 +553,26 @@ impl Ppu {
                     self.sprite_read();
                 }
                 Some(SpriteStep::Hblank) => {
-                    self.oam_addr = 0;
                     self.sprite_eval(step.scanline, step.dot);
+
+                    // Any on line is a performance optimization
                     self.sprite_any_on_line = false;
                 }
-                Some(SpriteStep::Fetch(0)) => self.sprite_oam_read(0),
-                Some(SpriteStep::Fetch(1)) => {
-                    self.sprite_oam_read(1);
-                    self.fetch_nametable();
-                }
-                Some(SpriteStep::Fetch(2)) => self.sprite_oam_read(2),
-                Some(SpriteStep::Fetch(3)) => {
-                    self.sprite_oam_read(3);
-                    self.fetch_attribute();
-                }
-                Some(SpriteStep::Fetch(4)) => self.sprite_oam_read(3),
-                Some(SpriteStep::Fetch(5)) => {
-                    self.sprite_oam_read(3);
-                    self.sprite_fetch(step.scanline, false);
-                }
-                Some(SpriteStep::Fetch(6)) => self.sprite_oam_read(3),
-                Some(SpriteStep::Fetch(7)) => {
-                    self.sprite_oam_read(3);
-                    self.sprite_fetch(step.scanline, true);
+                Some(SpriteStep::Fetch(n)) => {
+                    self.oam_addr = 0;
+                    match n {
+                        1 => self.fetch_nametable(),
+                        3 => self.fetch_attribute(),
+                        5 => self.sprite_fetch(step.scanline, false),
+                        7 => self.sprite_fetch(step.scanline, true),
+                        _ => (),
+                    }
+                    match n {
+                        0 => self.sprite_oam_read(0),
+                        1 => self.sprite_oam_read(1),
+                        2 => self.sprite_oam_read(2),
+                        _ => self.sprite_oam_read(3),
+                    }
                 }
                 Some(SpriteStep::BackgroundWait) => {
                     self.next_sprite_byte = self.line_oam_data[0];
