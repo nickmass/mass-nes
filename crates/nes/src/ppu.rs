@@ -73,14 +73,12 @@ pub struct Ppu {
 
     current_tick: u64,
     last_status_read: u64,
-    last_nmi_toggle: u64,
     pub frame: u32,
     regs: [u8; 8],
     vblank: bool,
     sprite_zero_hit: bool,
     sprite_overflow: bool,
-    last_write: u8,
-    last_write_decay: u64,
+    open_bus: OpenBus,
 
     write_latch: bool,
 
@@ -144,14 +142,12 @@ impl Ppu {
 
             current_tick: 0,
             last_status_read: 0,
-            last_nmi_toggle: 0,
             frame: 0,
             regs: [0; 8],
             vblank: false,
             sprite_zero_hit: false,
             sprite_overflow: false,
-            last_write: 0,
-            last_write_decay: 0,
+            open_bus: OpenBus::new(),
 
             write_latch: false,
 
@@ -256,78 +252,84 @@ impl Ppu {
     #[cfg(feature = "debugger")]
     pub fn peek(&self, address: u16) -> u8 {
         match address {
-            0x2000 => self.last_write,
-            0x2001 => self.last_write,
-            0x2002 => self.ppu_status(),
-            0x2003 => self.last_write,                       //OAMADDR
+            0x2000 => self.open_bus.value(0x00),
+            0x2001 => self.open_bus.value(0x00),
+            0x2002 => self.ppu_status() | self.open_bus.value(0xe0),
+            0x2003 => self.open_bus.value(0x00),
             0x2004 => self.oam_data[self.oam_addr as usize], //OAMDATA
-            0x2005 => self.last_write,
-            0x2006 => self.last_write,
+            0x2005 => self.open_bus.value(0x00),
+            0x2006 => self.open_bus.value(0x00),
             0x2007 => {
                 //PPUDATA
                 let addr = self.vram_addr;
-                if addr & 0x3f00 == 0x3f00 {
+                let (value, mask) = if addr & 0x3f00 == 0x3f00 {
                     let addr = if addr & 0x03 != 0 {
                         addr & 0x1f
                     } else {
                         addr & 0x0f
                     };
-                    if self.is_grayscale() {
+                    let value = if self.is_grayscale() {
                         self.palette_data[addr as usize] & 0x30
                     } else {
                         self.palette_data[addr as usize]
-                    }
+                    };
+                    (value, 0x3f)
                 } else {
-                    self.data_read_buffer
-                }
+                    (self.data_read_buffer, 0xff)
+                };
+
+                value | self.open_bus.value(mask)
             }
             _ => unreachable!(),
         }
     }
 
     pub fn read(&mut self, address: u16) -> u8 {
-        let value = match address {
-            0x2000 => self.last_write,
-            0x2001 => self.last_write,
+        match address {
+            0x2000 => self.open_bus.value(0x00),
+            0x2001 => self.open_bus.value(0x00),
             0x2002 => {
                 //PPUSTATUS
-                self.last_write_decay = self.current_tick;
                 let status = self.ppu_status();
                 self.write_latch = false;
                 self.vblank = false;
                 self.last_status_read = self.current_tick;
-                status
+                self.open_bus.update(status, 0xe0);
+                status | self.open_bus.value(0xe0)
             }
-            0x2003 => self.last_write, //OAMADDR
+            0x2003 => self.open_bus.value(0x00), //OAMADDR
             0x2004 => {
                 //OAMDATA
-                self.last_write_decay = self.current_tick;
-                if self.is_rendering() && !self.in_vblank() {
+                let value = if self.is_rendering() && !self.in_vblank() {
                     self.next_sprite_byte
                 } else {
                     self.oam_data[self.oam_addr as usize]
-                }
+                };
+                self.open_bus.update(value, 0xff);
+                value
             }
-            0x2005 => self.last_write,
-            0x2006 => self.last_write,
+            0x2005 => self.open_bus.value(0x00),
+            0x2006 => self.open_bus.value(0x00),
             0x2007 => {
                 //PPUDATA
-                self.last_write_decay = self.current_tick;
                 let addr = self.vram_addr;
-                let result = if addr & 0x3f00 == 0x3f00 {
+                let (result, mask) = if addr & 0x3f00 == 0x3f00 {
                     let addr = if addr & 0x03 != 0 {
                         addr & 0x1f
                     } else {
                         addr & 0x0f
                     };
-                    if self.is_grayscale() {
+                    let value = if self.is_grayscale() {
                         self.palette_data[addr as usize] & 0x30
                     } else {
                         self.palette_data[addr as usize]
-                    }
+                    };
+
+                    (value, 0x3f)
                 } else {
-                    self.data_read_buffer
+                    (self.data_read_buffer, 0xff)
                 };
+                self.open_bus.update(result, mask);
                 self.data_read_buffer = self.ppu_read(self.vram_addr);
                 if !self.in_vblank() && self.is_rendering() {
                     self.horz_increment();
@@ -336,31 +338,23 @@ impl Ppu {
                     self.vram_addr = self.vram_addr.wrapping_add(self.vram_inc()) & 0x7fff;
                 }
 
-                result
+                result | self.open_bus.value(mask)
             }
             _ => unreachable!(),
-        };
-        self.last_write = value;
-        value
+        }
     }
 
     pub fn write(&mut self, address: u16, value: u8) {
-        self.last_write = value;
-        self.last_write_decay = self.current_tick;
+        self.open_bus.update(value, 0xff);
         match address {
             0x2000 => {
                 //PPUCTRL
-                let was_nmi_enabled = self.is_nmi_enabled();
                 if self.reset_delay != 0 {
                     return;
                 }
                 self.regs[0] = value;
                 self.vram_addr_temp &= 0xf3ff;
                 self.vram_addr_temp |= self.base_nametable();
-
-                if was_nmi_enabled != self.is_nmi_enabled() {
-                    self.last_nmi_toggle = self.current_tick;
-                }
             }
             0x2001 => {
                 //PPUMASK
@@ -461,6 +455,7 @@ impl Ppu {
         }
 
         self.ppu_mask.tick();
+        self.open_bus.tick();
 
         let mut step = self.ppu_steps.step();
 
@@ -485,13 +480,6 @@ impl Ppu {
                 self.sprite_overflow = false;
                 self.vblank = false;
                 self.frame += 1;
-
-                // open bus should decay by 600 ms
-                // this is only a rough time estimate, and it should decay per bit
-                // instead of all 8 bits decaying at once
-                if self.current_tick - self.last_write_decay > 262 * 341 * 40 {
-                    self.last_write = 0;
-                }
             }
             None => (),
         }
@@ -1148,7 +1136,7 @@ impl Ppu {
     }
 
     fn ppu_status(&self) -> u8 {
-        let mut value = self.last_write & 0x1f;
+        let mut value = 0;
         if self.sprite_overflow {
             value |= 0x20;
         }
@@ -1221,5 +1209,48 @@ impl<
 
     fn update(&mut self, value: T) {
         self.values[DELAY - 1] = value;
+    }
+}
+
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone)]
+struct OpenBus {
+    value: u8,
+    decay: [u32; 8],
+}
+
+impl OpenBus {
+    fn new() -> Self {
+        Self {
+            value: 0,
+            decay: [0; 8],
+        }
+    }
+
+    fn tick(&mut self) {
+        const DECAY_TICKS: u32 = 262 * 341 * 40;
+        for idx in 0..8 {
+            if self.decay[idx] >= DECAY_TICKS {
+                let bit = 1 << idx;
+                self.value &= !bit;
+            } else {
+                self.decay[idx] += 1;
+            }
+        }
+    }
+
+    fn update(&mut self, value: u8, mask: u8) {
+        for idx in 0..8 {
+            let bit = 1 << idx;
+            if mask & bit != 0 {
+                self.decay[idx] = 0;
+                self.value &= !bit;
+                self.value |= value & bit;
+            }
+        }
+    }
+
+    fn value(&self, mask: u8) -> u8 {
+        self.value & !mask
     }
 }

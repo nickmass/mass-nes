@@ -11,7 +11,6 @@ fn run(rom_path: &'static str) {
 }
 
 #[test]
-#[should_panic]
 fn ppu_open_bus() {
     run("ppu_open_bus.nes");
 }
