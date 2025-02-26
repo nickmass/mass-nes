@@ -191,6 +191,6 @@ impl WorkletProcessor {
 
     #[wasm_bindgen]
     pub unsafe fn unpack(ptr: usize) -> WorkletProcessor {
-        *Box::from_raw(ptr as *mut _)
+        unsafe { *Box::from_raw(ptr as *mut _) }
     }
 }

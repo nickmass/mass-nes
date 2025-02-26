@@ -239,7 +239,7 @@ struct Audio {
     fm_unit: FmUnit,
     channels: [Channel; 6],
     tick: u64,
-    output: [i16; 6],
+    output: [i32; 6],
 }
 
 impl Audio {
@@ -325,10 +325,8 @@ impl Audio {
 
         if cycle % 6 == 0 {
             let channel = (cycle / 6) as usize;
-            let output = self.channels[channel].tick(self.am_unit.output, self.fm_unit.output);
-            self.output[channel] = (output / 2i32.pow(5))
-                .min(i16::MAX as i32)
-                .max(i16::MIN as i32) as i16;
+            self.output[channel] =
+                self.channels[channel].tick(self.am_unit.output, self.fm_unit.output);
         }
     }
 
@@ -341,7 +339,9 @@ impl Audio {
         for out in &self.output {
             output += *out as f32;
         }
-        (output / 6.0) as i16
+
+        let out = (output / 6.0) as i32 >> 5;
+        out.min(i16::MAX as i32).max(i16::MIN as i32) as i16
     }
 }
 
@@ -500,6 +500,9 @@ impl Channel {
                 self.regs[1] = value;
                 if was_key_on != self.key_on() {
                     if self.key_on() {
+                        let inst = &patches[self.instrument() as usize * 8..];
+                        self.carrier.inst = Instrument::new(inst, SlotKind::Carrier);
+                        self.modulator.inst = Instrument::new(inst, SlotKind::Modulator);
                         self.carrier.key_on();
                         self.modulator.key_on();
                     } else {
@@ -508,12 +511,7 @@ impl Channel {
                     }
                 }
             }
-            2 => {
-                self.regs[2] = value;
-                let inst = &patches[self.instrument() as usize * 8..];
-                self.carrier.inst = Instrument::new(inst, SlotKind::Carrier);
-                self.modulator.inst = Instrument::new(inst, SlotKind::Modulator);
-            }
+            2 => self.regs[2] = value,
             _ => {}
         }
     }
@@ -582,10 +580,13 @@ struct Slot {
 use std::f32::consts::PI;
 
 use std::sync::LazyLock;
-static HALF_SIN_TABLE: LazyLock<[f32; 0x2000]> = LazyLock::new(|| {
-    let mut table = [0.0; 0x2000];
-    for i in 0..0x2000 {
-        let scale = i as f32 / 0x2000 as f32;
+const SIN_LUT_BIT_WIDTH: usize = 12;
+const SIN_LUT_LEN: usize = 1 << SIN_LUT_BIT_WIDTH;
+
+static HALF_SIN_TABLE: LazyLock<[f32; SIN_LUT_LEN]> = LazyLock::new(|| {
+    let mut table = [0.0; SIN_LUT_LEN];
+    for i in 0..SIN_LUT_LEN {
+        let scale = i as f32 / SIN_LUT_LEN as f32;
         table[i] = to_db((PI * scale).sin());
     }
     table
@@ -638,14 +639,14 @@ impl Slot {
         let adj = match self.kind {
             SlotKind::Modulator => match self.inst.feedback_level() {
                 0 => 0,
-                f => mod_out / 2i32.pow(8 - f as u32),
+                f => mod_out >> (9 - f),
             },
             SlotKind::Carrier => mod_out,
         };
 
         let phase_secondary = (self.phase as i32).wrapping_add(adj);
         let rectify = phase_secondary & 0x20000 != 0;
-        let sin_index = (phase_secondary & 0x1ffff) >> 4;
+        let sin_index = (phase_secondary & 0x1ffff) >> (17 - SIN_LUT_BIT_WIDTH);
 
         let base = match self.kind {
             SlotKind::Modulator => 0.75 * self.inst.base_attenuation() as f32,
@@ -710,16 +711,23 @@ impl Slot {
         };
 
         let r = r as u32;
-
         let rks = r * 4 + kb;
         let rh = rks >> 2;
         let rh = rh.min(15);
         let rl = rks & 3;
 
+        let adj = match self.envelope_phase {
+            _ if r == 0 => 0,
+            EnvelopePhase::Attack => (12 * (rl + 4)) << rh,
+            EnvelopePhase::Idle => 0,
+            _ => (rl + 4) << (rh - 1),
+        };
+
+        self.egc += adj;
+
         match self.envelope_phase {
             EnvelopePhase::Attack => {
-                self.egc += (12 * (rl + 4)) << rh;
-                if self.egc > MAX_DB {
+                if self.egc >= MAX_DB {
                     self.egc = 0;
                     self.envelope_phase = EnvelopePhase::Decay;
                     return 0.0;
@@ -728,7 +736,6 @@ impl Slot {
                 return 1.0 - ((self.egc as f32).ln() / (MAX_DB as f32).ln());
             }
             EnvelopePhase::Decay => {
-                self.egc += (rl + 4) << (rh - 1);
                 let sustain = 3.0 * self.inst.sustain_level() as f32 * MAX_DB as f32 / 48.0;
                 let sustain = sustain as u32;
                 if self.egc >= sustain {
@@ -737,14 +744,12 @@ impl Slot {
                 }
             }
             EnvelopePhase::Sustain => {
-                self.egc += (rl + 4) << (rh - 1);
                 if self.egc >= MAX_DB {
                     self.egc = MAX_DB;
                     self.envelope_phase = EnvelopePhase::Idle;
                 }
             }
             EnvelopePhase::Release => {
-                self.egc += (rl + 4) << (rh - 1);
                 if self.egc >= MAX_DB {
                     self.egc = MAX_DB;
                     self.envelope_phase = EnvelopePhase::Idle;
@@ -763,6 +768,10 @@ impl Slot {
     }
 
     fn key_off(&mut self) {
+        if matches!(self.envelope_phase, EnvelopePhase::Attack) {
+            let output = 1.0 - ((self.egc as f32).ln() / (MAX_DB as f32).ln());
+            self.egc = (output * MAX_DB as f32) as u32;
+        }
         self.envelope_phase = EnvelopePhase::Release;
     }
 }
