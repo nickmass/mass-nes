@@ -99,6 +99,12 @@ mod web {
                     self.roms.push(rom);
                 }
 
+                ui.heading("Source Code");
+                if ui.link("https://github.com/nickmass/mass-nes/").clicked() {
+                    eframe::web::open_url("https://github.com/nickmass/mass-nes/", true);
+                }
+
+                ui.separator();
                 ui.heading("Controls");
                 egui::Grid::new("help_controls").show(ui, |ui| {
                     const CONTROLS: &[(&str, &str)] = &[

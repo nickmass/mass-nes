@@ -1,7 +1,4 @@
-use eframe::{
-    CreationContext,
-    egui::{Event, Widget},
-};
+use eframe::{CreationContext, egui::Event};
 use nes::{SaveWram, UserInput};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
@@ -582,15 +579,6 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
                     Some(VolumeChanged::Mute) => self.set_volume(0.0),
                     Some(VolumeChanged::Volume(v)) => self.set_volume(v),
                     _ => (),
-                }
-
-                ui.separator();
-                ui.label("Debug Update Freq.");
-                if egui::Slider::new(&mut self.state.debug_interval, 0..=120)
-                    .ui(ui)
-                    .changed()
-                {
-                    self.update_debug_req();
                 }
             });
         });
