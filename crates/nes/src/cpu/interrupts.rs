@@ -232,8 +232,12 @@ impl Interrupts {
             Power::UpdateRegPc(low_addr) => {
                 let high_addr = (pin_in.data as u16) << 8;
                 regs.reg_pc = low_addr | high_addr;
-                regs.set_reg_p(0x34);
+                regs.set_reg_p(0x00);
+                regs.flag_i = true;
                 regs.reg_sp = 0xfd;
+                regs.reg_a = 0x00;
+                regs.reg_x = 0x00;
+                regs.reg_y = 0x00;
                 if let Some(addr) = self.power_up_pc {
                     regs.reg_pc = addr;
                 }
