@@ -5,7 +5,7 @@ use nes::{
     Cartridge, DebugEvent, FdsInput, Machine, MapperInput, Region, RunResult, SaveWram, UserInput,
 };
 use tracing::instrument;
-use ui::{audio::SamplesSender, wram::CartridgeId};
+use ui::{audio::SamplesSender, fm2::Fm2Input, wram::CartridgeId};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum Playback {
@@ -80,6 +80,7 @@ pub enum EmulatorInput {
     FastForward,
     SetFdsDisk(Option<usize>),
     SaveWram,
+    PlayFm2(Fm2Input),
 }
 
 #[derive(Debug)]
@@ -109,6 +110,7 @@ pub struct Runner {
     cart_id: Option<CartridgeId>,
     back_buffer: GfxBackBuffer,
     commands: EmulatorCommands,
+    fm2_input: Option<Fm2Input>,
     samples_tx: SamplesSender,
     sample_rate: u32,
     blip: Blip,
@@ -167,6 +169,7 @@ impl Runner {
                 interest_breakpoints: 0,
                 frame: false,
             },
+            fm2_input: None,
         }
     }
 
@@ -178,7 +181,9 @@ impl Runner {
                 match input {
                     EmulatorInput::Nes(input) => {
                         if let Some(machine) = &mut self.machine {
-                            machine.handle_input(input)
+                            if self.fm2_input.is_none() {
+                                machine.handle_input(input)
+                            }
                         }
                     }
                     EmulatorInput::SaveState(slot) => {
@@ -228,6 +233,7 @@ impl Runner {
                                 self.save_store.clear();
                                 self.frame = 0;
                                 self.cart_id = Some(cart_id);
+                                self.fm2_input = None;
                                 let machine = Machine::new(region, cart);
                                 machine.set_debug_interest(
                                     self.debug_request.interests.iter().copied(),
@@ -268,6 +274,9 @@ impl Runner {
                         {
                             self.commands.send_wram(cart_id, wram);
                         }
+                    }
+                    EmulatorInput::PlayFm2(fm2) => {
+                        self.fm2_input = Some(fm2);
                     }
                 }
             }
@@ -314,6 +323,15 @@ impl Runner {
                 }
             }) {
                 RunResult::Frame => {
+                    while let Some(input) = self.fm2_input.as_mut().map(|fm2| fm2.next()) {
+                        match input {
+                            None => self.fm2_input = None,
+                            Some(ui::fm2::Fm2UserInput::Frame) => break,
+                            Some(ui::fm2::Fm2UserInput::Input(input)) => {
+                                machine.handle_input(input)
+                            }
+                        }
+                    }
                     self.frame += 1;
                     self.total_frames += 1;
 

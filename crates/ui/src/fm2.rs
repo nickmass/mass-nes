@@ -3,8 +3,14 @@ use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Result as IoResult};
 
 #[derive(Debug, Clone)]
+pub enum Fm2UserInput {
+    Input(UserInput),
+    Frame,
+}
+
+#[derive(Debug, Clone)]
 pub struct Fm2Input {
-    inputs: VecDeque<nes::UserInput>,
+    inputs: VecDeque<Fm2UserInput>,
 }
 
 impl Fm2Input {
@@ -12,7 +18,7 @@ impl Fm2Input {
         let buf_reader = BufReader::new(reader);
         let mut inputs = VecDeque::new();
 
-        inputs.push_back(UserInput::Power);
+        inputs.push_back(Fm2UserInput::Input(UserInput::Power));
 
         for line in buf_reader.split(b'\n') {
             let line = line?;
@@ -32,7 +38,7 @@ impl Fm2Input {
             let Some(port0) = splits.next() else {
                 continue;
             };
-            let Some(_port1) = splits.next() else {
+            let Some(port1) = splits.next() else {
                 continue;
             };
             let Some(_exp) = splits.next() else {
@@ -40,10 +46,10 @@ impl Fm2Input {
             };
 
             if command & 1 != 0 {
-                inputs.push_back(UserInput::Reset);
+                inputs.push_back(Fm2UserInput::Input(UserInput::Reset));
             }
             if command & 2 != 0 {
-                inputs.push_back(UserInput::Power);
+                inputs.push_back(Fm2UserInput::Input(UserInput::Power));
             }
 
             let is_pressed = |c| c != b'.' && c != b' ';
@@ -60,8 +66,24 @@ impl Fm2Input {
                     b: is_pressed(port[6]),
                     a: is_pressed(port[7]),
                 };
-                inputs.push_back(UserInput::PlayerOne(controller));
+                inputs.push_back(Fm2UserInput::Input(UserInput::PlayerOne(controller)));
             }
+            if port1.len() == 8 {
+                let port = port1;
+                let controller = Controller {
+                    right: is_pressed(port[0]),
+                    left: is_pressed(port[1]),
+                    down: is_pressed(port[2]),
+                    up: is_pressed(port[3]),
+                    start: is_pressed(port[4]),
+                    select: is_pressed(port[5]),
+                    b: is_pressed(port[6]),
+                    a: is_pressed(port[7]),
+                };
+                inputs.push_back(Fm2UserInput::Input(UserInput::PlayerTwo(controller)));
+            }
+
+            inputs.push_back(Fm2UserInput::Frame);
         }
 
         Ok(Fm2Input { inputs })
@@ -69,7 +91,7 @@ impl Fm2Input {
 }
 
 impl Iterator for Fm2Input {
-    type Item = UserInput;
+    type Item = Fm2UserInput;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inputs.pop_front()

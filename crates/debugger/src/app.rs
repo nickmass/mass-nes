@@ -260,6 +260,11 @@ impl<A: Audio> DebuggerApp<A> {
         pick_bios(proxy);
     }
 
+    fn select_fm2(&self) {
+        let proxy = self.app_events.create_proxy();
+        pick_fm2(proxy);
+    }
+
     fn set_volume(&mut self, value: f32) {
         self.audio.volume(value);
     }
@@ -390,6 +395,13 @@ impl<A: Audio> DebuggerApp<A> {
                     store.save_wram(cart, wram);
                 }
             }
+            AppEvent::Fm2Loaded(bytes) => {
+                let file = std::io::Cursor::new(bytes);
+                match ui::fm2::Fm2Input::read(file) {
+                    Ok(fm2) => self.emu_control.play_fm2(fm2),
+                    Err(e) => tracing::error!("Unable to parse fm2 file: {:?}", e),
+                }
+            }
         }
     }
 
@@ -468,6 +480,11 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
 
                     if ui.button("Load Bios").clicked() {
                         self.select_bios();
+                        ui.close_menu();
+                    }
+
+                    if ui.button("Load FM2").clicked() {
+                        self.select_fm2();
                         ui.close_menu();
                     }
 
@@ -713,6 +730,7 @@ pub enum AppEvent {
     BiosLoaded(Vec<u8>),
     CartridgeInfo(CartridgeKind),
     SaveWram(CartridgeId, SaveWram),
+    Fm2Loaded(Vec<u8>),
 }
 
 impl From<GamepadEvent> for AppEvent {
@@ -850,6 +868,10 @@ impl EmulatorControl {
 
     fn save_wram(&self) {
         let _ = self.tx.send(EmulatorInput::SaveWram);
+    }
+
+    fn play_fm2(&self, fm2: ui::fm2::Fm2Input) {
+        let _ = self.tx.send(EmulatorInput::PlayFm2(fm2));
     }
 }
 
@@ -1052,6 +1074,37 @@ fn pick_bios(proxy: AppEventsProxy) {
 
         let bytes = rom_file.read().await;
         proxy.send(AppEvent::BiosLoaded(bytes));
+    };
+
+    wasm_bindgen_futures::spawn_local(pick);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn pick_fm2(proxy: AppEventsProxy) {
+    std::thread::spawn(move || {
+        let rom_file = rfd::FileDialog::new()
+            .add_filter("All Supported Files", &["fm2", "FM2"])
+            .pick_file();
+
+        if let Some(bytes) = rom_file.and_then(|p| std::fs::read(&p).ok()) {
+            proxy.send(AppEvent::Fm2Loaded(bytes));
+        }
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn pick_fm2(proxy: AppEventsProxy) {
+    let picker = rfd::AsyncFileDialog::new().add_filter("All Supported Files", &["fm2", "FM2"]);
+
+    let pick = async move {
+        let rom_file = picker.pick_file().await;
+
+        let Some(rom_file) = rom_file else {
+            return;
+        };
+
+        let bytes = rom_file.read().await;
+        proxy.send(AppEvent::Fm2Loaded(bytes));
     };
 
     wasm_bindgen_futures::spawn_local(pick);

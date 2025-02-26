@@ -52,10 +52,10 @@ impl InputDevice for Controller {
         if self.up {
             value |= 0x10;
         }
-        if self.down && !self.up {
+        if self.down {
             value |= 0x20;
         }
-        if self.left && !self.right {
+        if self.left {
             value |= 0x40;
         }
         if self.right {
