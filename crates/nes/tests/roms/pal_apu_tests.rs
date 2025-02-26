@@ -26,43 +26,36 @@ fn irq_flag() {
 }
 
 #[test]
-#[should_panic]
 fn clock_jitter() {
     run("04.clock_jitter.nes");
 }
 
 #[test]
-#[should_panic]
 fn len_timing_mode0() {
     run("05.len_timing_mode0.nes");
 }
 
 #[test]
-#[should_panic]
 fn len_timing_mode1() {
     run("06.len_timing_mode1.nes");
 }
 
 #[test]
-#[should_panic]
 fn irq_flag_timing() {
     run("07.irq_flag_timing.nes");
 }
 
 #[test]
-#[should_panic]
 fn irq_timing() {
     run("08.irq_timing.nes");
 }
 
 #[test]
-#[should_panic]
 fn len_halt_timing() {
     run("10.len_halt_timing.nes");
 }
 
 #[test]
-#[should_panic]
 fn len_reload_timing() {
     run("11.len_reload_timing.nes");
 }

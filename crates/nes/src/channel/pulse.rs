@@ -35,6 +35,9 @@ pub struct Pulse {
     sweep_reload: bool,
     sweep_divider: u8,
     regs: [u8; 4],
+    pending_length_load: Option<u8>,
+    halt_delay: bool,
+    halt: bool,
     current_tick: u64,
     forced_clock: bool,
 }
@@ -80,7 +83,7 @@ impl Pulse {
     }
 
     fn halt(&self) -> bool {
-        self.regs[0] & 0x20 != 0
+        self.halt
     }
 
     fn shift_count(&self) -> u8 {
@@ -169,17 +172,13 @@ impl Channel for Pulse {
     fn write(&mut self, addr: u16, value: u8) {
         self.regs[addr as usize] = value;
         match addr {
-            0 => {}
-            1 => {
-                self.sweep_reload = true;
-            }
-            2 => {
-                self.period = self.timer_load();
-            }
+            0 => self.halt_delay = value & 0x20 != 0,
+            1 => self.sweep_reload = true,
+            2 => self.period = self.timer_load(),
             3 => {
                 self.period = self.timer_load();
                 self.sequencer = 0;
-                self.length_counter = self.length_load();
+                self.pending_length_load = Some(self.length_load());
                 self.envelope_start = true;
             }
             _ => unreachable!(),
@@ -217,9 +216,16 @@ impl Channel for Pulse {
             }
         }
 
+        let new_len = self
+            .pending_length_load
+            .take()
+            .unwrap_or(self.length_counter);
+
         if state.is_half_frame || self.forced_clock {
             if self.length_counter != 0 && !self.halt() {
                 self.length_counter -= 1;
+            } else {
+                self.length_counter = new_len;
             }
 
             if self.sweep_reload {
@@ -234,9 +240,13 @@ impl Channel for Pulse {
                 self.period = self.sweep_timer();
                 self.sweep_divider = self.sweep_load();
             }
+        } else {
+            self.length_counter = new_len;
         }
 
+        self.halt = self.halt_delay;
         self.forced_clock = false;
+
         if !self.duty() || self.length_counter == 0 || self.timer_counter < 8 {
             0
         } else {

@@ -15,6 +15,9 @@ pub struct Triangle {
     sequencer: u32,
     enabled: bool,
     regs: [u8; 4],
+    pending_length_load: Option<u8>,
+    halt_delay: bool,
+    halt: bool,
     current_tick: u64,
     forced_clock: bool,
 }
@@ -47,7 +50,7 @@ impl Triangle {
     }
 
     fn halt(&self) -> bool {
-        self.regs[0] & 0x80 != 0
+        self.halt
     }
 
     fn sequence(&self) -> u8 {
@@ -68,11 +71,11 @@ impl Channel for Triangle {
     fn write(&mut self, addr: u16, value: u8) {
         self.regs[addr as usize] = value;
         match addr {
-            0 => {}
-            1 => {}
-            2 => {}
+            0 => self.halt_delay = value & 0x80 != 0,
+            1 => (),
+            2 => (),
             3 => {
-                self.length_counter = self.length_load();
+                self.pending_length_load = Some(self.length_load());
                 self.linear_reload = true;
             }
             _ => unreachable!(),
@@ -102,10 +105,18 @@ impl Channel for Triangle {
             }
         }
 
+        let new_len = self
+            .pending_length_load
+            .take()
+            .unwrap_or(self.length_counter);
+
         if (state.is_half_frame || self.forced_clock) && self.length_counter != 0 && !self.halt() {
             self.length_counter -= 1;
+        } else {
+            self.length_counter = new_len;
         }
 
+        self.halt = self.halt_delay;
         self.forced_clock = false;
 
         self.sequence()

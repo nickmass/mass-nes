@@ -36,7 +36,6 @@ fn mmc3() {
 }
 
 #[test]
-#[should_panic]
 fn mmc3_alt() {
-    run("6-MMC3_alt.nes");
+    run("6-MMC3_alt (Submapper 4).nes");
 }

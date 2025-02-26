@@ -75,7 +75,6 @@ fn irq_timing() {
 }
 
 #[test]
-#[should_panic]
 fn reset_timing() {
     helper::run(
         format!("{}09.reset_timing.nes", DIR),
@@ -85,7 +84,6 @@ fn reset_timing() {
 }
 
 #[test]
-#[should_panic]
 fn len_halt_timing() {
     helper::run(
         format!("{}10.len_halt_timing.nes", DIR),
@@ -95,7 +93,6 @@ fn len_halt_timing() {
 }
 
 #[test]
-#[should_panic]
 fn len_reload_timing() {
     helper::run(
         format!("{}11.len_reload_timing.nes", DIR),

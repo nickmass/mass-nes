@@ -11,7 +11,6 @@ fn run(rom_path: &'static str) {
 }
 
 #[test]
-#[should_panic]
 fn sprdma_and_dmc_dma() {
     run("sprdma_and_dmc_dma.nes");
 }

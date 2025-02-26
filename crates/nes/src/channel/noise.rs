@@ -21,6 +21,9 @@ pub struct Noise {
     envelope_divider: u8,
     decay_counter: u8,
     regs: [u8; 4],
+    pending_length_load: Option<u8>,
+    halt_delay: bool,
+    halt: bool,
     current_tick: u64,
     forced_clock: bool,
 }
@@ -60,8 +63,9 @@ impl Noise {
     fn constant_volume(&self) -> bool {
         self.regs[0] & 0x10 != 0
     }
+
     fn halt(&self) -> bool {
-        self.regs[0] & 0x20 != 0
+        self.halt
     }
 
     fn noise_mode(&self) -> bool {
@@ -92,11 +96,11 @@ impl Channel for Noise {
     fn write(&mut self, addr: u16, value: u8) {
         self.regs[addr as usize] = value;
         match addr {
-            0 => {}
-            1 => {}
-            2 => {}
+            0 => self.halt_delay = value & 0x20 != 0,
+            1 => (),
+            2 => (),
             3 => {
-                self.length_counter = self.length_load();
+                self.pending_length_load = Some(self.length_load());
                 self.envelope_start = true;
             }
             _ => unreachable!(),
@@ -134,10 +138,18 @@ impl Channel for Noise {
             }
         }
 
+        let new_len = self
+            .pending_length_load
+            .take()
+            .unwrap_or(self.length_counter);
+
         if (state.is_half_frame || self.forced_clock) && self.length_counter != 0 && !self.halt() {
             self.length_counter -= 1;
+        } else {
+            self.length_counter = new_len;
         }
 
+        self.halt = self.halt_delay;
         self.forced_clock = false;
 
         if (self.shifter & 1) == 1 || self.length_counter == 0 {

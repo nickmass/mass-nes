@@ -9,7 +9,6 @@ use crate::cpu::dma::DmcDmaKind;
 use crate::mapper::RcMapper;
 use crate::region::Region;
 
-//TODO - Is this table the same for both PAL and NTSC?
 pub const LENGTH_TABLE: [u8; 0x20] = [
     10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14, 12, 16, 24, 18, 48, 20, 96, 22,
     192, 24, 72, 26, 16, 28, 32, 30,
@@ -105,11 +104,19 @@ impl Apu {
         }
         self.write(0x4015, 0);
         self.write(0x4017, 0);
+
+        for _ in 0..4 {
+            self.tick();
+        }
     }
 
     pub fn reset(&mut self) {
         self.write(0x4015, 0);
         self.write(0x4017, 0);
+
+        for _ in 0..4 {
+            self.tick();
+        }
     }
 
     #[cfg(feature = "debugger")]
