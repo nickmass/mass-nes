@@ -41,6 +41,7 @@ pub enum RunResult {
 #[derive(Debug, Copy, Clone)]
 pub enum UserInput {
     PlayerOne(Controller),
+    PlayerTwo(Controller),
     Mapper(MapperInput),
     Power,
     Reset,
@@ -325,7 +326,8 @@ impl Machine {
 
     pub fn handle_input(&mut self, input: UserInput) {
         match input {
-            UserInput::PlayerOne(c) => self.input.set_input(c.to_byte()),
+            UserInput::PlayerOne(c) => self.input.set_port_one(c.to_byte()),
+            UserInput::PlayerTwo(c) => self.input.set_port_two(c.to_byte()),
             UserInput::Power => self.power(),
             UserInput::Reset => self.reset(),
             UserInput::Mapper(mapper_input) => self.mapper.input(mapper_input),

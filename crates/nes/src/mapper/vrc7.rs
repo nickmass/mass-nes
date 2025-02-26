@@ -15,12 +15,44 @@ use crate::ppu::PpuFetchKind;
 use super::vrc_irq::VrcIrq;
 use super::{Nametable, SimpleMirroring};
 
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
+pub enum Vrc7Variant {
+    Undefined,
+    Vrc7a,
+    Vrc7b,
+}
+
+impl Vrc7Variant {
+    fn register_decode(&self, addr: u16) -> u16 {
+        if addr < 0x8000 {
+            return addr;
+        }
+        let a3 = addr & 0x0008;
+        let a4 = addr & 0x0010;
+        let addr = addr & 0xffe7;
+
+        match self {
+            Vrc7Variant::Undefined => {
+                if a3 != 0 {
+                    addr | (a3 << 1) | (a4 >> 1)
+                } else {
+                    addr | a3 | a4
+                }
+            }
+            Vrc7Variant::Vrc7a => addr | a3 | a4,
+            Vrc7Variant::Vrc7b => addr | (a3 << 1) | (a4 >> 1),
+        }
+    }
+}
+
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Vrc7 {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
     mirroring: SimpleMirroring,
     audio: Audio,
+    variant: Vrc7Variant,
     #[cfg_attr(feature = "save-states", save(nested))]
     irq: VrcIrq,
     prg: MappedMemory,
@@ -32,7 +64,7 @@ pub struct Vrc7 {
 }
 
 impl Vrc7 {
-    pub fn new(mut cartridge: INes, debug: Rc<Debug>) -> Self {
+    pub fn new(mut cartridge: INes, variant: Vrc7Variant, debug: Rc<Debug>) -> Self {
         let mirroring = SimpleMirroring::new(cartridge.mirroring.into());
         let mut prg = MappedMemory::new(&cartridge, 0x6000, 8, 40, MemKind::Prg);
         let (chr, chr_kind) = if cartridge.chr_ram_bytes > 0 {
@@ -65,6 +97,7 @@ impl Vrc7 {
             cartridge,
             mirroring,
             audio: Audio::new(),
+            variant,
             irq: VrcIrq::new(debug),
             prg,
             chr,
@@ -126,13 +159,14 @@ impl Vrc7 {
     }
 
     fn write_cpu(&mut self, addr: u16, value: u8) {
+        let addr = self.variant.register_decode(addr);
         match addr {
             0x6000..=0x7fff if !self.ram_protect => self.prg.write(addr, value),
             0x8000 => {
                 self.prg_bank_regs[0] = value;
                 self.sync();
             }
-            0x8010 | 0x8008 => {
+            0x8010 => {
                 self.prg_bank_regs[1] = value;
                 self.sync();
             }
@@ -143,13 +177,13 @@ impl Vrc7 {
             0xa000..=0xdfff => {
                 let reg = match addr {
                     0xa000 => 0,
-                    0xa008 | 0xa010 => 1,
+                    0xa010 => 1,
                     0xb000 => 2,
-                    0xb008 | 0xb010 => 3,
+                    0xb010 => 3,
                     0xc000 => 4,
-                    0xc008 | 0xc010 => 5,
+                    0xc010 => 5,
                     0xd000 => 6,
-                    0xd008 | 0xd010 => 7,
+                    0xd010 => 7,
                     _ => return,
                 };
                 self.chr_bank_regs[reg] = value;
@@ -167,9 +201,9 @@ impl Vrc7 {
                 self.audio.write(addr, value);
             }
             0x9010 | 0x9030 => self.audio.write(addr, value),
-            0xe008 | 0xe010 => self.irq.latch(value),
+            0xe010 => self.irq.latch(value),
             0xf000 => self.irq.control(value),
-            0xf008 | 0xf010 => self.irq.acknowledge(),
+            0xf010 => self.irq.acknowledge(),
             _ => (),
         }
     }

@@ -7,7 +7,7 @@ pub trait InputDevice {
     fn to_byte(&self) -> u8;
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct Controller {
     pub a: bool,
     pub b: bool,
@@ -69,10 +69,10 @@ impl InputDevice for Controller {
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 #[derive(Default)]
 pub struct Input {
-    read_counter: u32,
-    read_shifter: u8,
-    input_buffer: u8,
-    input: u8,
+    read_counter: [u32; 2],
+    read_shifter: [u8; 2],
+    input_buffer: [u8; 2],
+    input: [u8; 2],
 }
 
 impl Input {
@@ -92,13 +92,19 @@ impl Input {
     pub fn peek(&self, addr: u16, open_bus: u8) -> u8 {
         let value = match addr {
             0x4016 => {
-                if self.read_counter == 0 {
+                if self.read_counter[0] == 0 {
                     0x01
                 } else {
-                    self.read_shifter & 1
+                    self.read_shifter[0] & 1
                 }
             }
-            0x4017 => 0x00,
+            0x4017 => {
+                if self.read_counter[1] == 0 {
+                    0x01
+                } else {
+                    self.read_shifter[1] & 1
+                }
+            }
             _ => unimplemented!(),
         };
 
@@ -108,16 +114,25 @@ impl Input {
     pub fn read(&mut self, addr: u16, open_bus: u8) -> u8 {
         let value = match addr {
             0x4016 => {
-                if self.read_counter == 0 {
+                if self.read_counter[0] == 0 {
                     0x01
                 } else {
-                    let value = self.read_shifter & 1;
-                    self.read_shifter >>= 1;
-                    self.read_counter -= 1;
+                    let value = self.read_shifter[0] & 1;
+                    self.read_shifter[0] >>= 1;
+                    self.read_counter[0] -= 1;
                     value
                 }
             }
-            0x4017 => 0x00,
+            0x4017 => {
+                if self.read_counter[1] == 0 {
+                    0x01
+                } else {
+                    let value = self.read_shifter[1] & 1;
+                    self.read_shifter[1] >>= 1;
+                    self.read_counter[1] -= 1;
+                    value
+                }
+            }
             _ => unimplemented!(),
         };
 
@@ -131,14 +146,18 @@ impl Input {
                     self.input_buffer = self.input;
                 } else {
                     self.read_shifter = self.input_buffer;
-                    self.read_counter = 8;
+                    self.read_counter = [8, 8];
                 }
             }
             _ => unimplemented!(),
         }
     }
 
-    pub fn set_input(&mut self, input: u8) {
-        self.input = input;
+    pub fn set_port_one(&mut self, port_one: u8) {
+        self.input[0] = port_one;
+    }
+
+    pub fn set_port_two(&mut self, port_two: u8) {
+        self.input[1] = port_two;
     }
 }

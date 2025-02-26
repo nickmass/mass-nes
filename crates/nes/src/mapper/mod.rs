@@ -210,7 +210,11 @@ pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
         69 => RcMapper::new(fme7::Fme7::new(cart)),
         71 | 232 => RcMapper::new(bf909x::Bf909x::new(cart)),
         79 | 146 => RcMapper::new(nina006::Nina006::new(cart)),
-        85 => RcMapper::new(vrc7::Vrc7::new(cart, debug)),
+        85 => match cart.submapper {
+            Some(1) => RcMapper::new(vrc7::Vrc7::new(cart, vrc7::Vrc7Variant::Vrc7b, debug)),
+            Some(2) => RcMapper::new(vrc7::Vrc7::new(cart, vrc7::Vrc7Variant::Vrc7a, debug)),
+            _ => RcMapper::new(vrc7::Vrc7::new(cart, vrc7::Vrc7Variant::Undefined, debug)),
+        },
         206 => {
             tracing::warn!("limited mapper support");
             RcMapper::new(mmc3::Mmc3::new(cart, mmc3::Mmc3Variant::Mmc3, debug))
