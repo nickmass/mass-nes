@@ -18,6 +18,7 @@ pub use machine::{Controller, FdsInput, Machine, MapperInput, RunResult, UserInp
 pub use mapper::SaveWram;
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;
+pub use ppu::FrameEnd;
 pub use region::Region;
 #[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};

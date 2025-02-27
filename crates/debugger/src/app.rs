@@ -260,9 +260,9 @@ impl<A: Audio> DebuggerApp<A> {
         pick_bios(proxy);
     }
 
-    fn select_fm2(&self) {
+    fn select_movie(&self) {
         let proxy = self.app_events.create_proxy();
-        pick_fm2(proxy);
+        pick_movie(proxy);
     }
 
     fn set_volume(&mut self, value: f32) {
@@ -395,11 +395,30 @@ impl<A: Audio> DebuggerApp<A> {
                     store.save_wram(cart, wram);
                 }
             }
-            AppEvent::Fm2Loaded(bytes) => {
+            AppEvent::MovieLoaded(file_name, bytes) => {
                 let file = std::io::Cursor::new(bytes);
-                match ui::fm2::Fm2Input::read(file) {
-                    Ok(fm2) => self.emu_control.play_fm2(fm2),
-                    Err(e) => tracing::error!("Unable to parse fm2 file: {:?}", e),
+                let movie = if file_name.ends_with(".fm2") {
+                    Some(ui::movie::MovieFile::fm2(file))
+                } else if file_name.ends_with(".bk2") {
+                    Some(ui::movie::MovieFile::bk2(file))
+                } else if file_name.ends_with(".zip") {
+                    if let Some(bytes) = read_first_match_in_zip(".fm2", file.clone()) {
+                        let file = std::io::Cursor::new(bytes);
+                        Some(ui::movie::MovieFile::fm2(file))
+                    } else if let Some(bytes) = read_first_match_in_zip(".bk2", file) {
+                        let file = std::io::Cursor::new(bytes);
+                        Some(ui::movie::MovieFile::bk2(file))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                match movie {
+                    Some(Ok(movie)) => self.emu_control.play_movie(movie),
+                    Some(Err(e)) => tracing::error!("Unable to parse movie file: {:?}", e),
+                    None => tracing::warn!("No movie found in file"),
                 }
             }
         }
@@ -483,8 +502,8 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
                         ui.close_menu();
                     }
 
-                    if ui.button("Load FM2").clicked() {
-                        self.select_fm2();
+                    if ui.button("Load Movie").clicked() {
+                        self.select_movie();
                         ui.close_menu();
                     }
 
@@ -730,7 +749,7 @@ pub enum AppEvent {
     BiosLoaded(Vec<u8>),
     CartridgeInfo(CartridgeKind),
     SaveWram(CartridgeId, SaveWram),
-    Fm2Loaded(Vec<u8>),
+    MovieLoaded(String, Vec<u8>),
 }
 
 impl From<GamepadEvent> for AppEvent {
@@ -870,8 +889,8 @@ impl EmulatorControl {
         let _ = self.tx.send(EmulatorInput::SaveWram);
     }
 
-    fn play_fm2(&self, fm2: ui::fm2::Fm2Input) {
-        let _ = self.tx.send(EmulatorInput::PlayFm2(fm2));
+    fn play_movie(&self, movie: ui::movie::MovieFile) {
+        let _ = self.tx.send(EmulatorInput::PlayMovie(movie));
     }
 }
 
@@ -1080,32 +1099,62 @@ fn pick_bios(proxy: AppEventsProxy) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn pick_fm2(proxy: AppEventsProxy) {
+fn pick_movie(proxy: AppEventsProxy) {
     std::thread::spawn(move || {
-        let rom_file = rfd::FileDialog::new()
-            .add_filter("All Supported Files", &["fm2", "FM2"])
-            .pick_file();
+        let Some(movie_file) = rfd::FileDialog::new()
+            .add_filter("All Supported Files", &["fm2", "bk2", "zip"])
+            .pick_file()
+        else {
+            return;
+        };
 
-        if let Some(bytes) = rom_file.and_then(|p| std::fs::read(&p).ok()) {
-            proxy.send(AppEvent::Fm2Loaded(bytes));
+        let Some(name) = movie_file.file_name().map(|n| n.to_string_lossy().into()) else {
+            return;
+        };
+
+        if let Some(bytes) = std::fs::read(movie_file).ok() {
+            proxy.send(AppEvent::MovieLoaded(name, bytes));
         }
     });
 }
 
 #[cfg(target_arch = "wasm32")]
-fn pick_fm2(proxy: AppEventsProxy) {
-    let picker = rfd::AsyncFileDialog::new().add_filter("All Supported Files", &["fm2", "FM2"]);
+fn pick_movie(proxy: AppEventsProxy) {
+    let picker =
+        rfd::AsyncFileDialog::new().add_filter("All Supported Files", &["fm2", "bk2", "zip"]);
 
     let pick = async move {
-        let rom_file = picker.pick_file().await;
+        let movie_file = picker.pick_file().await;
 
-        let Some(rom_file) = rom_file else {
+        let Some(movie_file) = movie_file else {
             return;
         };
 
-        let bytes = rom_file.read().await;
-        proxy.send(AppEvent::Fm2Loaded(bytes));
+        let name = movie_file.file_name();
+        let bytes = movie_file.read().await;
+
+        proxy.send(AppEvent::MovieLoaded(name, bytes));
     };
 
     wasm_bindgen_futures::spawn_local(pick);
+}
+
+fn read_first_match_in_zip<R: std::io::Read + std::io::Seek>(
+    extension: &str,
+    read: R,
+) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut zip = zip::ZipArchive::new(read).ok()?;
+    let mut file_match = None;
+    for i in 0..zip.len() {
+        let mut file = zip.by_index(i).ok()?;
+        if file.name().ends_with(extension) {
+            let mut buf = Vec::with_capacity(file.size() as usize);
+            file.read_to_end(&mut buf).ok()?;
+            file_match = Some(buf);
+            break;
+        }
+    }
+
+    file_match
 }

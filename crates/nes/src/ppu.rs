@@ -12,6 +12,14 @@ use crate::memory::MemoryBlock;
 use crate::ppu_step::*;
 use crate::region::{EmphMode, Region};
 
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum FrameEnd {
+    SetVblank,
+    ClearVblank,
+    Dot(u32, u32),
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PpuFetchKind {
     Idle,
@@ -449,7 +457,7 @@ impl Ppu {
         self.vblank && self.is_nmi_enabled()
     }
 
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self, frame_end: FrameEnd) {
         if self.reset_delay != 0 {
             self.reset_delay -= 1;
         }
@@ -458,6 +466,9 @@ impl Ppu {
         self.open_bus.tick();
 
         let mut step = self.ppu_steps.step();
+        if frame_end == FrameEnd::Dot(step.scanline, step.dot) {
+            self.frame += 1;
+        }
 
         self.debug.event(DebugEvent::Dot(step.scanline, step.dot));
         match step.state {
@@ -466,6 +477,9 @@ impl Ppu {
                     let skipped = self.ppu_steps.step();
                     step.scanline = 0;
                     step.dot = 0;
+                    if frame_end == FrameEnd::Dot(step.scanline, step.dot) {
+                        self.frame += 1;
+                    }
                     self.debug.event(DebugEvent::Dot(step.scanline, step.dot));
 
                     // Need to assign this to ensure sprite reset still happens on dot 0 after a skip
@@ -474,12 +488,17 @@ impl Ppu {
             }
             Some(StateChange::SetVblank) => {
                 self.vblank = self.last_status_read != self.current_tick;
+                if frame_end == FrameEnd::SetVblank {
+                    self.frame += 1;
+                }
             }
             Some(StateChange::ClearVblank) => {
                 self.sprite_zero_hit = false;
                 self.sprite_overflow = false;
                 self.vblank = false;
-                self.frame += 1;
+                if frame_end == FrameEnd::ClearVblank {
+                    self.frame += 1;
+                }
             }
             None => (),
         }

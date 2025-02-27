@@ -11,7 +11,7 @@ use crate::debug::{Debug, DebugEvent};
 use crate::input::Input;
 use crate::mapper::{RcMapper, SaveWram};
 use crate::memory::MemoryBlock;
-use crate::ppu::Ppu;
+use crate::ppu::{FrameEnd, Ppu};
 use crate::region::Region;
 
 pub use crate::input::{Controller, InputDevice};
@@ -142,16 +142,24 @@ impl Machine {
         self.region
     }
 
-    pub fn run_with_breakpoints<H: BreakpointHandler>(&mut self, break_handler: H) -> RunResult {
-        self.do_run(break_handler)
+    pub fn run_with_breakpoints<H: BreakpointHandler>(
+        &mut self,
+        frame_end: FrameEnd,
+        break_handler: H,
+    ) -> RunResult {
+        self.do_run(frame_end, break_handler)
     }
 
     pub fn run(&mut self) {
-        self.do_run(());
+        self.do_run(FrameEnd::ClearVblank, ());
     }
 
     #[tracing::instrument(skip_all)]
-    fn do_run<H: BreakpointHandler>(&mut self, mut break_handler: H) -> RunResult {
+    fn do_run<H: BreakpointHandler>(
+        &mut self,
+        frame_end: FrameEnd,
+        mut break_handler: H,
+    ) -> RunResult {
         #[cfg(feature = "debugger")]
         let _ = self.debug.take_interest_notification();
         let last_frame = self.ppu.frame();
@@ -168,8 +176,8 @@ impl Machine {
             self.apu.tick();
             self.mapper.tick();
 
-            self.tick_ppu();
-            self.tick_ppu();
+            self.tick_ppu(frame_end);
+            self.tick_ppu(frame_end);
 
             match tick_result {
                 TickResult::Fetch(addr) => {
@@ -193,10 +201,10 @@ impl Machine {
                 TickResult::Idle(_) => (),
             }
 
-            self.tick_ppu();
+            self.tick_ppu(frame_end);
 
             if self.region.extra_ppu_tick() && self.cycle % 5 == 0 {
-                self.tick_ppu();
+                self.tick_ppu(frame_end);
             }
 
             if let Some(addr) = self.apu.get_dmc_req() {
@@ -225,8 +233,8 @@ impl Machine {
         RunResult::Frame
     }
 
-    fn tick_ppu(&mut self) {
-        self.ppu.tick();
+    fn tick_ppu(&mut self, frame_end: FrameEnd) {
+        self.ppu.tick(frame_end);
         let ppu_state = self.ppu.debug_state();
         self.debug.trace_ppu(&self, ppu_state);
     }

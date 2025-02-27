@@ -5,7 +5,7 @@ use nes::{
     Cartridge, DebugEvent, FdsInput, Machine, MapperInput, Region, RunResult, SaveWram, UserInput,
 };
 use tracing::instrument;
-use ui::{audio::SamplesSender, fm2::Fm2Input, wram::CartridgeId};
+use ui::{audio::SamplesSender, movie::MovieFile, wram::CartridgeId};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum Playback {
@@ -80,7 +80,7 @@ pub enum EmulatorInput {
     FastForward,
     SetFdsDisk(Option<usize>),
     SaveWram,
-    PlayFm2(Fm2Input),
+    PlayMovie(MovieFile),
 }
 
 #[derive(Debug)]
@@ -110,7 +110,7 @@ pub struct Runner {
     cart_id: Option<CartridgeId>,
     back_buffer: GfxBackBuffer,
     commands: EmulatorCommands,
-    fm2_input: Option<Fm2Input>,
+    movie_input: Option<MovieFile>,
     samples_tx: SamplesSender,
     sample_rate: u32,
     blip: Blip,
@@ -169,7 +169,7 @@ impl Runner {
                 interest_breakpoints: 0,
                 frame: false,
             },
-            fm2_input: None,
+            movie_input: None,
         }
     }
 
@@ -181,7 +181,7 @@ impl Runner {
                 match input {
                     EmulatorInput::Nes(input) => {
                         if let Some(machine) = &mut self.machine {
-                            if self.fm2_input.is_none() {
+                            if self.movie_input.is_none() {
                                 machine.handle_input(input)
                             }
                         }
@@ -233,7 +233,7 @@ impl Runner {
                                 self.save_store.clear();
                                 self.frame = 0;
                                 self.cart_id = Some(cart_id);
-                                self.fm2_input = None;
+                                self.movie_input = None;
                                 let machine = Machine::new(region, cart);
                                 machine.set_debug_interest(
                                     self.debug_request.interests.iter().copied(),
@@ -275,8 +275,8 @@ impl Runner {
                             self.commands.send_wram(cart_id, wram);
                         }
                     }
-                    EmulatorInput::PlayFm2(fm2) => {
-                        self.fm2_input = Some(fm2);
+                    EmulatorInput::PlayMovie(movie) => {
+                        self.movie_input = Some(movie);
                     }
                 }
             }
@@ -309,7 +309,12 @@ impl Runner {
             if playback.save_state() {
                 self.save_store.push(self.frame, || machine.save_state());
             }
-            match machine.run_with_breakpoints(|debug: &nes::Debug| {
+            let frame_end = if self.movie_input.is_some() {
+                nes::FrameEnd::SetVblank
+            } else {
+                nes::FrameEnd::ClearVblank
+            };
+            match machine.run_with_breakpoints(frame_end, |debug: &nes::Debug| {
                 let event_notif = debug.take_interest_notification();
                 if event_notif & self.debug_request.interest_breakpoints != 0 {
                     return true;
@@ -323,11 +328,11 @@ impl Runner {
                 }
             }) {
                 RunResult::Frame => {
-                    while let Some(input) = self.fm2_input.as_mut().map(|fm2| fm2.next()) {
+                    while let Some(input) = self.movie_input.as_mut().map(|fm2| fm2.next()) {
                         match input {
-                            None => self.fm2_input = None,
-                            Some(ui::fm2::Fm2UserInput::Frame) => break,
-                            Some(ui::fm2::Fm2UserInput::Input(input)) => {
+                            None => self.movie_input = None,
+                            Some(ui::movie::MovieInput::Frame) => break,
+                            Some(ui::movie::MovieInput::Input(input)) => {
                                 machine.handle_input(input)
                             }
                         }
