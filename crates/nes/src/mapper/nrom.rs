@@ -39,6 +39,7 @@ impl Mapper for Nrom {
         match bus {
             BusKind::Cpu => self.cartridge.prg_rom[addr as usize],
             BusKind::Ppu => {
+                let addr = addr & 0x1fff;
                 if self.cartridge.chr_ram_bytes > 0 {
                     self.chr_ram.read(addr)
                 } else {
@@ -49,16 +50,7 @@ impl Mapper for Nrom {
     }
 
     fn read(&mut self, bus: BusKind, addr: u16) -> u8 {
-        match bus {
-            BusKind::Cpu => self.cartridge.prg_rom[addr as usize],
-            BusKind::Ppu => {
-                if self.cartridge.chr_ram_bytes > 0 {
-                    self.chr_ram.read(addr)
-                } else {
-                    self.cartridge.chr_rom[addr as usize]
-                }
-            }
-        }
+        self.peek(bus, addr)
     }
 
     fn write(&mut self, bus: BusKind, addr: u16, value: u8) {
@@ -66,6 +58,7 @@ impl Mapper for Nrom {
             BusKind::Cpu => (),
             BusKind::Ppu => {
                 if self.cartridge.chr_ram_bytes > 0 {
+                    let addr = (addr & 0x1fff) % self.cartridge.chr_ram_bytes as u16;
                     self.chr_ram.write(addr, value);
                 }
             }

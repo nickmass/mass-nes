@@ -48,6 +48,7 @@ pub struct Fme7 {
     cartridge: INes,
     prg: MappedMemory,
     chr: MappedMemory,
+    chr_kind: BankKind,
     command: u8,
     parameter: u8,
     irq_enable: bool,
@@ -64,13 +65,15 @@ pub struct Fme7 {
     audio_reg_select: u8,
     audio_counter: u64,
 
-    channel_counters: [u16; 3],
+    tone_counters: [u16; 3],
     noise_counter: u16,
     envelope_counter: u16,
 
-    channel_state: [bool; 3],
+    tone_state: [bool; 3],
     noise_seed: u32,
     envelope_volume: u8,
+    envelope_ascending: bool,
+    envelope_holding: bool,
 
     #[cfg_attr(feature = "save-states", save(skip))]
     audio_lookup: Vec<i16>,
@@ -79,7 +82,13 @@ pub struct Fme7 {
 
 impl Fme7 {
     pub fn new(mut cartridge: INes) -> Fme7 {
-        let chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
+        let (chr, chr_kind) = if cartridge.chr_ram_bytes > 0 {
+            let chr = MappedMemory::new(&cartridge, 0x0000, 8, 8, MemKind::Chr);
+            (chr, BankKind::Ram)
+        } else {
+            let chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
+            (chr, BankKind::Rom)
+        };
         let mut prg = MappedMemory::new(&cartridge, 0x6000, 16, 40, MemKind::Prg);
         prg.map(0x6000, 8, 0, BankKind::Ram);
         prg.map(
@@ -115,6 +124,7 @@ impl Fme7 {
             cartridge,
             prg,
             chr,
+            chr_kind,
             command: 0,
             parameter: 0,
             irq_enable: false,
@@ -131,13 +141,15 @@ impl Fme7 {
             audio_reg_select: 0,
             audio_counter: 0,
 
-            channel_counters: [0; 3],
+            tone_counters: [0; 3],
             noise_counter: 0,
             envelope_counter: 0,
 
-            channel_state: [false; 3],
-            noise_seed: 0,
-            envelope_volume: 0,
+            tone_state: [false; 3],
+            noise_seed: 0xffff,
+            envelope_volume: 7,
+            envelope_ascending: true,
+            envelope_holding: true,
 
             audio_lookup,
             sample: 0,
@@ -182,6 +194,14 @@ impl Fme7 {
                     self.audio_regs[self.audio_reg_select as usize] = value;
                     if self.audio_reg_select == 0x0d {
                         self.envelope_counter = 0;
+                        if self.envelope_attack() {
+                            self.envelope_volume = 0;
+                            self.envelope_ascending = true;
+                        } else {
+                            self.envelope_volume = 31;
+                            self.envelope_ascending = false;
+                        }
+                        self.envelope_holding = false;
                     }
                 }
             }
@@ -190,7 +210,9 @@ impl Fme7 {
     }
 
     fn write_ppu(&mut self, addr: u16, value: u8) {
-        self.chr.write(addr, value);
+        if addr < 0x2000 {
+            self.chr.write(addr, value);
+        }
     }
 
     fn sync(&mut self) {
@@ -200,7 +222,7 @@ impl Fme7 {
                 0x400 * self.command as u16,
                 1,
                 self.parameter as usize,
-                BankKind::Rom,
+                self.chr_kind,
             ),
             8 => {
                 self.ram_protect = self.parameter & 0x80 == 0;
@@ -236,7 +258,7 @@ impl Fme7 {
         }
     }
 
-    fn channel_period(&self, channel: Channel) -> u16 {
+    fn tone_period(&self, channel: Channel) -> u16 {
         let low = self.audio_regs[channel.period_low_reg()] as u16;
         let high = self.audio_regs[channel.period_high_reg()] as u16 & 0xf;
 
@@ -245,7 +267,11 @@ impl Fme7 {
     }
 
     fn noise_period(&self) -> u16 {
-        self.audio_regs[0x6] as u16 & 0x1f
+        self.audio_regs[0x6] as u16 & 0x1f << 1
+    }
+
+    fn envelope_period(&self) -> u16 {
+        ((self.audio_regs[0xc] as u16) << 8) | self.audio_regs[0xb] as u16
     }
 
     fn tone_enabled(&self, channel: Channel) -> bool {
@@ -258,11 +284,6 @@ impl Fme7 {
         }
     }
 
-    #[allow(dead_code)]
-    fn envelope_period(&self) -> u16 {
-        ((self.audio_regs[0xc] as u16) << 8) | self.audio_regs[0xb] as u16
-    }
-
     fn noise_enabled(&self, channel: Channel) -> bool {
         let val = self.audio_regs[0x7];
 
@@ -273,7 +294,6 @@ impl Fme7 {
         }
     }
 
-    #[allow(dead_code)]
     fn envelope_enabled(&self, channel: Channel) -> bool {
         self.audio_regs[channel.envelope_reg()] & 0x10 != 0
     }
@@ -283,17 +303,48 @@ impl Fme7 {
         if val == 0 { 0 } else { val * 2 + 1 }
     }
 
+    fn tone(&self, channel: Channel) -> bool {
+        match channel {
+            Channel::A => self.tone_state[0],
+            Channel::B => self.tone_state[1],
+            Channel::C => self.tone_state[2],
+        }
+    }
+
     fn noise(&self) -> bool {
         self.noise_seed & 1 != 0
     }
 
+    fn envelope_continue(&self) -> bool {
+        self.audio_regs[0xd] & 0x08 != 0
+    }
+
+    fn envelope_attack(&self) -> bool {
+        self.audio_regs[0xd] & 0x04 != 0
+    }
+
+    fn envelope_alternate(&self) -> bool {
+        self.audio_regs[0xd] & 0x02 != 0
+    }
+
+    fn envelope_hold(&self) -> bool {
+        self.audio_regs[0xd] & 0x01 != 0
+    }
+
+    fn envelope_at_limit(&self) -> bool {
+        (self.envelope_ascending && self.envelope_volume == 31)
+            || (!self.envelope_ascending && self.envelope_volume == 0)
+    }
+
     fn channel_value(&self, channel: Channel) -> u8 {
-        if !self.tone_enabled(channel) {
-            0
-        } else if self.envelope_enabled(channel) {
-            self.envelope_volume
-        } else if !self.noise_enabled(channel) || self.noise() {
-            self.volume(channel)
+        let active = (!self.tone_enabled(channel) || self.tone(channel))
+            && (!self.noise_enabled(channel) || self.noise());
+        if active {
+            if self.envelope_enabled(channel) {
+                self.envelope_volume
+            } else {
+                self.volume(channel)
+            }
         } else {
             0
         }
@@ -307,7 +358,7 @@ impl Fme7 {
         self.audio_counter = 0;
 
         self.noise_counter += 1;
-        if self.noise_counter >= self.noise_period() * 2 {
+        if self.noise_counter >= self.noise_period() {
             self.noise_counter = 0;
             if self.noise() {
                 self.noise_seed ^= 0x24000;
@@ -315,21 +366,47 @@ impl Fme7 {
             self.noise_seed >>= 1;
         }
 
-        // envelope not implemented, unused by all comercial games
+        self.envelope_counter += 1;
+        if self.envelope_counter >= self.envelope_period() {
+            self.envelope_counter = 0;
+            if !self.envelope_holding {
+                if self.envelope_at_limit() {
+                    if !self.envelope_continue() {
+                        self.envelope_holding = true;
+                        self.envelope_volume = 0;
+                    } else if self.envelope_hold() {
+                        self.envelope_holding = true;
+                        if self.envelope_alternate() {
+                            self.envelope_volume ^= 0x1f;
+                        }
+                    } else if self.envelope_alternate() {
+                        self.envelope_ascending = !self.envelope_ascending;
+                    } else {
+                        self.envelope_volume ^= 0x1f;
+                    }
+                }
+            }
+
+            if !self.envelope_holding {
+                if self.envelope_ascending {
+                    self.envelope_volume += 1;
+                } else {
+                    self.envelope_volume -= 1;
+                }
+            }
+        }
 
         let channels = [Channel::A, Channel::B, Channel::C];
         let mut sample = 0;
 
         for (idx, channel) in channels.into_iter().enumerate() {
-            self.channel_counters[idx] += 1;
-            if self.channel_counters[idx] >= self.channel_period(channel) {
-                self.channel_counters[idx] = 0;
-                self.channel_state[idx] = !self.channel_state[idx];
+            self.tone_counters[idx] += 1;
+            if self.tone_counters[idx] >= self.tone_period(channel) {
+                self.tone_counters[idx] = 0;
+                self.tone_state[idx] = !self.tone_state[idx];
             }
 
-            if self.channel_state[idx] {
-                sample += self.audio_lookup[self.channel_value(channel) as usize]
-            }
+            sample += self.audio_lookup[self.channel_value(channel) as usize]
         }
 
         self.sample = sample;
@@ -352,10 +429,7 @@ impl Mapper for Fme7 {
     }
 
     fn read(&mut self, bus: BusKind, addr: u16) -> u8 {
-        match bus {
-            BusKind::Cpu => self.read_cpu(addr),
-            BusKind::Ppu => self.read_ppu(addr),
-        }
+        self.peek(bus, addr)
     }
 
     fn write(&mut self, bus: BusKind, addr: u16, value: u8) {
