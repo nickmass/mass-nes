@@ -12,8 +12,8 @@ use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind};
 use crate::ppu::PpuFetchKind;
 
+use super::Nametable;
 use super::vrc_irq::VrcIrq;
-use super::{Nametable, SimpleMirroring};
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Copy, Clone)]
@@ -41,7 +41,6 @@ pub struct Vrc6 {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
     variant: Vrc6Variant,
-    mirroring: SimpleMirroring,
     #[cfg_attr(feature = "save-states", save(nested))]
     irq: VrcIrq,
     prg: MappedMemory,
@@ -49,6 +48,7 @@ pub struct Vrc6 {
     ram_protect: bool,
     chr_regs: [u8; 8],
     chr_mode: u8,
+    nt_regs: [u8; 4],
 
     halt_audio: bool,
     freq_mode: FreqMode,
@@ -60,9 +60,8 @@ pub struct Vrc6 {
 
 impl Vrc6 {
     pub fn new(mut cartridge: INes, variant: Vrc6Variant, debug: Rc<Debug>) -> Self {
-        let mirroring = SimpleMirroring::new(cartridge.mirroring.into());
         let mut prg = MappedMemory::new(&cartridge, 0x6000, 8, 40, MemKind::Prg);
-        let chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
+        let chr = MappedMemory::new(&cartridge, 0x0000, 0, 12, MemKind::Chr);
 
         let last = (cartridge.prg_rom.len() / 0x2000) - 1;
         prg.map(0x6000, 8, 0, BankKind::Ram);
@@ -79,13 +78,13 @@ impl Vrc6 {
         let mut rom = Self {
             cartridge,
             variant,
-            mirroring,
             irq: VrcIrq::new(debug),
             prg,
             chr,
             ram_protect: true,
             chr_regs: [0; 8],
             chr_mode: 0x20,
+            nt_regs: [0; 4],
             halt_audio: true,
             freq_mode: FreqMode::X1,
             pulse_a: Pulse::new(),
@@ -108,8 +107,12 @@ impl Vrc6 {
     }
 
     fn read_ppu(&self, addr: u16) -> u8 {
-        // todo: handle >= 0x2000 if nt chr rom mapped
-        self.chr.read(&self.cartridge, addr)
+        if addr & 0x2000 != 0 {
+            let addr = (addr & 0xfff) | 0x2000;
+            self.chr.read(&self.cartridge, addr)
+        } else {
+            self.chr.read(&self.cartridge, addr)
+        }
     }
 
     fn write_cpu(&mut self, addr: u16, value: u8) {
@@ -170,8 +173,8 @@ impl Vrc6 {
 
     fn sync_chr(&mut self) {
         let r = self.chr_regs;
-        match self.chr_mode & 0x3 {
-            0x0 => {
+        match (self.chr_mode & 0x3, self.chr_mode & 0x20 != 0) {
+            (0x0, _) => {
                 self.chr.map(0x0000, 1, r[0] as usize, BankKind::Rom);
                 self.chr.map(0x0400, 1, r[1] as usize, BankKind::Rom);
                 self.chr.map(0x0800, 1, r[2] as usize, BankKind::Rom);
@@ -181,40 +184,126 @@ impl Vrc6 {
                 self.chr.map(0x1800, 1, r[6] as usize, BankKind::Rom);
                 self.chr.map(0x1c00, 1, r[7] as usize, BankKind::Rom);
             }
-            0x1 => {
-                self.chr.map(0x0000, 2, r[0] as usize, BankKind::Rom);
-                self.chr.map(0x0800, 2, r[1] as usize, BankKind::Rom);
-                self.chr.map(0x1000, 2, r[2] as usize, BankKind::Rom);
-                self.chr.map(0x1800, 2, r[3] as usize, BankKind::Rom);
+            (0x1, true) => {
+                self.chr.map(0x0000, 2, r[0] as usize >> 1, BankKind::Rom);
+                self.chr.map(0x0800, 2, r[1] as usize >> 1, BankKind::Rom);
+                self.chr.map(0x1000, 2, r[2] as usize >> 1, BankKind::Rom);
+                self.chr.map(0x1800, 2, r[3] as usize >> 1, BankKind::Rom);
             }
-            0x2 | 0x3 => {
+            (0x2 | 0x3, true) => {
                 self.chr.map(0x0000, 1, r[0] as usize, BankKind::Rom);
                 self.chr.map(0x0400, 1, r[1] as usize, BankKind::Rom);
                 self.chr.map(0x0800, 1, r[2] as usize, BankKind::Rom);
                 self.chr.map(0x0c00, 1, r[3] as usize, BankKind::Rom);
-                self.chr.map(0x1000, 2, r[4] as usize, BankKind::Rom);
-                self.chr.map(0x1800, 2, r[5] as usize, BankKind::Rom);
+                self.chr.map(0x1000, 2, r[4] as usize >> 1, BankKind::Rom);
+                self.chr.map(0x1800, 2, r[5] as usize >> 1, BankKind::Rom);
+            }
+            (0x1, false) => {
+                self.chr.map(0x0000, 1, r[0] as usize, BankKind::Rom);
+                self.chr.map(0x0400, 1, r[0] as usize, BankKind::Rom);
+                self.chr.map(0x0800, 1, r[1] as usize, BankKind::Rom);
+                self.chr.map(0x0c00, 1, r[1] as usize, BankKind::Rom);
+                self.chr.map(0x1000, 1, r[2] as usize, BankKind::Rom);
+                self.chr.map(0x1400, 1, r[2] as usize, BankKind::Rom);
+                self.chr.map(0x1800, 1, r[3] as usize, BankKind::Rom);
+                self.chr.map(0x1c00, 1, r[3] as usize, BankKind::Rom);
+            }
+            (0x2 | 0x3, false) => {
+                self.chr.map(0x0000, 1, r[0] as usize, BankKind::Rom);
+                self.chr.map(0x0400, 1, r[1] as usize, BankKind::Rom);
+                self.chr.map(0x0800, 1, r[2] as usize, BankKind::Rom);
+                self.chr.map(0x0c00, 1, r[3] as usize, BankKind::Rom);
+                self.chr.map(0x1000, 1, r[4] as usize, BankKind::Rom);
+                self.chr.map(0x1400, 1, r[4] as usize, BankKind::Rom);
+                self.chr.map(0x1800, 1, r[5] as usize, BankKind::Rom);
+                self.chr.map(0x1c00, 1, r[5] as usize, BankKind::Rom);
             }
             _ => unreachable!(),
         }
 
-        // todo: implement unused banking modes
-        if self.chr_mode & 0x10 != 0 || self.chr_mode & 0x20 == 0 {
-            tracing::warn!("vrc6 unimplemented mirroring mode");
-            self.mirroring.vertical();
-        } else {
+        // Every game sets this bit, the unset bit logic was intended for a different board that was not released
+        if self.chr_mode & 0x20 != 0 {
             let mirror_mode = self.chr_mode >> 2 & 0x3;
             match (self.chr_mode & 0x3, mirror_mode) {
-                (0x0, 0x0) => self.mirroring.vertical(),
-                (0x0, 0x1) => self.mirroring.horizontal(),
-                (0x0, 0x2) => self.mirroring.internal_b(),
-                (0x0, 0x3) => self.mirroring.internal_a(),
-                _ => {
-                    tracing::warn!("vrc6 unimplemented mirroring mode");
-                    self.mirroring.vertical();
+                (0x0, 0x0) | (0x3, 0x1) => {
+                    self.nt_regs[0] = r[6] & 0xfe;
+                    self.nt_regs[1] = r[6] | 0x01;
+                    self.nt_regs[2] = r[7] & 0xfe;
+                    self.nt_regs[3] = r[7] | 0x01;
                 }
+                (0x0, 0x1) | (0x3, 0x0) => {
+                    self.nt_regs[0] = r[6] & 0xfe;
+                    self.nt_regs[1] = r[7] & 0xfe;
+                    self.nt_regs[2] = r[6] | 0x01;
+                    self.nt_regs[3] = r[7] | 0x01;
+                }
+                (0x0, 0x2) | (0x3, 0x3) => {
+                    self.nt_regs[0] = r[6] & 0xfe;
+                    self.nt_regs[1] = r[6] & 0xfe;
+                    self.nt_regs[2] = r[7] & 0xfe;
+                    self.nt_regs[3] = r[7] & 0xfe;
+                }
+                (0x0, 0x3) | (0x3, 0x2) => {
+                    self.nt_regs[0] = r[6] | 0x01;
+                    self.nt_regs[1] = r[7] | 0x01;
+                    self.nt_regs[2] = r[6] | 0x01;
+                    self.nt_regs[3] = r[7] | 0x01;
+                }
+                (0x1, _) => {
+                    self.nt_regs[0] = r[4];
+                    self.nt_regs[1] = r[5];
+                    self.nt_regs[2] = r[6];
+                    self.nt_regs[3] = r[7];
+                }
+                (0x2, 0x0 | 0x2) => {
+                    self.nt_regs[0] = r[6];
+                    self.nt_regs[1] = r[7];
+                    self.nt_regs[2] = r[6];
+                    self.nt_regs[3] = r[7];
+                }
+                (0x2, 0x1 | 0x3) => {
+                    self.nt_regs[0] = r[6];
+                    self.nt_regs[1] = r[6];
+                    self.nt_regs[2] = r[7];
+                    self.nt_regs[3] = r[7];
+                }
+                _ => unreachable!(),
+            }
+        } else {
+            match self.chr_mode & 0xf {
+                0x0 | 0x6 | 0x7 | 0x8 | 0xe | 0xf => {
+                    // horizontal
+                    self.nt_regs[0] = r[6];
+                    self.nt_regs[1] = r[6];
+                    self.nt_regs[2] = r[7];
+                    self.nt_regs[3] = r[7];
+                }
+                0x1 | 0x5 | 0x9 | 0xd => {
+                    // 4-screen
+                    self.nt_regs[0] = r[4];
+                    self.nt_regs[1] = r[5];
+                    self.nt_regs[2] = r[6];
+                    self.nt_regs[3] = r[7];
+                }
+                0x2 | 0x3 | 0x4 | 0xa | 0xb | 0xc => {
+                    // vertical
+                    self.nt_regs[0] = r[6];
+                    self.nt_regs[1] = r[7];
+                    self.nt_regs[2] = r[6];
+                    self.nt_regs[3] = r[7];
+                }
+                _ => unreachable!(),
             }
         }
+
+        self.chr
+            .map(0x2000, 1, self.nt_regs[0] as usize, BankKind::Rom);
+        self.chr
+            .map(0x2400, 1, self.nt_regs[1] as usize, BankKind::Rom);
+        self.chr
+            .map(0x2800, 1, self.nt_regs[2] as usize, BankKind::Rom);
+        self.chr
+            .map(0x2c00, 1, self.nt_regs[3] as usize, BankKind::Rom);
     }
 }
 
@@ -248,7 +337,20 @@ impl Mapper for Vrc6 {
     }
 
     fn peek_ppu_fetch(&self, address: u16, _kind: PpuFetchKind) -> Nametable {
-        self.mirroring.ppu_fetch(address)
+        if self.chr_mode & 0x10 == 0x0 {
+            if address & 0x2000 == 0 {
+                Nametable::External
+            } else {
+                let reg = (address & 0xc00) >> 10;
+                if self.nt_regs[reg as usize] & 1 == 0 {
+                    Nametable::InternalB
+                } else {
+                    Nametable::InternalA
+                }
+            }
+        } else {
+            Nametable::External
+        }
     }
 
     fn get_irq(&mut self) -> bool {
