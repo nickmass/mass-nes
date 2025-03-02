@@ -76,27 +76,35 @@ impl Vrc6 {
 
         let mix = (i16::MAX as f32 / 64.0) as i16;
 
-        Self {
+        let mut rom = Self {
             cartridge,
             variant,
             mirroring,
             irq: VrcIrq::new(debug),
             prg,
             chr,
-            ram_protect: false,
+            ram_protect: true,
             chr_regs: [0; 8],
-            chr_mode: 0,
+            chr_mode: 0x20,
             halt_audio: true,
             freq_mode: FreqMode::X1,
             pulse_a: Pulse::new(),
             pulse_b: Pulse::new(),
             sawtooth: Sawtooth::new(),
             mix,
-        }
+        };
+
+        rom.sync_chr();
+
+        rom
     }
 
     fn read_cpu(&self, addr: u16) -> u8 {
-        self.prg.read(&self.cartridge, addr)
+        if addr < 0x8000 && self.ram_protect {
+            0
+        } else {
+            self.prg.read(&self.cartridge, addr)
+        }
     }
 
     fn read_ppu(&self, addr: u16) -> u8 {
@@ -123,7 +131,7 @@ impl Vrc6 {
                 self.prg.map(0xc000, 8, bank, BankKind::Rom);
             }
             0xb003 => {
-                self.ram_protect = value & 0x80 != 0;
+                self.ram_protect = value & 0x80 == 0;
                 self.chr_mode = value & 0x3f;
                 self.sync_chr();
             }
