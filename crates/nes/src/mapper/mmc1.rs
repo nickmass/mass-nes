@@ -13,6 +13,8 @@ use super::SimpleMirroring;
 pub struct Mmc1 {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
+    current_tick: u64,
+    last_write_tick: u64,
     prg: MappedMemory,
     chr: MappedMemory,
     shift_reg: u32,
@@ -48,6 +50,8 @@ impl Mmc1 {
 
         let mut rom = Mmc1 {
             cartridge,
+            current_tick: 0,
+            last_write_tick: 0,
             prg,
             chr,
             shift_reg: 0,
@@ -88,21 +92,24 @@ impl Mmc1 {
             self.shift_reg = 0;
             self.counter = 0;
         } else {
-            self.shift_reg |= ((value as u32 & 1) << self.counter) as u32;
-            self.counter += 1;
-            if self.counter == 5 {
-                match addr & 0xfffe {
-                    0x8000 => self.regs[0] = self.shift_reg,
-                    0xA000 => self.regs[1] = self.shift_reg,
-                    0xC000 => self.regs[2] = self.shift_reg,
-                    0xE000 => self.regs[3] = self.shift_reg,
-                    _ => unreachable!(),
+            if self.current_tick > self.last_write_tick + 1 {
+                self.shift_reg |= ((value as u32 & 1) << self.counter) as u32;
+                self.counter += 1;
+                if self.counter == 5 {
+                    match addr & 0xfffe {
+                        0x8000 => self.regs[0] = self.shift_reg,
+                        0xA000 => self.regs[1] = self.shift_reg,
+                        0xC000 => self.regs[2] = self.shift_reg,
+                        0xE000 => self.regs[3] = self.shift_reg,
+                        _ => unreachable!(),
+                    }
+                    self.sync();
+                    self.shift_reg = 0;
+                    self.counter = 0;
                 }
-                self.sync();
-                self.shift_reg = 0;
-                self.counter = 0;
             }
         }
+        self.last_write_tick = self.current_tick;
     }
 
     fn write_ppu(&self, addr: u16, value: u8) {
@@ -199,6 +206,10 @@ impl Mapper for Mmc1 {
 
     fn peek_ppu_fetch(&self, address: u16, _kind: PpuFetchKind) -> super::Nametable {
         self.mirroring.ppu_fetch(address)
+    }
+
+    fn tick(&mut self) {
+        self.current_tick += 1;
     }
 
     fn save_wram(&self) -> Option<super::SaveWram> {
