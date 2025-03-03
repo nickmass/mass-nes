@@ -31,7 +31,7 @@ impl Mapper for Nrom {
     fn register(&self, cpu: &mut AddressBus) {
         cpu.register_read(
             DeviceKind::Mapper,
-            AndAndMask(0x8000, (self.prg_len - 1) as u16),
+            AndAndMask(0x8000, self.prg_len.min(0x8000) as u16 - 1),
         );
     }
 
@@ -47,10 +47,6 @@ impl Mapper for Nrom {
                 }
             }
         }
-    }
-
-    fn read(&mut self, bus: BusKind, addr: u16) -> u8 {
-        self.peek(bus, addr)
     }
 
     fn write(&mut self, bus: BusKind, addr: u16, value: u8) {

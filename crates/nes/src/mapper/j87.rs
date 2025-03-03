@@ -1,7 +1,7 @@
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 
-use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind};
+use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind};
@@ -10,7 +10,7 @@ use crate::ppu::PpuFetchKind;
 use super::SimpleMirroring;
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
-pub struct Cnrom {
+pub struct J87 {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
     chr: MappedMemory,
@@ -18,51 +18,42 @@ pub struct Cnrom {
     prg_len: usize,
 }
 
-impl Cnrom {
-    pub fn new(cartridge: INes) -> Cnrom {
+impl J87 {
+    pub fn new(cartridge: INes) -> J87 {
         let mut chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
         chr.map(0x0000, 8, 0, BankKind::Rom);
 
-        Cnrom {
+        J87 {
             chr,
             mirroring: SimpleMirroring::new(cartridge.mirroring.into()),
             prg_len: cartridge.prg_rom.len(),
             cartridge,
         }
     }
-
-    fn read_cpu(&self, addr: u16) -> u8 {
-        self.cartridge.prg_rom[addr as usize]
-    }
-
-    fn read_ppu(&self, addr: u16) -> u8 {
-        self.chr.read(&self.cartridge, addr)
-    }
-
-    fn write_cpu(&mut self, _addr: u16, value: u8) {
-        self.chr.map(0x0000, 8, value as usize, BankKind::Rom);
-    }
 }
 
-impl Mapper for Cnrom {
+impl Mapper for J87 {
     fn register(&self, cpu: &mut AddressBus) {
         cpu.register_read(
             DeviceKind::Mapper,
             AndAndMask(0x8000, self.prg_len.min(0x8000) as u16 - 1),
         );
-        cpu.register_write(DeviceKind::Mapper, AndAndMask(0x8000, 0xffff));
+        cpu.register_write(DeviceKind::Mapper, AndEqualsAndMask(0xe000, 0x6000, 0x7fff));
     }
 
     fn peek(&self, bus: BusKind, addr: u16) -> u8 {
         match bus {
-            BusKind::Cpu => self.read_cpu(addr),
-            BusKind::Ppu => self.read_ppu(addr),
+            BusKind::Cpu => self.cartridge.prg_rom[addr as usize],
+            BusKind::Ppu => self.chr.read(&self.cartridge, addr),
         }
     }
 
-    fn write(&mut self, bus: BusKind, addr: u16, value: u8) {
+    fn write(&mut self, bus: BusKind, _addr: u16, value: u8) {
         match bus {
-            BusKind::Cpu => self.write_cpu(addr, value),
+            BusKind::Cpu => {
+                let bank = (value & 2) >> 1 | (value & 1) << 1;
+                self.chr.map(0x0000, 8, bank as usize, BankKind::Rom);
+            }
             BusKind::Ppu => (),
         }
     }

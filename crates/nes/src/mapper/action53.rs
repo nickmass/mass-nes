@@ -192,13 +192,6 @@ impl Mapper for Action53 {
         }
     }
 
-    fn read(&mut self, bus: BusKind, addr: u16) -> u8 {
-        match bus {
-            BusKind::Cpu => self.read_cpu(addr),
-            BusKind::Ppu => self.read_ppu(addr),
-        }
-    }
-
     fn write(&mut self, bus: BusKind, addr: u16, value: u8) {
         match bus {
             BusKind::Cpu => self.write_cpu(addr, value),

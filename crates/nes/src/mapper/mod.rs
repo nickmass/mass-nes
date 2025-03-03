@@ -7,6 +7,7 @@ mod color_dreams;
 mod fds;
 mod fme7;
 mod gxrom;
+mod j87;
 mod mmc1;
 mod mmc2;
 mod mmc3;
@@ -80,7 +81,9 @@ pub trait Mapper {
 
     fn peek(&self, bus: BusKind, addr: u16) -> u8;
 
-    fn read(&mut self, bus: BusKind, addr: u16) -> u8;
+    fn read(&mut self, bus: BusKind, addr: u16) -> u8 {
+        self.peek(bus, addr)
+    }
 
     fn write(&mut self, bus: BusKind, addr: u16, value: u8);
 
@@ -166,6 +169,10 @@ pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
         1 | 65 => RcMapper::new(mmc1::Mmc1::new(cart)),
         2 => RcMapper::new(uxrom::Uxrom::new(cart)),
         3 => RcMapper::new(cnrom::Cnrom::new(cart)),
+        148 => {
+            tracing::warn!("limited mapper support");
+            RcMapper::new(cnrom::Cnrom::new(cart))
+        }
         4 => match cart.submapper {
             Some(1) => RcMapper::new(mmc3::Mmc3::new(cart, mmc3::Mmc3Variant::Mmc6, debug)),
             Some(4) => RcMapper::new(mmc3::Mmc3::new(cart, mmc3::Mmc3Variant::Mmc3AltIrq, debug)),
@@ -215,6 +222,7 @@ pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
             Some(2) => RcMapper::new(vrc7::Vrc7::new(cart, vrc7::Vrc7Variant::Vrc7a, debug)),
             _ => RcMapper::new(vrc7::Vrc7::new(cart, vrc7::Vrc7Variant::Undefined, debug)),
         },
+        87 => RcMapper::new(j87::J87::new(cart)),
         206 => {
             tracing::warn!("limited mapper support");
             RcMapper::new(mmc3::Mmc3::new(cart, mmc3::Mmc3Variant::Mmc3, debug))

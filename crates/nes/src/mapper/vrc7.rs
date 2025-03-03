@@ -224,10 +224,6 @@ impl Mapper for Vrc7 {
         }
     }
 
-    fn read(&mut self, bus: BusKind, addr: u16) -> u8 {
-        self.peek(bus, addr)
-    }
-
     fn write(&mut self, bus: BusKind, addr: u16, value: u8) {
         match bus {
             BusKind::Cpu => self.write_cpu(addr, value),
