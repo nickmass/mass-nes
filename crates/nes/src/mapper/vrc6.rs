@@ -164,7 +164,7 @@ impl Vrc6 {
             0xa001 => self.pulse_b.freq_low(value),
             0xa002 => self.pulse_b.freq_high(value),
             0xa003 => (),
-            0xb000 => self.sawtooth.accumulator_rate = value & 0x3f,
+            0xb000 => self.sawtooth.accumulator_rate(value),
             0xb001 => self.sawtooth.freq_low(value),
             0xb002 => self.sawtooth.freq_high(value),
             _ => unreachable!(),
@@ -360,9 +360,10 @@ impl Mapper for Vrc6 {
     }
 
     fn get_sample(&self) -> Option<i16> {
-        let val =
-            (self.pulse_a.sample as i16 + self.pulse_b.sample as i16 + self.sawtooth.sample as i16)
-                * self.mix;
+        let val = (self.pulse_a.sample() as i16
+            + self.pulse_b.sample() as i16
+            + self.sawtooth.sample() as i16)
+            * self.mix;
         Some(val)
     }
 
@@ -377,7 +378,7 @@ impl Mapper for Vrc6 {
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Copy, Clone)]
-enum FreqMode {
+pub enum FreqMode {
     X1,
     X4,
     X256,
@@ -397,7 +398,7 @@ impl FreqMode {
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
-struct Pulse {
+pub struct Pulse {
     period: u16,
     counter: u16,
     volume: u8,
@@ -409,7 +410,7 @@ struct Pulse {
 }
 
 impl Pulse {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             period: 1,
             counter: 0,
@@ -422,7 +423,7 @@ impl Pulse {
         }
     }
 
-    fn tick(&mut self, freq: FreqMode) {
+    pub fn tick(&mut self, freq: FreqMode) {
         if self.enabled && !self.constant {
             if self.counter == 0 {
                 if self.duty_counter == 0 {
@@ -447,27 +448,31 @@ impl Pulse {
         }
     }
 
-    fn volume(&mut self, value: u8) {
+    pub fn volume(&mut self, value: u8) {
         self.volume = value & 0xf;
         self.duty = (value >> 4) & 0x7;
         self.constant = value & 0x80 != 0;
     }
 
-    fn freq_low(&mut self, value: u8) {
+    pub fn freq_low(&mut self, value: u8) {
         let period = (self.period & 0xff00) | value as u16;
         self.period = period;
     }
 
-    fn freq_high(&mut self, value: u8) {
+    pub fn freq_high(&mut self, value: u8) {
         let period = (self.period & 0xff) | ((value as u16 & 0xf) << 8);
         self.period = period;
         self.enabled = value & 0x80 != 0;
+    }
+
+    pub fn sample(&self) -> u8 {
+        self.sample
     }
 }
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
-struct Sawtooth {
+pub struct Sawtooth {
     period: u16,
     counter: u16,
     accumulator_rate: u8,
@@ -478,7 +483,7 @@ struct Sawtooth {
 }
 
 impl Sawtooth {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             period: 1,
             counter: 0,
@@ -490,7 +495,7 @@ impl Sawtooth {
         }
     }
 
-    fn tick(&mut self, freq: FreqMode) {
+    pub fn tick(&mut self, freq: FreqMode) {
         if self.enabled {
             if self.counter == 0 {
                 self.counter = freq.set(self.period);
@@ -515,14 +520,22 @@ impl Sawtooth {
         }
     }
 
-    fn freq_low(&mut self, value: u8) {
+    pub fn accumulator_rate(&mut self, value: u8) {
+        self.accumulator_rate = value & 0x3f;
+    }
+
+    pub fn freq_low(&mut self, value: u8) {
         let period = (self.period & 0xff00) | value as u16;
         self.period = period;
     }
 
-    fn freq_high(&mut self, value: u8) {
+    pub fn freq_high(&mut self, value: u8) {
         let period = (self.period & 0xff) | ((value as u16 & 0xf) << 8);
         self.period = period;
         self.enabled = value & 0x80 != 0;
+    }
+
+    pub fn sample(&self) -> u8 {
+        self.sample
     }
 }

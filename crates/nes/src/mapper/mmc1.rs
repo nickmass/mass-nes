@@ -96,7 +96,7 @@ impl Mmc1 {
                 self.shift_reg |= ((value as u32 & 1) << self.counter) as u32;
                 self.counter += 1;
                 if self.counter == 5 {
-                    match addr & 0xfffe {
+                    match addr & 0xe000 {
                         0x8000 => self.regs[0] = self.shift_reg,
                         0xA000 => self.regs[1] = self.shift_reg,
                         0xC000 => self.regs[2] = self.shift_reg,
@@ -180,7 +180,7 @@ impl Mapper for Mmc1 {
         cpu.register_read(DeviceKind::Mapper, AndEqualsAndMask(0xe000, 0x6000, 0x7fff));
         cpu.register_write(DeviceKind::Mapper, AndEqualsAndMask(0xe000, 0x6000, 0x7fff));
         cpu.register_read(DeviceKind::Mapper, AndAndMask(0x8000, 0xffff));
-        cpu.register_write(DeviceKind::Mapper, AndAndMask(0x8000, 0xe001));
+        cpu.register_write(DeviceKind::Mapper, AndAndMask(0x8000, 0xffff));
     }
 
     fn peek(&self, bus: BusKind, addr: u16) -> u8 {

@@ -16,6 +16,7 @@ mod namco163;
 mod nina001;
 mod nina006;
 mod nrom;
+mod rainbow;
 mod uxrom;
 mod vrc4;
 mod vrc6;
@@ -226,6 +227,10 @@ pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
         206 => {
             tracing::warn!("limited mapper support");
             RcMapper::new(mmc3::Mmc3::new(cart, mmc3::Mmc3Variant::Mmc3, debug))
+        }
+        682 => {
+            tracing::warn!("limited mapper support");
+            RcMapper::new(rainbow::Rainbow::new(cart, debug))
         }
         _ => {
             tracing::error!("mapper not implemented");

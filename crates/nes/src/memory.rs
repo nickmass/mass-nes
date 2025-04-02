@@ -210,6 +210,48 @@ impl MappedMemory {
         }
     }
 
+    pub fn read_in_bank(
+        &self,
+        cartridge: &INes,
+        addr: usize,
+        kb: u32,
+        bank: usize,
+        bank_kind: BankKind,
+    ) -> u8 {
+        assert!(
+            addr < (kb as usize) << 10,
+            "address must be less than kb * 1024"
+        );
+        assert_eq!(kb.count_ones(), 1, "kb must be a power of 2");
+        let full_addr = (bank << (kb.trailing_zeros() + 10)) | addr;
+
+        let bank = full_addr >> 10;
+        let addr = (full_addr & 0x3ff) as u16;
+
+        match bank_kind {
+            BankKind::Ram => {
+                let page = self.pages[bank % self.pages.len()];
+                self.mem.read(page, addr)
+            }
+            BankKind::Rom => self.banks.read(cartridge, bank, addr),
+        }
+    }
+
+    pub fn write_in_bank(&self, addr: usize, kb: u32, value: u8, bank: usize) {
+        assert!(
+            addr < (kb as usize) << 10,
+            "address must be less than kb * 1024"
+        );
+        assert_eq!(kb.count_ones(), 1, "kb must be a power of 2");
+        let full_addr = (bank << (kb.trailing_zeros() + 10)) | addr;
+
+        let bank = full_addr >> 10;
+        let addr = (full_addr & 0x3ff) as u16;
+
+        let page = self.pages[bank % self.pages.len()];
+        self.mem.write(page, addr, value)
+    }
+
     pub fn save_wram(&self) -> Option<SaveWram> {
         if self.mem.data.is_empty() {
             return None;
