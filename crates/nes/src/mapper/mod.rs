@@ -228,7 +228,7 @@ pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
             tracing::warn!("limited mapper support");
             RcMapper::new(mmc3::Mmc3::new(cart, mmc3::Mmc3Variant::Mmc3, debug))
         }
-        682 => {
+        682 | 3871 => {
             tracing::warn!("limited mapper support");
             RcMapper::new(rainbow::Rainbow::new(cart, debug))
         }

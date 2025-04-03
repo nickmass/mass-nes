@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::rc::Rc;
 
 use super::vrc6::{FreqMode, Pulse, Sawtooth};
-use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
+use crate::bus::{Address, AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::debug::Debug;
 use crate::mapper::Mapper;
@@ -39,8 +39,10 @@ enum PpuRead {
     Sprite,
     Bg,
     ExtBg(u8),
+    ExtSprite(u8),
     Nametable,
     Attribute,
+    ExtAttribute(u8),
 }
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
@@ -57,7 +59,7 @@ struct PpuState {
     idle_ticks: u8,
     irq_offset: u8,
     irq_jitter: u8,
-    ext_bg_bank: Option<u8>,
+    ext_bg: Option<u8>,
 }
 
 impl PpuState {
@@ -74,11 +76,11 @@ impl PpuState {
             idle_ticks: 0,
             irq_offset: 135,
             irq_jitter: 0,
-            ext_bg_bank: None,
+            ext_bg: None,
         }
     }
 
-    fn fetch(&mut self, addr: u16, nt_mode: Option<u8>, fpga: &MemoryBlock) {
+    fn fetch(&mut self, addr: u16, nt_mode: Option<u8>, fpga: &MemoryBlock, oam: &mut ShadowOam) {
         self.line_fetches = self.line_fetches.saturating_add(1);
 
         if self.line_fetches == self.irq_offset
@@ -98,7 +100,7 @@ impl PpuState {
                     self.in_frame = true;
                     self.scanline = 0;
                 }
-
+                oam.eval(self.scanline);
                 self.line_fetches = 0;
             }
         } else {
@@ -108,47 +110,56 @@ impl PpuState {
         self.last_address = Some(addr);
         self.reading = true;
 
+        if self.in_frame && self.line_fetches >= 128 && self.line_fetches < 160 {
+            oam.oam_addr(0);
+        }
+
         if let Some(nt_mode) = nt_mode {
             if self.in_frame && nt_mode & 0x2 != 0 {
                 if self.line_fetches & 3 == 0 {
                     let fpga_bank = (nt_mode >> 2) & 3;
                     let fpga_addr = (fpga_bank as u16 * 0x400) | (addr & 0x3ff);
                     let value = fpga.read(fpga_addr);
-                    self.ext_bg_bank = Some(value & 0x3f);
+                    self.ext_bg = Some(value);
                 }
             } else {
-                self.ext_bg_bank = None;
+                self.ext_bg = None;
             }
         }
     }
 
-    fn read(&self) -> Option<PpuRead> {
+    fn read(&self, oam: Option<&ShadowOam>) -> Option<PpuRead> {
         if !self.in_frame {
             return None;
         }
 
         let read = match self.line_fetches {
-            fetches if fetches < 128 => match (fetches & 3, self.ext_bg_bank) {
+            fetches if fetches < 128 => match (fetches & 3, self.ext_bg) {
                 (0, _) => PpuRead::Nametable,
+                (1, Some(b)) => PpuRead::ExtAttribute((b >> 6) * 0b0101_0101),
                 (1, _) => PpuRead::Attribute,
-                (2, Some(b)) => PpuRead::ExtBg(b),
-                (3, Some(b)) => PpuRead::ExtBg(b),
+                (2 | 3, Some(b)) => PpuRead::ExtBg(b & 0x3f),
                 (2, _) => PpuRead::Bg,
                 (3, _) => PpuRead::Bg,
                 _ => unreachable!(),
             },
-            fetches if fetches >= 128 && fetches < 160 => match fetches & 3 {
-                0 => PpuRead::Nametable,
-                1 => PpuRead::Nametable,
-                2 => PpuRead::Sprite,
-                3 => PpuRead::Sprite,
+            fetches if fetches >= 128 && fetches < 160 => match (fetches & 3, oam) {
+                (0, _) => PpuRead::Nametable,
+                (1, _) => PpuRead::Nametable,
+                (2 | 3, Some(oam)) => {
+                    let idx = (fetches as usize - 128) / 4;
+                    let tile = oam.line_oam[idx];
+                    PpuRead::ExtSprite(tile)
+                }
+                (2, _) => PpuRead::Sprite,
+                (3, _) => PpuRead::Sprite,
                 _ => unreachable!(),
             },
-            fetches if fetches >= 160 && fetches < 168 => match (fetches & 3, self.ext_bg_bank) {
+            fetches if fetches >= 160 && fetches < 168 => match (fetches & 3, self.ext_bg) {
                 (0, _) => PpuRead::Nametable,
+                (1, Some(b)) => PpuRead::ExtAttribute((b >> 6) * 0b0101_0101),
                 (1, _) => PpuRead::Attribute,
-                (2, Some(b)) => PpuRead::ExtBg(b),
-                (3, Some(b)) => PpuRead::ExtBg(b),
+                (2 | 3, Some(b)) => PpuRead::ExtBg(b & 0x3f),
                 (2, _) => PpuRead::Bg,
                 (3, _) => PpuRead::Bg,
                 _ => unreachable!(),
@@ -197,7 +208,7 @@ impl PpuState {
         self.irq_pending = false;
         self.scanline = 0;
         self.last_address = None;
-        self.ext_bg_bank = None;
+        self.ext_bg = None;
     }
 }
 
@@ -228,17 +239,20 @@ pub struct Rainbow {
     spr_ext_hi: u8,
     ppu_state: PpuState,
     ppu_irq_enabled: bool,
+    oam_state: ShadowOam,
     cpu_irq_latch: u16,
     cpu_irq_counter: u16,
     cpu_irq_pending: bool,
     cpu_irq_enable: bool,
     cpu_irq_ack_enable: bool,
+    cpu_irq_4011_ack: bool,
     fpga_reader_addr: u16,
     fpga_reader_inc: u8,
     pulse_a: Pulse,
     pulse_b: Pulse,
     sawtooth: Sawtooth,
     audio_enable: bool,
+    audio_4011_out: bool,
     master_volume: i16,
     redir_nmi: bool,
     redir_nmi_lo: u8,
@@ -246,7 +260,6 @@ pub struct Rainbow {
     redir_irq: bool,
     redir_irq_lo: u8,
     redir_irq_hi: u8,
-    warn_spr_ext: bool,
     warn_window: bool,
     warn_512_banks: bool,
 }
@@ -299,17 +312,20 @@ impl Rainbow {
             spr_ext_hi: 0,
             ppu_state: PpuState::new(),
             ppu_irq_enabled: false,
+            oam_state: ShadowOam::new(),
             cpu_irq_latch: 0,
             cpu_irq_counter: 0,
             cpu_irq_pending: false,
             cpu_irq_enable: false,
             cpu_irq_ack_enable: false,
+            cpu_irq_4011_ack: false,
             fpga_reader_addr: 0,
             fpga_reader_inc: 1,
             pulse_a: Pulse::new(),
             pulse_b: Pulse::new(),
             sawtooth: Sawtooth::new(),
             audio_enable: true,
+            audio_4011_out: false,
             master_volume,
             redir_nmi: false,
             redir_nmi_lo: 0,
@@ -317,7 +333,6 @@ impl Rainbow {
             redir_irq: false,
             redir_irq_lo: 0,
             redir_irq_hi: 0,
-            warn_spr_ext: false,
             warn_window: false,
             warn_512_banks: false,
         };
@@ -330,6 +345,9 @@ impl Rainbow {
 
     fn peek_cpu(&self, addr: u16) -> u8 {
         match addr {
+            0x4011 if self.audio_4011_out => {
+                (self.pulse_a.sample() + self.pulse_b.sample() + self.sawtooth.sample()) << 2
+            }
             0x4150 => self.ppu_state.scanline,
             0x4151 => {
                 let mut val = 0;
@@ -365,7 +383,7 @@ impl Rainbow {
             0xffff if self.redir_irq => self.redir_irq_hi,
             0x4800..=0x4fff => {
                 let addr = addr - 0x4800;
-                self.fpga_ram.read(addr)
+                self.fpga_ram.read(addr + 0x1800)
             }
             0x5000..=0x5fff => {
                 let bank = if self.fpga_ram_reg & 1 != 0 {
@@ -403,6 +421,12 @@ impl Rainbow {
 
     fn read_cpu(&mut self, addr: u16) -> u8 {
         match addr {
+            0x4011 => {
+                if self.cpu_irq_4011_ack {
+                    self.cpu_irq_pending = false;
+                    self.cpu_irq_enable = self.cpu_irq_ack_enable;
+                }
+            }
             0x4151 => {
                 let mut val = 0;
                 if self.ppu_state.irq_pending {
@@ -424,6 +448,9 @@ impl Rainbow {
                 self.fpga_reader_addr &= 0x1fff;
                 return val;
             }
+            0x4280..=0x4286 => {
+                tracing::error!("rainbow oam routine unsupported: {:04x}", addr);
+            }
             0xfffa | 0xfffb => self.ppu_state.leave_frame(),
             _ => (),
         }
@@ -432,6 +459,9 @@ impl Rainbow {
 
     fn write_cpu(&mut self, addr: u16, value: u8) {
         match addr {
+            0x2000 => self.oam_state.ppu_ctrl(value),
+            0x2003 => self.oam_state.oam_addr(value),
+            0x2004 => self.oam_state.oam_data(value),
             0x4100 => {
                 self.prg_mode = value;
                 self.sync_prg()
@@ -472,8 +502,6 @@ impl Rainbow {
                 self.chr_lo_regs[(addr & 0xf) as usize] = value;
                 self.sync_chr();
             }
-            0x4200..=0x423f => self.spr_ext_lo[(addr & 0x3f) as usize] = value,
-            0x4240 => self.spr_ext_hi = value,
             0x4150 => self.ppu_state.scanline_compare = value,
             0x4151 => self.ppu_irq_enabled = true,
             0x4152 => {
@@ -486,6 +514,7 @@ impl Rainbow {
             0x415a => {
                 self.cpu_irq_enable = value & 1 != 0;
                 self.cpu_irq_ack_enable = value & 2 != 0;
+                self.cpu_irq_4011_ack = value & 4 != 0;
 
                 if self.cpu_irq_enable {
                     self.cpu_irq_counter = self.cpu_irq_latch;
@@ -523,14 +552,19 @@ impl Rainbow {
             0x41a6 => self.sawtooth.accumulator_rate(value),
             0x41a7 => self.sawtooth.freq_low(value),
             0x41a8 => self.sawtooth.freq_high(value),
-            0x41a9 => self.audio_enable = value & 7 != 0,
+            0x41a9 => {
+                self.audio_enable = value & 3 != 0;
+                self.audio_4011_out = value & 4 != 0;
+            }
             0x41aa => {
                 let vol = (value & 0xf) as f32 / 15.0;
                 self.master_volume = (i16::MAX as f32 * vol / 64.0) as i16;
             }
+            0x4200..=0x423f => self.spr_ext_lo[(addr & 0x3f) as usize] = value,
+            0x4240 => self.spr_ext_hi = value,
             0x4800..=0x4fff => {
                 let addr = addr - 0x4800;
-                self.fpga_ram.write(addr, value);
+                self.fpga_ram.write(addr + 0x1800, value);
             }
             0x5000..=0x5fff => {
                 let bank = if self.fpga_ram_reg & 1 != 0 {
@@ -572,7 +606,7 @@ impl Rainbow {
             let mode = self.nt_mode_regs[nt_idx];
             let bank = self.nt_bank_regs[nt_idx];
 
-            let read = self.ppu_state.read();
+            let read = self.ppu_state.read(None);
             if mode & 0x20 != 0 {
                 match read {
                     Some(PpuRead::Attribute) => return self.fill_attr,
@@ -583,12 +617,7 @@ impl Rainbow {
 
             if mode & 0x1 != 0 {
                 match read {
-                    Some(PpuRead::Attribute) => {
-                        let fpga_bank = (mode >> 2) & 3;
-                        let fpga_addr = fpga_bank as u16 * 0x400;
-                        let val = self.fpga_ram.read(fpga_addr);
-                        return (val >> 6) * 0b0101_0101;
-                    }
+                    Some(PpuRead::ExtAttribute(attr)) => return attr,
                     _ => (),
                 }
             }
@@ -617,29 +646,83 @@ impl Rainbow {
                 _ => unreachable!(),
             }
         } else {
-            if let Some(PpuRead::ExtBg(bank)) = self.ppu_state.read() {
-                let bank = (bank as usize) | ((self.bg_ext_hi as usize & 0x1f) << 6);
+            let oam = (self.chr_mode & 0x20 != 0).then_some(&self.oam_state);
+            let ppu_read = self.ppu_state.read(oam);
+
+            let read_from_bank = |addr, bank| {
+                let addr = addr & 0xfff;
                 match self.chr_mode >> 6 {
                     0 => {
-                        let chr_ram_limit = (self.cartridge.chr_ram_bytes >> 12) - 1;
-                        let bank = bank as usize & chr_ram_limit;
-                        let addr = (addr & 0xfff) as usize;
-                        self.chr
-                            .read_in_bank(&self.cartridge, addr, 4, bank, BankKind::Rom)
-                    }
-                    1 => {
                         let chr_rom_limit = (self.cartridge.chr_rom.len() >> 12) - 1;
                         let bank = bank as usize & chr_rom_limit;
-                        let addr = (addr & 0xfff) as usize;
-                        self.chr
-                            .read_in_bank(&self.cartridge, addr, 4, bank, BankKind::Ram)
+                        self.chr.read_in_bank(
+                            &self.cartridge,
+                            addr as usize,
+                            4,
+                            bank,
+                            BankKind::Rom,
+                        )
                     }
-                    _ => self.fpga_ram.read(addr & 0xfff),
+                    1 => {
+                        let chr_ram_limit = (self.cartridge.chr_ram_bytes >> 12) - 1;
+                        let bank = bank as usize & chr_ram_limit;
+                        self.chr.read_in_bank(
+                            &self.cartridge,
+                            addr as usize,
+                            4,
+                            bank,
+                            BankKind::Ram,
+                        )
+                    }
+                    _ => self.fpga_ram.read(addr),
                 }
+            };
+
+            if let Some(PpuRead::ExtBg(bank)) = ppu_read {
+                let bank = (bank as usize) | ((self.bg_ext_hi as usize & 0x1f) << 6);
+                read_from_bank(addr, bank)
+            } else if let Some(PpuRead::ExtSprite(sprite)) = ppu_read {
+                let bank = self.spr_ext_lo[sprite as usize] as usize
+                    | ((self.spr_ext_hi as usize & 0x07) << 8);
+                read_from_bank(addr, bank)
             } else if self.chr_mode & 0x80 != 0 {
                 self.fpga_ram.read(addr & 0xfff)
             } else {
-                self.chr.read(&self.cartridge, addr)
+                if self.chr_mode & 4 == 0 {
+                    self.chr.read(&self.cartridge, addr)
+                } else {
+                    let bank_idx = (addr >> 9) as usize;
+                    let hi = self.chr_hi_regs[bank_idx] as usize;
+                    let lo = self.chr_lo_regs[bank_idx] as usize;
+                    let bank = (hi << 8) | lo;
+                    let addr = (addr as usize & 0x1ff) | ((bank & 1) << 9);
+                    let bank = bank >> 1;
+
+                    match self.chr_mode & 0x40 {
+                        0 => {
+                            let chr_rom_limit = (self.cartridge.chr_rom.len() >> 10) - 1;
+                            let bank = bank as usize & chr_rom_limit;
+                            self.chr.read_in_bank(
+                                &self.cartridge,
+                                addr as usize,
+                                1,
+                                bank,
+                                BankKind::Rom,
+                            )
+                        }
+                        _ => {
+                            let chr_ram_limit = (self.cartridge.chr_ram_bytes >> 10) - 1;
+                            let bank = bank as usize & chr_ram_limit;
+                            self.chr.read_in_bank(
+                                &self.cartridge,
+                                addr as usize,
+                                1,
+                                bank,
+                                BankKind::Ram,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -669,7 +752,21 @@ impl Rainbow {
         } else if self.chr_mode & 0x80 != 0 {
             self.fpga_ram.write(addr & 0xfff, value)
         } else {
-            self.chr.write(addr, value)
+            if self.chr_mode & 4 == 0 {
+                self.chr.write(addr, value)
+            } else {
+                let bank_idx = (addr >> 9) as usize;
+                let hi = self.chr_hi_regs[bank_idx] as usize;
+                let lo = self.chr_lo_regs[bank_idx] as usize;
+                let bank = (hi << 8) | lo;
+                let addr = (addr as usize & 0x1ff) | ((bank & 1) << 9);
+                let bank = bank >> 1;
+
+                if self.chr_mode & 0x40 != 0 {
+                    let bank_limit = (self.cartridge.chr_ram_bytes >> 10) - 1;
+                    self.chr.write_in_bank(addr, 1, value, bank & bank_limit)
+                };
+            }
         }
     }
 
@@ -682,7 +779,7 @@ impl Rainbow {
             let hi = self.prg_ram_hi_regs[idx] & 0x7f;
             let lo = self.prg_ram_lo_regs[idx];
 
-            let bank = hi as usize | lo as usize;
+            let bank = ((hi as usize) << 8) | lo as usize;
 
             if ram {
                 let bank_limit = prg_ram_limit >> size.trailing_zeros();
@@ -708,7 +805,7 @@ impl Rainbow {
             let hi = self.prg_hi_regs[idx] & 0x7f;
             let lo = self.prg_lo_regs[idx];
 
-            let bank = hi as usize | lo as usize;
+            let bank = ((hi as usize) << 8) | lo as usize;
 
             if ram {
                 let bank_limit = prg_ram_limit >> size.trailing_zeros();
@@ -751,12 +848,12 @@ impl Rainbow {
                     let (kind, bank) = map_rom(i, 4);
                     self.prg.map(addr, 4, bank, kind);
                 }
-            } //4k
+            }
         }
     }
 
     fn sync_chr(&mut self) {
-        let ram = self.chr_mode & 0xc0 != 0;
+        let ram = self.chr_mode & 0x40 != 0;
         let chr_rom_limit = (self.cartridge.chr_rom.len() >> 10) - 1;
         let chr_ram_limit = (self.cartridge.chr_ram_bytes >> 10) - 1;
 
@@ -765,16 +862,11 @@ impl Rainbow {
             self.warn_window = true;
         }
 
-        if self.chr_mode & 0x20 != 0 && !self.warn_spr_ext {
-            tracing::error!("rainbow extended sprites unsupported");
-            self.warn_spr_ext = true;
-        }
-
         let map_chr = |idx, size: usize| {
             let hi = self.chr_hi_regs[idx];
             let lo = self.chr_lo_regs[idx];
 
-            let bank = hi as usize | lo as usize;
+            let bank = ((hi as usize) << 8) | lo as usize;
 
             if ram {
                 let bank_limit = chr_ram_limit >> size.trailing_zeros();
@@ -845,6 +937,12 @@ impl Mapper for Rainbow {
 
         cpu.register_read(DeviceKind::Mapper, AndEqualsAndMask(0xf800, 0x4800, 0xffff));
         cpu.register_write(DeviceKind::Mapper, AndEqualsAndMask(0xf800, 0x4800, 0xffff));
+
+        cpu.register_write(DeviceKind::Mapper, Address(0x2000));
+        cpu.register_write(DeviceKind::Mapper, Address(0x2003));
+        cpu.register_write(DeviceKind::Mapper, Address(0x2004));
+
+        cpu.register_read(DeviceKind::Mapper, Address(0x4011));
     }
 
     fn peek(&self, bus: BusKind, addr: u16) -> u8 {
@@ -894,7 +992,8 @@ impl Mapper for Rainbow {
                 None
             };
             let was_irq = self.ppu_state.irq_pending;
-            self.ppu_state.fetch(address, nt_mode, &self.fpga_ram);
+            self.ppu_state
+                .fetch(address, nt_mode, &self.fpga_ram, &mut self.oam_state);
             if self.ppu_irq_enabled && !was_irq && self.ppu_state.irq_pending {
                 self.debug.event(crate::DebugEvent::MapperIrq);
             }
@@ -941,6 +1040,61 @@ impl Mapper for Rainbow {
             self.prg.save_wram()
         } else {
             None
+        }
+    }
+}
+
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone)]
+struct ShadowOam {
+    ppu_ctrl: u8,
+    oam_addr: u8,
+    #[cfg_attr(feature = "save-states", serde(with = "serde_arrays"))]
+    oam: [u8; 256],
+    line_oam: [u8; 8],
+}
+
+impl ShadowOam {
+    fn new() -> Self {
+        Self {
+            ppu_ctrl: 0,
+            oam_addr: 0,
+            oam: [0; 256],
+            line_oam: [0; 8],
+        }
+    }
+
+    fn ppu_ctrl(&mut self, value: u8) {
+        self.ppu_ctrl = value;
+    }
+
+    fn oam_addr(&mut self, value: u8) {
+        self.oam_addr = value;
+    }
+
+    fn oam_data(&mut self, value: u8) {
+        self.oam[self.oam_addr as usize] = value;
+        self.oam_addr = self.oam_addr.wrapping_add(1);
+    }
+
+    fn tall_sprite(&self) -> bool {
+        self.ppu_ctrl & 0x20 != 0
+    }
+
+    fn eval(&mut self, scanline: u8) {
+        let height = if self.tall_sprite() { 16 } else { 8 };
+        let end = scanline + height;
+
+        let mut sprites_on_line = 0;
+
+        for (idx, s) in self.oam.chunks(4).enumerate() {
+            if s[0] >= scanline && s[0] < end {
+                self.line_oam[sprites_on_line] = idx as u8;
+                sprites_on_line += 1;
+                if sprites_on_line == 8 {
+                    break;
+                }
+            }
         }
     }
 }
