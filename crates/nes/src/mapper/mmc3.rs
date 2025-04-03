@@ -6,7 +6,7 @@ use nes_traits::SaveState;
 use serde::{Deserialize, Serialize};
 
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
-use crate::cartridge::{CartMirroring, INes};
+use crate::cartridge::INes;
 use crate::debug::Debug;
 use crate::mapper::Mapper;
 use crate::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
@@ -98,13 +98,13 @@ impl Mmc3 {
             prg.restore_wram(wram);
         }
 
-        let ext_nt = if cartridge.mirroring == CartMirroring::FourScreen {
-            Some([MemoryBlock::new(1), MemoryBlock::new(1)])
+        let (mirroring, ext_nt) = if cartridge.alternative_mirroring {
+            let mirroring = SimpleMirroring::new(super::Mirroring::FourScreen);
+            (mirroring, Some([MemoryBlock::new(1), MemoryBlock::new(1)]))
         } else {
-            None
+            (SimpleMirroring::new(cartridge.mirroring.into()), None)
         };
 
-        let mirroring = SimpleMirroring::new(cartridge.mirroring.into());
         let last = (cartridge.prg_rom.len() / 0x2000) - 1;
 
         let mut rom = Mmc3 {
@@ -156,15 +156,15 @@ impl Mmc3 {
     }
 
     fn read_ppu(&self, addr: u16) -> u8 {
-        if let Some([a, b]) = self.ext_nt.as_ref() {
-            if addr & 0x2000 != 0 {
+        if addr & 0x2000 != 0 {
+            if let Some([a, b]) = self.ext_nt.as_ref() {
                 match addr & 0x400 {
                     0x0000 => a.read(addr & 0x3ff),
                     0x0400 => b.read(addr & 0x3ff),
                     _ => unreachable!(),
                 }
             } else {
-                self.chr.read(&self.cartridge, addr)
+                0
             }
         } else {
             self.chr.read(&self.cartridge, addr)
@@ -238,15 +238,13 @@ impl Mmc3 {
     }
 
     fn write_ppu(&mut self, addr: u16, value: u8) {
-        if let Some([a, b]) = self.ext_nt.as_mut() {
-            if addr & 0x2000 != 0 {
+        if addr & 0x2000 != 0 {
+            if let Some([a, b]) = self.ext_nt.as_mut() {
                 match addr & 0x400 {
                     0x0000 => a.write(addr & 0x3ff, value),
                     0x0400 => b.write(addr & 0x3ff, value),
                     _ => unreachable!(),
                 }
-            } else {
-                self.chr.write(addr, value);
             }
         } else {
             self.chr.write(addr, value);
@@ -359,20 +357,7 @@ impl Mapper for Mmc3 {
     }
 
     fn peek_ppu_fetch(&self, address: u16, _kind: PpuFetchKind) -> Nametable {
-        if let Some(_) = self.ext_nt {
-            if address & 0x2000 != 0 {
-                match address & 0xc00 {
-                    0x0000 => Nametable::InternalA,
-                    0x0400 => Nametable::InternalB,
-                    0x0800 | 0xc00 => Nametable::External,
-                    _ => unreachable!(),
-                }
-            } else {
-                Nametable::External
-            }
-        } else {
-            self.mirroring.ppu_fetch(address)
-        }
+        self.mirroring.ppu_fetch(address)
     }
 
     fn ppu_fetch(&mut self, address: u16, kind: PpuFetchKind) -> super::Nametable {

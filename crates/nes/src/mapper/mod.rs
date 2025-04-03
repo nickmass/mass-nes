@@ -249,7 +249,7 @@ pub enum Mirroring {
     Horizontal,
     Vertical,
     Single(Nametable),
-    Custom,
+    FourScreen,
 }
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
@@ -301,7 +301,11 @@ impl SimpleMirroring {
                 Mirroring::Horizontal => Nametable::InternalB,
                 Mirroring::Vertical if address & 0x400 != 0 => Nametable::InternalA,
                 Mirroring::Vertical => Nametable::InternalB,
-                Mirroring::Custom => Nametable::External,
+                Mirroring::FourScreen => match address & 0xc00 {
+                    0x000 => Nametable::InternalA,
+                    0x400 => Nametable::InternalB,
+                    _ => Nametable::External,
+                },
             }
         } else {
             Nametable::External

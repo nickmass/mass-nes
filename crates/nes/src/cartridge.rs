@@ -41,7 +41,6 @@ enum RomType {
 pub enum CartMirroring {
     Horizontal,
     Vertical,
-    FourScreen,
 }
 
 impl From<CartMirroring> for mapper::Mirroring {
@@ -49,7 +48,6 @@ impl From<CartMirroring> for mapper::Mirroring {
         match value {
             CartMirroring::Horizontal => mapper::Mirroring::Horizontal,
             CartMirroring::Vertical => mapper::Mirroring::Vertical,
-            CartMirroring::FourScreen => mapper::Mirroring::Custom,
         }
     }
 }
@@ -60,6 +58,7 @@ pub struct INes {
     pub prg_rom: Vec<u8>,
     pub chr_rom: Vec<u8>,
     pub mirroring: CartMirroring,
+    pub alternative_mirroring: bool,
     pub mapper: u32,
     pub submapper: Option<u32>,
     pub wram: Option<SaveWram>,
@@ -156,9 +155,8 @@ impl Cartridge {
             file.read_exact(&mut [0; 512])?;
         }
 
-        let mirroring = if header[6] & 0x08 != 0 {
-            CartMirroring::FourScreen
-        } else if header[6] & 0x01 != 0 {
+        let alternative_mirroring = header[6] & 0x08 != 0;
+        let mirroring = if header[6] & 0x01 != 0 {
             CartMirroring::Vertical
         } else {
             CartMirroring::Horizontal
@@ -203,6 +201,7 @@ impl Cartridge {
             prg_rom,
             chr_rom,
             mirroring,
+            alternative_mirroring,
             mapper,
             submapper,
             wram,

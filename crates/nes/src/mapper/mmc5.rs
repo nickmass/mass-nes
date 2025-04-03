@@ -271,9 +271,11 @@ impl Mmc5 {
 
         use MmcNametable as M;
         let mirroring = match cartridge.mirroring {
+            _ if cartridge.alternative_mirroring => {
+                [M::InternalA, M::InternalB, M::Exram, M::Exram]
+            }
             CartMirroring::Horizontal => [M::InternalA, M::InternalA, M::InternalB, M::InternalB],
             CartMirroring::Vertical => [M::InternalA, M::InternalB, M::InternalA, M::InternalB],
-            CartMirroring::FourScreen => [M::InternalA, M::InternalB, M::Exram, M::Exram],
         };
 
         let mut rom = Self {
