@@ -1,5 +1,6 @@
 use crate::debug::Debug;
 use crate::mapper::{self, SaveWram};
+use crate::memory::RomBlock;
 
 use std::{fmt, io, rc::Rc};
 
@@ -55,8 +56,8 @@ impl From<CartMirroring> for mapper::Mirroring {
 pub struct INes {
     pub chr_ram_bytes: usize,
     pub prg_ram_bytes: usize,
-    pub prg_rom: Vec<u8>,
-    pub chr_rom: Vec<u8>,
+    pub prg_rom: RomBlock,
+    pub chr_rom: RomBlock,
     pub mirroring: CartMirroring,
     pub alternative_mirroring: bool,
     pub mapper: u32,
@@ -198,8 +199,8 @@ impl Cartridge {
         let cartridge = INes {
             chr_ram_bytes,
             prg_ram_bytes,
-            prg_rom,
-            chr_rom,
+            prg_rom: RomBlock::new(prg_rom),
+            chr_rom: RomBlock::new(chr_rom),
             mirroring,
             alternative_mirroring,
             mapper,

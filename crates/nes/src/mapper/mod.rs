@@ -263,39 +263,37 @@ pub enum Nametable {
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
 pub struct SimpleMirroring {
-    mirroring: std::cell::Cell<Mirroring>,
+    mirroring: Mirroring,
 }
 
 impl SimpleMirroring {
     pub fn new(mirroring: Mirroring) -> Self {
-        Self {
-            mirroring: std::cell::Cell::new(mirroring),
-        }
+        Self { mirroring }
     }
 
-    pub fn internal_a(&self) {
-        self.mirroring.set(Mirroring::Single(Nametable::InternalA));
+    pub fn internal_a(&mut self) {
+        self.mirroring = Mirroring::Single(Nametable::InternalA);
     }
 
-    pub fn internal_b(&self) {
-        self.mirroring.set(Mirroring::Single(Nametable::InternalB));
+    pub fn internal_b(&mut self) {
+        self.mirroring = Mirroring::Single(Nametable::InternalB);
     }
 
-    pub fn horizontal(&self) {
-        self.mirroring.set(Mirroring::Horizontal);
+    pub fn horizontal(&mut self) {
+        self.mirroring = Mirroring::Horizontal;
     }
 
-    pub fn vertical(&self) {
-        self.mirroring.set(Mirroring::Vertical);
+    pub fn vertical(&mut self) {
+        self.mirroring = Mirroring::Vertical;
     }
 
-    pub fn set(&self, mirroring: Mirroring) {
-        self.mirroring.set(mirroring);
+    pub fn set(&mut self, mirroring: Mirroring) {
+        self.mirroring = mirroring;
     }
 
     pub fn ppu_fetch(&self, address: u16) -> Nametable {
         if address & 0x2000 != 0 {
-            match self.mirroring.get() {
+            match self.mirroring {
                 Mirroring::Single(n) => n,
                 Mirroring::Horizontal if address & 0x800 != 0 => Nametable::InternalA,
                 Mirroring::Horizontal => Nametable::InternalB,

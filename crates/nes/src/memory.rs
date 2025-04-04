@@ -62,6 +62,27 @@ impl MemoryBlock {
     pub fn write(&self, addr: u16, val: u8) {
         self.mem.write(self.page, addr, val);
     }
+
+    pub fn save_wram(&self) -> Option<SaveWram> {
+        if self.mem.data.is_empty() {
+            return None;
+        }
+
+        let mut data = Vec::with_capacity(self.mem.data.len());
+        for b in self.mem.data.iter() {
+            data.push(b.get())
+        }
+
+        Some(SaveWram::from_bytes(data))
+    }
+
+    pub fn restore_wram(&mut self, wram: SaveWram) {
+        let data = wram.to_bytes();
+
+        for (a, b) in self.mem.data.iter().zip(data) {
+            a.set(b);
+        }
+    }
 }
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
@@ -210,48 +231,6 @@ impl MappedMemory {
         }
     }
 
-    pub fn read_in_bank(
-        &self,
-        cartridge: &INes,
-        addr: usize,
-        kb: u32,
-        bank: usize,
-        bank_kind: BankKind,
-    ) -> u8 {
-        assert!(
-            addr < (kb as usize) << 10,
-            "address must be less than kb * 1024"
-        );
-        assert_eq!(kb.count_ones(), 1, "kb must be a power of 2");
-        let full_addr = (bank << (kb.trailing_zeros() + 10)) | addr;
-
-        let bank = full_addr >> 10;
-        let addr = (full_addr & 0x3ff) as u16;
-
-        match bank_kind {
-            BankKind::Ram => {
-                let page = self.pages[bank % self.pages.len()];
-                self.mem.read(page, addr)
-            }
-            BankKind::Rom => self.banks.read(cartridge, bank, addr),
-        }
-    }
-
-    pub fn write_in_bank(&self, addr: usize, kb: u32, value: u8, bank: usize) {
-        assert!(
-            addr < (kb as usize) << 10,
-            "address must be less than kb * 1024"
-        );
-        assert_eq!(kb.count_ones(), 1, "kb must be a power of 2");
-        let full_addr = (bank << (kb.trailing_zeros() + 10)) | addr;
-
-        let bank = full_addr >> 10;
-        let addr = (full_addr & 0x3ff) as u16;
-
-        let page = self.pages[bank % self.pages.len()];
-        self.mem.write(page, addr, value)
-    }
-
     pub fn save_wram(&self) -> Option<SaveWram> {
         if self.mem.data.is_empty() {
             return None;
@@ -271,5 +250,82 @@ impl MappedMemory {
         for (a, b) in self.mem.data.iter().zip(data) {
             a.set(b);
         }
+    }
+}
+
+pub struct RomBlock {
+    rom: Vec<u8>,
+}
+
+impl RomBlock {
+    pub fn new(rom: Vec<u8>) -> RomBlock {
+        RomBlock { rom }
+    }
+}
+
+impl std::ops::Deref for RomBlock {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.rom
+    }
+}
+
+impl std::ops::DerefMut for RomBlock {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.rom
+    }
+}
+
+impl Memory for RomBlock {
+    fn len(&self) -> usize {
+        self.rom.len()
+    }
+
+    fn read(&self, address: usize) -> u8 {
+        let address = address % self.len();
+        self.rom[address]
+    }
+
+    fn write(&mut self, _address: usize, _value: u8) {}
+}
+
+impl Memory for MemoryBlock {
+    fn len(&self) -> usize {
+        self.mem.data.len()
+    }
+
+    fn read(&self, address: usize) -> u8 {
+        let address = address % self.len();
+        self.mem.data[address].get()
+    }
+
+    fn write(&mut self, address: usize, value: u8) {
+        let address = address % self.len();
+        self.mem.data[address].set(value);
+    }
+}
+
+pub trait Memory {
+    fn len(&self) -> usize;
+    fn read(&self, address: usize) -> u8;
+    fn write(&mut self, address: usize, value: u8);
+
+    fn read_mapped(&self, bank: usize, bank_size: usize, addr: u16) -> u8 {
+        assert_eq!(bank_size.count_ones(), 1, "bank_size must be power of 2");
+        let low_addr = (addr as usize) & (bank_size - 1);
+        let high_addr = bank << bank_size.trailing_zeros();
+        let full_addr = high_addr | low_addr;
+
+        self.read(full_addr)
+    }
+
+    fn write_mapped(&mut self, bank: usize, bank_size: usize, addr: u16, value: u8) {
+        assert_eq!(bank_size.count_ones(), 1, "bank_size must be power of 2");
+        let low_addr = (addr as usize) & (bank_size - 1);
+        let high_addr = bank << bank_size.trailing_zeros();
+        let full_addr = high_addr | low_addr;
+
+        self.write(full_addr, value)
     }
 }

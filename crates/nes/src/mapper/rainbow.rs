@@ -11,10 +11,17 @@ use crate::bus::{Address, AddressBus, AndAndMask, AndEqualsAndMask, BusKind, Dev
 use crate::cartridge::INes;
 use crate::debug::Debug;
 use crate::mapper::Mapper;
-use crate::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
+use crate::memory::{Memory, MemoryBlock};
 use crate::ppu::PpuFetchKind;
 
 use super::Nametable;
+
+#[derive(Debug, Copy, Clone)]
+enum MemSource {
+    Rom,
+    Ram,
+    Fpga,
+}
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
@@ -43,6 +50,724 @@ enum PpuRead {
     Nametable,
     Attribute,
     ExtAttribute(u8),
+}
+
+#[cfg_attr(feature = "save-states", derive(SaveState))]
+pub struct Rainbow {
+    #[cfg_attr(feature = "save-states", save(skip))]
+    cartridge: INes,
+    #[cfg_attr(feature = "save-states", save(skip))]
+    debug: Rc<Debug>,
+    prg_ram: MemoryBlock,
+    chr_ram: MemoryBlock,
+    fpga_ram: MemoryBlock,
+    // Storing CIRAM inside mapper greatly simplifies applying window/ext-bg effects
+    nt_ram: MemoryBlock,
+    prg_mode: u8,
+    prg_lo_regs: [u8; 8],
+    prg_hi_regs: [u8; 8],
+    prg_ram_lo_regs: [u8; 2],
+    prg_ram_hi_regs: [u8; 2],
+    fpga_ram_reg: u8,
+    chr_mode: u8,
+    bg_ext_hi: u8,
+    nt_bank_regs: [u8; 5],
+    nt_mode_regs: [u8; 5],
+    fill_tile: u8,
+    fill_attr: u8,
+    chr_lo_regs: [u8; 16],
+    chr_hi_regs: [u8; 16],
+    spr_ext_lo: SpriteExtRegs,
+    spr_ext_hi: u8,
+    ppu_state: PpuState,
+    ppu_irq_enabled: bool,
+    oam_state: ShadowOam,
+    cpu_irq_latch: u16,
+    cpu_irq_counter: u16,
+    cpu_irq_pending: bool,
+    cpu_irq_enable: bool,
+    cpu_irq_ack_enable: bool,
+    cpu_irq_4011_ack: bool,
+    fpga_reader_addr: u16,
+    fpga_reader_inc: u8,
+    pulse_a: Pulse,
+    pulse_b: Pulse,
+    sawtooth: Sawtooth,
+    audio_enable: bool,
+    audio_4011_out: bool,
+    master_volume: i16,
+    redir_nmi: bool,
+    redir_nmi_lo: u8,
+    redir_nmi_hi: u8,
+    redir_irq: bool,
+    redir_irq_lo: u8,
+    redir_irq_hi: u8,
+    wifi_enable: bool,
+    wifi_irq_enable: bool,
+    wifi_tx_addr: u8,
+    wifi_rx_addr: u8,
+    wifi_data_pending: bool,
+    window_tile_start: u8,
+    window_tile_end: u8,
+    window_line_start: u8,
+    window_line_end: u8,
+    window_tile_scroll: u8,
+    window_line_scroll: u8,
+    warn_oam: bool,
+}
+
+impl Rainbow {
+    pub fn new(mut cartridge: INes, debug: Rc<Debug>) -> Self {
+        let mut prg_ram = MemoryBlock::new(cartridge.prg_ram_bytes / 1024);
+        if let Some(wram) = cartridge.wram.take() {
+            prg_ram.restore_wram(wram);
+        }
+
+        let fpga_ram = MemoryBlock::new(8);
+        for (addr, &value) in BOOTROM_FPGA.iter().enumerate() {
+            fpga_ram.write(addr as u16, value);
+        }
+
+        let chr_ram = MemoryBlock::new(cartridge.chr_ram_bytes / 1024);
+        let nt_ram = MemoryBlock::new(2);
+
+        let master_volume = (i16::MAX as f32 / 64.0) as i16;
+
+        Self {
+            cartridge,
+            debug,
+            prg_ram,
+            chr_ram,
+            fpga_ram,
+            nt_ram,
+            prg_mode: 0,
+            prg_lo_regs: [0; 8],
+            prg_hi_regs: [0; 8],
+            prg_ram_lo_regs: [0; 2],
+            prg_ram_hi_regs: [0; 2],
+            fpga_ram_reg: 0,
+            chr_mode: 0,
+            bg_ext_hi: 0,
+            nt_bank_regs: [0, 0, 1, 1, 0],
+            nt_mode_regs: [0, 0, 0, 0, 0x80],
+            fill_tile: 0,
+            fill_attr: 0,
+            chr_lo_regs: [0; 16],
+            chr_hi_regs: [0; 16],
+            spr_ext_lo: SpriteExtRegs([0; 64]),
+            spr_ext_hi: 0,
+            ppu_state: PpuState::new(),
+            ppu_irq_enabled: false,
+            oam_state: ShadowOam::new(),
+            cpu_irq_latch: 0,
+            cpu_irq_counter: 0,
+            cpu_irq_pending: false,
+            cpu_irq_enable: false,
+            cpu_irq_ack_enable: false,
+            cpu_irq_4011_ack: false,
+            fpga_reader_addr: 0,
+            fpga_reader_inc: 1,
+            pulse_a: Pulse::new(),
+            pulse_b: Pulse::new(),
+            sawtooth: Sawtooth::new(),
+            audio_enable: true,
+            audio_4011_out: false,
+            master_volume,
+            redir_nmi: false,
+            redir_nmi_lo: 0,
+            redir_nmi_hi: 0,
+            redir_irq: false,
+            redir_irq_lo: 0,
+            redir_irq_hi: 0,
+            wifi_enable: false,
+            wifi_irq_enable: false,
+            wifi_tx_addr: 0,
+            wifi_rx_addr: 0,
+            wifi_data_pending: false,
+            window_tile_start: 0,
+            window_tile_end: 0,
+            window_line_start: 0,
+            window_line_end: 0,
+            window_tile_scroll: 0,
+            window_line_scroll: 0,
+            warn_oam: false,
+        }
+    }
+
+    fn peek_cpu(&self, addr: u16) -> u8 {
+        match addr {
+            0x4011 if self.audio_4011_out => {
+                (self.pulse_a.sample() + self.pulse_b.sample() + self.sawtooth.sample()) << 1
+            }
+            0x4100 => self.prg_mode,
+            0x4120 => self.chr_mode,
+            0x412a..=0x412d => self.nt_mode_regs[(addr - 0x412a) as usize],
+            0x412f => self.nt_mode_regs[4],
+            0x4150 => self.ppu_state.scanline,
+            0x4151 => {
+                let mut val = 0;
+                if self.ppu_state.irq_pending {
+                    val |= 1;
+                }
+                if self.ppu_state.in_frame {
+                    val |= 0x40;
+                }
+                if self.ppu_state.hblank() {
+                    val |= 0x80;
+                }
+
+                val
+            }
+            0x4154 => self.ppu_state.irq_jitter,
+            0x415f => self.fpga_ram.read(self.fpga_reader_addr),
+            0x4160 => 0x20,
+            0x4161 => {
+                let mut val = 0;
+                if self.cpu_irq_pending {
+                    val |= 0x40;
+                }
+                if self.ppu_state.irq_pending {
+                    val |= 0x80;
+                }
+
+                val
+            }
+            0x4190 => {
+                let mut val = 0;
+                if self.wifi_enable {
+                    val |= 1;
+                }
+                if self.wifi_irq_enable {
+                    val |= 2;
+                }
+
+                val
+            }
+            0x4191 => 0,
+            0x4192 => {
+                let mut val = 0;
+                if !self.wifi_data_pending {
+                    val |= 0x80;
+                }
+
+                val
+            }
+            0xfffa if self.redir_nmi => self.redir_nmi_lo,
+            0xfffb if self.redir_nmi => self.redir_nmi_hi,
+            0xfffe if self.redir_irq => self.redir_irq_lo,
+            0xffff if self.redir_irq => self.redir_irq_hi,
+            0x4800.. => self.read_prg(addr),
+            _ => 0,
+        }
+    }
+
+    fn read_cpu(&mut self, addr: u16) -> u8 {
+        match addr {
+            0x4011 => {
+                if self.cpu_irq_4011_ack {
+                    self.cpu_irq_pending = false;
+                    self.cpu_irq_enable = self.cpu_irq_ack_enable;
+                }
+            }
+            0x4151 => {
+                let mut val = 0;
+                if self.ppu_state.irq_pending {
+                    val |= 1;
+                }
+                if self.ppu_state.in_frame {
+                    val |= 0x40;
+                }
+                if self.ppu_state.hblank() {
+                    val |= 0x80;
+                }
+
+                self.ppu_state.irq_pending = false;
+                return val;
+            }
+            0x415f => {
+                let val = self.fpga_ram.read(self.fpga_reader_addr);
+                self.fpga_reader_addr += self.fpga_reader_inc as u16;
+                self.fpga_reader_addr &= 0x1fff;
+                return val;
+            }
+            0x4280..=0x4286 => {
+                if !self.warn_oam {
+                    tracing::error!("rainbow oam routine unsupported: {:04x}", addr);
+                    self.warn_oam = true;
+                }
+            }
+            0xfffa | 0xfffb => self.ppu_state.leave_frame(),
+            _ => (),
+        }
+        self.peek_cpu(addr)
+    }
+
+    fn write_cpu(&mut self, addr: u16, value: u8) {
+        match addr {
+            0x2000 => self.oam_state.ppu_ctrl(value),
+            0x2003 => self.oam_state.oam_addr(value),
+            0x2004 => self.oam_state.oam_data(value),
+            0x4100 => self.prg_mode = value,
+            0x4108..=0x410f => self.prg_hi_regs[(addr & 7) as usize] = value,
+            0x4118..=0x411f => self.prg_lo_regs[(addr & 7) as usize] = value,
+            0x4106..=0x4107 => self.prg_ram_hi_regs[(addr & 1) as usize] = value,
+            0x4116..=0x4117 => self.prg_ram_lo_regs[(addr & 1) as usize] = value,
+            0x4115 => self.fpga_ram_reg = value,
+            0x4120 => self.chr_mode = value,
+            0x4121 => self.bg_ext_hi = value,
+            0x4126..=0x4129 => self.nt_bank_regs[(addr - 0x4126) as usize] = value,
+            0x412a..=0x412d => self.nt_mode_regs[(addr - 0x412a) as usize] = value,
+            0x412e => self.nt_bank_regs[4] = value,
+            0x412f => self.nt_mode_regs[4] = (value & 0x3f) | 0x80,
+            0x4124 => self.fill_tile = value,
+            0x4125 => self.fill_attr = (value & 3) * 0b0101_0101,
+            0x4130..=0x413f => self.chr_hi_regs[(addr & 0xf) as usize] = value,
+            0x4140..=0x414f => self.chr_lo_regs[(addr & 0xf) as usize] = value,
+            0x4150 => self.ppu_state.scanline_compare = value,
+            0x4151 => self.ppu_irq_enabled = true,
+            0x4152 => {
+                self.ppu_irq_enabled = false;
+                self.ppu_state.irq_pending = false;
+            }
+            0x4153 => self.ppu_state.irq_offset = value.max(1).min(170),
+            0x4158 => self.cpu_irq_latch = (self.cpu_irq_latch & 0x00ff) | ((value as u16) << 8),
+            0x4159 => self.cpu_irq_latch = (self.cpu_irq_latch & 0xff00) | (value as u16),
+            0x415a => {
+                self.cpu_irq_enable = value & 1 != 0;
+                self.cpu_irq_ack_enable = value & 2 != 0;
+                self.cpu_irq_4011_ack = value & 4 != 0;
+
+                if self.cpu_irq_enable {
+                    self.cpu_irq_counter = self.cpu_irq_latch;
+                }
+            }
+            0x415b => {
+                self.cpu_irq_pending = false;
+                self.cpu_irq_enable = self.cpu_irq_ack_enable;
+            }
+            0x415c => {
+                self.fpga_reader_addr =
+                    (self.fpga_reader_addr & 0x00ff) | ((value as u16 & 0x1f) << 8)
+            }
+            0x415d => self.fpga_reader_addr = (self.fpga_reader_addr & 0xff00) | (value as u16),
+            0x415e => self.fpga_reader_inc = value,
+            0x415f => {
+                self.fpga_ram.write(self.fpga_reader_addr, value);
+                self.fpga_reader_addr += self.fpga_reader_inc as u16;
+                self.fpga_reader_addr &= 0x1fff;
+            }
+            0x416b => {
+                self.redir_nmi = value & 1 != 0;
+                self.redir_irq = value & 2 != 0;
+            }
+            0x416c => self.redir_nmi_hi = value,
+            0x416d => self.redir_nmi_lo = value,
+            0x416e => self.redir_irq_hi = value,
+            0x416f => self.redir_irq_lo = value,
+            0x4170 => self.window_tile_start = value & 0x1f,
+            0x4171 => self.window_tile_end = value & 0x1f,
+            0x4172 => self.window_line_start = value,
+            0x4173 => self.window_line_end = value,
+            0x4174 => self.window_tile_scroll = value & 0x1f,
+            0x4175 => self.window_line_scroll = value,
+            0x4190 => {
+                self.wifi_enable = value & 1 != 0;
+                self.wifi_irq_enable = value & 2 != 0;
+            }
+            0x4191 => (),
+            0x4192 => self.wifi_data_pending = true,
+            0x4193 => self.wifi_rx_addr = value & 0x7,
+            0x4194 => self.wifi_tx_addr = value & 0x7,
+            0x41a0 => self.pulse_a.volume(value),
+            0x41a1 => self.pulse_a.freq_low(value),
+            0x41a2 => self.pulse_a.freq_high(value),
+            0x41a3 => self.pulse_b.volume(value),
+            0x41a4 => self.pulse_b.freq_low(value),
+            0x41a5 => self.pulse_b.freq_high(value),
+            0x41a6 => self.sawtooth.accumulator_rate(value),
+            0x41a7 => self.sawtooth.freq_low(value),
+            0x41a8 => self.sawtooth.freq_high(value),
+            0x41a9 => {
+                self.audio_enable = value & 3 != 0;
+                self.audio_4011_out = value & 4 != 0;
+            }
+            0x41aa => {
+                let vol = (value & 0xf) as f32 / 15.0;
+                self.master_volume = (i16::MAX as f32 * vol / 64.0) as i16;
+            }
+            0x4200..=0x423f => self.spr_ext_lo[(addr & 0x3f) as usize] = value,
+            0x4240 => self.spr_ext_hi = value,
+            0x4800.. => self.write_prg(addr, value),
+            _ => tracing::debug!("unsupported rainbow write reg: {addr:04x}:{value:02x}"),
+        }
+    }
+
+    fn read_ppu(&self, addr: u16) -> u8 {
+        let (addr, nt_idx) = if let Some(win_addr) = self.window_address(addr) {
+            (win_addr, 4)
+        } else {
+            (addr, ((addr >> 10) & 0x3) as usize)
+        };
+
+        let oam = (self.chr_mode & 0x20 != 0).then_some(&self.oam_state);
+        let ppu_read = self.ppu_state.read(oam);
+
+        if addr & 0x2000 != 0 {
+            let mode = self.nt_mode_regs[nt_idx];
+            let bank = self.nt_bank_regs[nt_idx] as usize;
+
+            let fill = mode & 0x20 != 0;
+            let ext_attr = mode & 0x1 != 0;
+            let chip = mode >> 6 & 3;
+
+            match ppu_read {
+                Some(PpuRead::Attribute) if fill => return self.fill_attr,
+                Some(PpuRead::Nametable) if fill => return self.fill_tile,
+                Some(PpuRead::ExtAttribute(attr)) if ext_attr => return attr,
+                _ => (),
+            }
+
+            match chip {
+                0 => self.nt_ram.read_mapped(bank & 1, 1024, addr),
+                1 => self.chr_ram.read_mapped(bank, 1024, addr),
+                2 => self.fpga_ram.read_mapped(bank & 3, 1024, addr),
+                3 => self.cartridge.chr_rom.read_mapped(bank, 1024, addr),
+                _ => unreachable!(),
+            }
+        } else {
+            match ppu_read {
+                Some(PpuRead::ExtBg(bank)) => {
+                    let bank = bank as usize | (self.bg_ext_hi as usize & 0x1f) << 6;
+                    self.read_bank_chr(bank, addr, 4096)
+                }
+                Some(PpuRead::ExtSprite(sprite)) => {
+                    let bank = self.spr_ext_lo[sprite as usize] as usize
+                        | (self.spr_ext_hi as usize & 0x07) << 8;
+                    self.read_bank_chr(bank, addr, 4096)
+                }
+                _ => self.read_chr(addr),
+            }
+        }
+    }
+
+    fn write_ppu(&mut self, addr: u16, value: u8) {
+        if addr & 0x2000 != 0 {
+            let nt_idx = ((addr >> 10) & 0x3) as usize;
+            let mode = self.nt_mode_regs[nt_idx];
+            let bank = self.nt_bank_regs[nt_idx] as usize;
+            let chip = mode >> 6 & 3;
+
+            match chip {
+                0 => self.nt_ram.write_mapped(bank & 1, 1024, addr, value),
+                1 => self.chr_ram.write_mapped(bank, 1024, addr, value),
+                2 => self.fpga_ram.write_mapped(bank & 3, 1024, addr, value),
+                3 => (), // chr-rom,
+                _ => unreachable!(),
+            }
+        } else {
+            self.write_chr(addr, value);
+        }
+    }
+
+    fn read_prg(&self, addr: u16) -> u8 {
+        let (bank, size, mem_source) = self.map_prg(addr);
+        match mem_source {
+            MemSource::Rom => self.cartridge.prg_rom.read_mapped(bank, size, addr),
+            MemSource::Ram => self.prg_ram.read_mapped(bank, size, addr),
+            MemSource::Fpga => self.fpga_ram.read_mapped(bank, size, addr),
+        }
+    }
+
+    fn write_prg(&mut self, addr: u16, value: u8) {
+        let (bank, size, mem_source) = self.map_prg(addr);
+        match mem_source {
+            MemSource::Rom => self.cartridge.prg_rom.write_mapped(bank, size, addr, value),
+            MemSource::Ram => self.prg_ram.write_mapped(bank, size, addr, value),
+            MemSource::Fpga => self.fpga_ram.write_mapped(bank, size, addr, value),
+        }
+    }
+
+    fn map_prg(&self, addr: u16) -> (usize, usize, MemSource) {
+        if addr < 0x6000 {
+            let (bank, size) = match addr {
+                0x4800..0x5000 => (3, 2 * 1024),
+                0x5000..0x6000 => ((self.fpga_ram_reg & 1) as usize, 4 * 1024),
+                _ => unreachable!(),
+            };
+            return (bank, size, MemSource::Fpga);
+        }
+
+        let prg_rom_mode = self.prg_mode & 0x7;
+        let prg_ram_mode = self.prg_mode >> 7;
+        let ram_bank = addr < 0x8000;
+        let (bank_idx, size_kb) = if ram_bank {
+            match (addr, prg_ram_mode) {
+                (0x6000..0x8000, 0) => (0, 8),
+                (0x6000..0x7000, 1) => (0, 4),
+                (0x7000..0x8000, 1) => (1, 4),
+                _ => unreachable!(),
+            }
+        } else {
+            let addr = addr >> 12 & 7;
+            match prg_rom_mode {
+                0 => (0, 32),
+                1 => (addr & 0xfffc, 16),
+                2 => match addr >> 1 {
+                    2 => (4, 8),
+                    3 => (6, 8),
+                    _ => (0, 16),
+                },
+                3 => (addr & 0xfffe, 8),
+                _ => (addr, 4),
+            }
+        };
+        let bank_idx = bank_idx as usize;
+        let size = size_kb * 1024;
+
+        let bank_reg = if ram_bank {
+            (self.prg_ram_hi_regs[bank_idx] as usize) << 8 | self.prg_ram_lo_regs[bank_idx] as usize
+        } else {
+            (self.prg_hi_regs[bank_idx] as usize) << 8 | self.prg_lo_regs[bank_idx] as usize
+        };
+
+        let mem_source = match bank_reg >> 14 & 3 {
+            0 | 1 => MemSource::Rom,
+            3 if ram_bank => MemSource::Fpga,
+            _ => MemSource::Ram,
+        };
+
+        let bank = bank_reg & 0x7fff;
+
+        (bank, size, mem_source)
+    }
+
+    fn read_chr(&self, addr: u16) -> u8 {
+        if self.chr_mode & 0x80 != 0 {
+            return self.fpga_ram.read(addr & 0xfff);
+        }
+
+        let ram = self.chr_mode & 0x40 != 0;
+
+        let (bank, size) = self.map_chr(addr);
+
+        if ram {
+            self.chr_ram.read_mapped(bank, size, addr)
+        } else {
+            self.cartridge.chr_rom.read_mapped(bank, size, addr)
+        }
+    }
+
+    fn read_bank_chr(&self, bank: usize, addr: u16, size: usize) -> u8 {
+        if self.chr_mode & 0x80 != 0 {
+            return self.fpga_ram.read(addr & 0xfff);
+        }
+
+        let ram = self.chr_mode & 0x40 != 0;
+
+        if ram {
+            self.chr_ram.read_mapped(bank, size, addr)
+        } else {
+            self.cartridge.chr_rom.read_mapped(bank, size, addr)
+        }
+    }
+
+    fn write_chr(&mut self, addr: u16, value: u8) {
+        if self.chr_mode & 0x80 != 0 {
+            return self.fpga_ram.write(addr & 0xfff, value);
+        }
+
+        let ram = self.chr_mode & 0x40 != 0;
+        if !ram {
+            return;
+        }
+
+        let (bank, size) = self.map_chr(addr);
+
+        self.chr_ram.write_mapped(bank, size, addr, value);
+    }
+
+    fn map_chr(&self, addr: u16) -> (usize, usize) {
+        let size: usize = match self.chr_mode & 7 {
+            0 => 8 * 1024,
+            1 => 4 * 1024,
+            2 => 2 * 1024,
+            3 => 1024,
+            _ => 512,
+        };
+
+        let bank_idx = (addr >> size.trailing_zeros()) as usize;
+        let hi = self.chr_hi_regs[bank_idx] as usize;
+        let lo = self.chr_lo_regs[bank_idx] as usize;
+        (hi << 8 | lo, size)
+    }
+
+    fn is_in_window(&self, tile: u8, scanline: u8) -> bool {
+        if self.window_tile_start <= self.window_tile_end {
+            if tile < self.window_tile_start || tile > self.window_tile_end {
+                return false;
+            }
+        } else {
+            if tile < self.window_tile_start && tile > self.window_tile_end {
+                return false;
+            }
+        }
+
+        if self.window_line_start <= self.window_line_end {
+            if scanline < self.window_line_start || scanline > self.window_line_end {
+                return false;
+            }
+        } else {
+            if scanline < self.window_line_start && scanline > self.window_line_end {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn window_address(&self, addr: u16) -> Option<u16> {
+        if self.chr_mode & 0x10 == 0 {
+            return None;
+        }
+
+        let tile = self.ppu_state.tile_number()?;
+        let scanline = self.ppu_state.render_line()?;
+
+        if !self.is_in_window(tile, scanline) {
+            return None;
+        }
+
+        let x = self.window_tile_scroll as u16 + tile as u16;
+        let y = self.window_line_scroll as u16 + scanline as u16;
+        let mut coarse_y = y >> 3;
+        if coarse_y >= 30 {
+            coarse_y -= 30;
+        }
+
+        let nt_addr = ((coarse_y) << 5) | (x & 0x1f);
+
+        match self.ppu_state.read(None)? {
+            PpuRead::Attribute => Some(
+                0x23c0 | (nt_addr & 0x0c00) | ((nt_addr >> 4) & 0x38) | ((nt_addr >> 2) & 0x07),
+            ),
+            PpuRead::Nametable => Some(0x2000 | (nt_addr & 0xfff)),
+            PpuRead::Bg => Some((addr & 0xfff8) | (y & 7)),
+            _ => None,
+        }
+    }
+}
+
+impl Mapper for Rainbow {
+    fn register(&self, cpu: &mut AddressBus) {
+        cpu.register_read(DeviceKind::Mapper, AndAndMask(0x8000, 0xffff));
+        cpu.register_write(DeviceKind::Mapper, AndAndMask(0x8000, 0xffff));
+        cpu.register_read(DeviceKind::Mapper, AndEqualsAndMask(0xe000, 0x6000, 0x7fff));
+        cpu.register_write(DeviceKind::Mapper, AndEqualsAndMask(0xe000, 0x6000, 0x7fff));
+
+        cpu.register_read(DeviceKind::Mapper, AndEqualsAndMask(0xf000, 0x5000, 0xffff));
+        cpu.register_write(DeviceKind::Mapper, AndEqualsAndMask(0xf000, 0x5000, 0xffff));
+
+        cpu.register_read(DeviceKind::Mapper, AndEqualsAndMask(0xff00, 0x4100, 0xffff));
+        cpu.register_write(DeviceKind::Mapper, AndEqualsAndMask(0xff00, 0x4100, 0xffff));
+
+        cpu.register_read(DeviceKind::Mapper, AndEqualsAndMask(0xff00, 0x4200, 0xffff));
+        cpu.register_write(DeviceKind::Mapper, AndEqualsAndMask(0xff00, 0x4200, 0xffff));
+
+        cpu.register_read(DeviceKind::Mapper, AndEqualsAndMask(0xf800, 0x4800, 0xffff));
+        cpu.register_write(DeviceKind::Mapper, AndEqualsAndMask(0xf800, 0x4800, 0xffff));
+
+        cpu.register_write(DeviceKind::Mapper, Address(0x2000));
+        cpu.register_write(DeviceKind::Mapper, Address(0x2003));
+        cpu.register_write(DeviceKind::Mapper, Address(0x2004));
+
+        cpu.register_read(DeviceKind::Mapper, Address(0x4011));
+    }
+
+    fn peek(&self, bus: BusKind, addr: u16) -> u8 {
+        match bus {
+            BusKind::Cpu => self.peek_cpu(addr),
+            BusKind::Ppu => self.read_ppu(addr),
+        }
+    }
+
+    fn read(&mut self, bus: BusKind, addr: u16) -> u8 {
+        match bus {
+            BusKind::Cpu => self.read_cpu(addr),
+            BusKind::Ppu => self.read_ppu(addr),
+        }
+    }
+
+    fn write(&mut self, bus: BusKind, addr: u16, value: u8) {
+        match bus {
+            BusKind::Cpu => self.write_cpu(addr, value),
+            BusKind::Ppu => self.write_ppu(addr, value),
+        }
+    }
+
+    fn peek_ppu_fetch(&self, _address: u16, _kind: PpuFetchKind) -> Nametable {
+        // Storing CIRAM inside mapper to give a chance to apply windowing and ext-attr
+        Nametable::External
+    }
+
+    fn ppu_fetch(&mut self, address: u16, kind: PpuFetchKind) -> Nametable {
+        if kind != PpuFetchKind::Idle {
+            let nt_mode = if (address & 0x2000) != 0 {
+                let nt_idx = ((address >> 10) & 0x3) as usize;
+                Some(self.nt_mode_regs[nt_idx])
+            } else {
+                None
+            };
+            let was_irq = self.ppu_state.irq_pending;
+            self.ppu_state
+                .fetch(address, nt_mode, &self.fpga_ram, &mut self.oam_state);
+            if self.ppu_irq_enabled && !was_irq && self.ppu_state.irq_pending {
+                self.debug.event(crate::DebugEvent::MapperIrq);
+            }
+        }
+
+        self.peek_ppu_fetch(address, kind)
+    }
+
+    fn tick(&mut self) {
+        if self.cpu_irq_enable {
+            self.cpu_irq_counter = self.cpu_irq_counter.saturating_sub(1);
+            if self.cpu_irq_counter == 0 {
+                self.cpu_irq_counter = self.cpu_irq_latch;
+                self.cpu_irq_pending = true;
+                self.debug.event(crate::DebugEvent::MapperIrq);
+            }
+        }
+        self.ppu_state.tick();
+        self.pulse_a.tick(FreqMode::X1);
+        self.pulse_b.tick(FreqMode::X1);
+        self.sawtooth.tick(FreqMode::X1);
+    }
+
+    fn get_irq(&mut self) -> bool {
+        (self.ppu_irq_enabled && self.ppu_state.irq_pending)
+            || (self.cpu_irq_enable && self.cpu_irq_pending)
+    }
+
+    fn get_sample(&self) -> Option<i16> {
+        if self.audio_enable {
+            let val = (self.pulse_a.sample() as i16
+                + self.pulse_b.sample() as i16
+                + self.sawtooth.sample() as i16)
+                * self.master_volume;
+
+            Some(val)
+        } else {
+            Some(0)
+        }
+    }
+
+    fn save_wram(&self) -> Option<super::SaveWram> {
+        if self.cartridge.battery {
+            self.prg_ram.save_wram()
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
@@ -184,6 +909,18 @@ impl PpuState {
         }
     }
 
+    fn render_line(&self) -> Option<u8> {
+        if !self.in_frame {
+            return None;
+        }
+
+        if self.line_fetches >= 160 {
+            Some(self.scanline.wrapping_add(1))
+        } else {
+            Some(self.scanline)
+        }
+    }
+
     fn tick(&mut self) {
         self.irq_jitter = self.irq_jitter.saturating_add(1);
         if self.reading {
@@ -207,959 +944,6 @@ impl PpuState {
         self.scanline = 0;
         self.last_address = None;
         self.ext_bg = None;
-    }
-}
-
-#[cfg_attr(feature = "save-states", derive(SaveState))]
-pub struct Rainbow {
-    #[cfg_attr(feature = "save-states", save(skip))]
-    cartridge: INes,
-    #[cfg_attr(feature = "save-states", save(skip))]
-    debug: Rc<Debug>,
-    prg: MappedMemory,
-    chr: MappedMemory,
-    fpga_ram: MemoryBlock,
-    // Storing CIRAM inside mapper greatly simplifies applying window/ext-bg effects
-    nt_ram: [MemoryBlock; 2],
-    prg_mode: u8,
-    prg_lo_regs: [u8; 8],
-    prg_hi_regs: [u8; 8],
-    prg_ram_lo_regs: [u8; 2],
-    prg_ram_hi_regs: [u8; 2],
-    fpga_ram_reg: u8,
-    chr_mode: u8,
-    bg_ext_hi: u8,
-    nt_bank_regs: [u8; 5],
-    nt_mode_regs: [u8; 5],
-    fill_tile: u8,
-    fill_attr: u8,
-    chr_lo_regs: [u8; 16],
-    chr_hi_regs: [u8; 16],
-    spr_ext_lo: SpriteExtRegs,
-    spr_ext_hi: u8,
-    ppu_state: PpuState,
-    ppu_irq_enabled: bool,
-    oam_state: ShadowOam,
-    cpu_irq_latch: u16,
-    cpu_irq_counter: u16,
-    cpu_irq_pending: bool,
-    cpu_irq_enable: bool,
-    cpu_irq_ack_enable: bool,
-    cpu_irq_4011_ack: bool,
-    fpga_reader_addr: u16,
-    fpga_reader_inc: u8,
-    pulse_a: Pulse,
-    pulse_b: Pulse,
-    sawtooth: Sawtooth,
-    audio_enable: bool,
-    audio_4011_out: bool,
-    master_volume: i16,
-    redir_nmi: bool,
-    redir_nmi_lo: u8,
-    redir_nmi_hi: u8,
-    redir_irq: bool,
-    redir_irq_lo: u8,
-    redir_irq_hi: u8,
-    wifi_enable: bool,
-    wifi_irq_enable: bool,
-    wifi_tx_addr: u8,
-    wifi_rx_addr: u8,
-    wifi_data_pending: bool,
-    window_tile_start: u8,
-    window_tile_end: u8,
-    window_line_start: u8,
-    window_line_end: u8,
-    window_tile_scroll: u8,
-    window_line_scroll: u8,
-    warn_oam: bool,
-}
-
-impl Rainbow {
-    pub fn new(mut cartridge: INes, debug: Rc<Debug>) -> Self {
-        let mut prg = MappedMemory::new(
-            &cartridge,
-            0x6000,
-            cartridge.prg_ram_bytes as u32 / 1024,
-            40,
-            MemKind::Prg,
-        );
-
-        let chr = MappedMemory::new(
-            &cartridge,
-            0x0000,
-            cartridge.chr_ram_bytes as u32 / 1024,
-            8,
-            MemKind::Chr,
-        );
-
-        if let Some(wram) = cartridge.wram.take() {
-            prg.restore_wram(wram);
-        }
-
-        let fpga_ram = MemoryBlock::new(8);
-        for (addr, &value) in BOOTROM_FPGA.iter().enumerate() {
-            fpga_ram.write(addr as u16, value);
-        }
-
-        let nt_ram = [MemoryBlock::new(1), MemoryBlock::new(1)];
-
-        let master_volume = (i16::MAX as f32 / 64.0) as i16;
-
-        let mut rom = Self {
-            cartridge,
-            debug,
-            prg,
-            chr,
-            fpga_ram,
-            nt_ram,
-            prg_mode: 0,
-            prg_lo_regs: [0; 8],
-            prg_hi_regs: [0; 8],
-            prg_ram_lo_regs: [0; 2],
-            prg_ram_hi_regs: [0; 2],
-            fpga_ram_reg: 0,
-            chr_mode: 0,
-            bg_ext_hi: 0,
-            nt_bank_regs: [0, 0, 1, 1, 0],
-            nt_mode_regs: [0, 0, 0, 0, 0x80],
-            fill_tile: 0,
-            fill_attr: 0,
-            chr_lo_regs: [0; 16],
-            chr_hi_regs: [0; 16],
-            spr_ext_lo: SpriteExtRegs([0; 64]),
-            spr_ext_hi: 0,
-            ppu_state: PpuState::new(),
-            ppu_irq_enabled: false,
-            oam_state: ShadowOam::new(),
-            cpu_irq_latch: 0,
-            cpu_irq_counter: 0,
-            cpu_irq_pending: false,
-            cpu_irq_enable: false,
-            cpu_irq_ack_enable: false,
-            cpu_irq_4011_ack: false,
-            fpga_reader_addr: 0,
-            fpga_reader_inc: 1,
-            pulse_a: Pulse::new(),
-            pulse_b: Pulse::new(),
-            sawtooth: Sawtooth::new(),
-            audio_enable: true,
-            audio_4011_out: false,
-            master_volume,
-            redir_nmi: false,
-            redir_nmi_lo: 0,
-            redir_nmi_hi: 0,
-            redir_irq: false,
-            redir_irq_lo: 0,
-            redir_irq_hi: 0,
-            wifi_enable: false,
-            wifi_irq_enable: false,
-            wifi_tx_addr: 0,
-            wifi_rx_addr: 0,
-            wifi_data_pending: false,
-            window_tile_start: 0,
-            window_tile_end: 0,
-            window_line_start: 0,
-            window_line_end: 0,
-            window_tile_scroll: 0,
-            window_line_scroll: 0,
-            warn_oam: false,
-        };
-
-        rom.sync_prg();
-        rom.sync_chr();
-
-        rom
-    }
-
-    fn peek_cpu(&self, addr: u16) -> u8 {
-        match addr {
-            0x4011 if self.audio_4011_out => {
-                (self.pulse_a.sample() + self.pulse_b.sample() + self.sawtooth.sample()) << 1
-            }
-            0x4100 => self.prg_mode,
-            0x4120 => self.chr_mode,
-            0x412a..=0x412d => self.nt_mode_regs[(addr - 0x412a) as usize],
-            0x412f => self.nt_mode_regs[4],
-            0x4150 => self.ppu_state.scanline,
-            0x4151 => {
-                let mut val = 0;
-                if self.ppu_state.irq_pending {
-                    val |= 1;
-                }
-                if self.ppu_state.in_frame {
-                    val |= 0x40;
-                }
-                if self.ppu_state.hblank() {
-                    val |= 0x80;
-                }
-
-                val
-            }
-            0x4154 => self.ppu_state.irq_jitter,
-            0x415f => self.fpga_ram.read(self.fpga_reader_addr),
-            0x4160 => 0x20,
-            0x4161 => {
-                let mut val = 0;
-                if self.cpu_irq_pending {
-                    val |= 0x40;
-                }
-                if self.ppu_state.irq_pending {
-                    val |= 0x80;
-                }
-
-                val
-            }
-            0x4190 => {
-                let mut val = 0;
-                if self.wifi_enable {
-                    val |= 1;
-                }
-                if self.wifi_irq_enable {
-                    val |= 2;
-                }
-
-                val
-            }
-            0x4191 => 0,
-            0x4192 => {
-                let mut val = 0;
-                if !self.wifi_data_pending {
-                    val |= 0x80;
-                }
-
-                val
-            }
-            0xfffa if self.redir_nmi => self.redir_nmi_lo,
-            0xfffb if self.redir_nmi => self.redir_nmi_hi,
-            0xfffe if self.redir_irq => self.redir_irq_lo,
-            0xffff if self.redir_irq => self.redir_irq_hi,
-            0x4800..=0x4fff => {
-                let addr = addr - 0x4800;
-                self.fpga_ram.read(addr + 0x1800)
-            }
-            0x5000..=0x5fff => {
-                let bank = if self.fpga_ram_reg & 1 != 0 {
-                    0x1000
-                } else {
-                    0x0000
-                };
-                self.fpga_ram.read((addr & 0xfff) | bank)
-            }
-            0x6000..0x8000 => {
-                let bank = (addr >> 12) & 1;
-                let fpga = if self.prg_mode & 0x80 == 0 {
-                    (self.prg_ram_hi_regs[0] >> 6) & 3 == 3
-                } else {
-                    (self.prg_ram_hi_regs[bank as usize] >> 6) & 3 == 3
-                };
-
-                if fpga {
-                    if self.prg_mode & 0x80 == 0 {
-                        let addr = addr & 0x1fff;
-                        self.fpga_ram.read(addr)
-                    } else {
-                        let addr = (addr & 0xfff)
-                            | ((self.prg_ram_lo_regs[bank as usize] as u16 & 1) << 12);
-                        self.fpga_ram.read(addr)
-                    }
-                } else {
-                    self.prg.read(&self.cartridge, addr)
-                }
-            }
-            0x8000.. => self.prg.read(&self.cartridge, addr),
-            _ => 0,
-        }
-    }
-
-    fn read_cpu(&mut self, addr: u16) -> u8 {
-        match addr {
-            0x4011 => {
-                if self.cpu_irq_4011_ack {
-                    self.cpu_irq_pending = false;
-                    self.cpu_irq_enable = self.cpu_irq_ack_enable;
-                }
-            }
-            0x4151 => {
-                let mut val = 0;
-                if self.ppu_state.irq_pending {
-                    val |= 1;
-                }
-                if self.ppu_state.in_frame {
-                    val |= 0x40;
-                }
-                if self.ppu_state.hblank() {
-                    val |= 0x80;
-                }
-
-                self.ppu_state.irq_pending = false;
-                return val;
-            }
-            0x415f => {
-                let val = self.fpga_ram.read(self.fpga_reader_addr);
-                self.fpga_reader_addr += self.fpga_reader_inc as u16;
-                self.fpga_reader_addr &= 0x1fff;
-                return val;
-            }
-            0x4280..=0x4286 => {
-                if !self.warn_oam {
-                    tracing::error!("rainbow oam routine unsupported: {:04x}", addr);
-                    self.warn_oam = true;
-                }
-            }
-            0xfffa | 0xfffb => self.ppu_state.leave_frame(),
-            _ => (),
-        }
-        self.peek_cpu(addr)
-    }
-
-    fn write_cpu(&mut self, addr: u16, value: u8) {
-        match addr {
-            0x2000 => self.oam_state.ppu_ctrl(value),
-            0x2003 => self.oam_state.oam_addr(value),
-            0x2004 => self.oam_state.oam_data(value),
-            0x4100 => {
-                self.prg_mode = value;
-                self.sync_prg()
-            }
-            0x4108..=0x410f => {
-                self.prg_hi_regs[(addr & 7) as usize] = value;
-                self.sync_prg()
-            }
-            0x4118..=0x411f => {
-                self.prg_lo_regs[(addr & 7) as usize] = value;
-                self.sync_prg()
-            }
-            0x4106..=0x4107 => {
-                self.prg_ram_hi_regs[(addr & 1) as usize] = value;
-                self.sync_prg()
-            }
-            0x4116..=0x4117 => {
-                self.prg_ram_lo_regs[(addr & 1) as usize] = value;
-                self.sync_prg()
-            }
-            0x4115 => self.fpga_ram_reg = value,
-            0x4120 => {
-                self.chr_mode = value;
-                self.sync_chr();
-            }
-            0x4121 => self.bg_ext_hi = value,
-            0x4126..=0x4129 => self.nt_bank_regs[(addr - 0x4126) as usize] = value,
-            0x412a..=0x412d => self.nt_mode_regs[(addr - 0x412a) as usize] = value,
-            0x412e => self.nt_bank_regs[4] = value,
-            0x412f => self.nt_mode_regs[4] = (value & 0x3f) | 0x80,
-            0x4124 => self.fill_tile = value,
-            0x4125 => self.fill_attr = (value & 3) * 0b0101_0101,
-            0x4130..=0x413f => {
-                self.chr_hi_regs[(addr & 0xf) as usize] = value;
-                self.sync_chr();
-            }
-            0x4140..=0x414f => {
-                self.chr_lo_regs[(addr & 0xf) as usize] = value;
-                self.sync_chr();
-            }
-            0x4150 => self.ppu_state.scanline_compare = value,
-            0x4151 => self.ppu_irq_enabled = true,
-            0x4152 => {
-                self.ppu_irq_enabled = false;
-                self.ppu_state.irq_pending = false;
-            }
-            0x4153 => self.ppu_state.irq_offset = value.max(1).min(170),
-            0x4158 => self.cpu_irq_latch = (self.cpu_irq_latch & 0x00ff) | ((value as u16) << 8),
-            0x4159 => self.cpu_irq_latch = (self.cpu_irq_latch & 0xff00) | (value as u16),
-            0x415a => {
-                self.cpu_irq_enable = value & 1 != 0;
-                self.cpu_irq_ack_enable = value & 2 != 0;
-                self.cpu_irq_4011_ack = value & 4 != 0;
-
-                if self.cpu_irq_enable {
-                    self.cpu_irq_counter = self.cpu_irq_latch;
-                }
-            }
-            0x415b => {
-                self.cpu_irq_pending = false;
-                self.cpu_irq_enable = self.cpu_irq_ack_enable;
-            }
-            0x415c => {
-                self.fpga_reader_addr =
-                    (self.fpga_reader_addr & 0x00ff) | ((value as u16 & 0x1f) << 8)
-            }
-            0x415d => self.fpga_reader_addr = (self.fpga_reader_addr & 0xff00) | (value as u16),
-            0x415e => self.fpga_reader_inc = value,
-            0x415f => {
-                self.fpga_ram.write(self.fpga_reader_addr, value);
-                self.fpga_reader_addr += self.fpga_reader_inc as u16;
-                self.fpga_reader_addr &= 0x1fff;
-            }
-            0x416b => {
-                self.redir_nmi = value & 1 != 0;
-                self.redir_irq = value & 2 != 0;
-            }
-            0x416c => self.redir_nmi_hi = value,
-            0x416d => self.redir_nmi_lo = value,
-            0x416e => self.redir_irq_hi = value,
-            0x416f => self.redir_irq_lo = value,
-            0x4170 => self.window_tile_start = value & 0x1f,
-            0x4171 => self.window_tile_end = value & 0x1f,
-            0x4172 => self.window_line_start = value,
-            0x4173 => self.window_line_end = value,
-            0x4174 => self.window_tile_scroll = value & 0x1f,
-            0x4175 => self.window_line_scroll = value,
-            0x4190 => {
-                self.wifi_enable = value & 1 != 0;
-                self.wifi_irq_enable = value & 2 != 0;
-            }
-            0x4191 => (),
-            0x4192 => self.wifi_data_pending = true,
-            0x4193 => self.wifi_rx_addr = value & 0x7,
-            0x4194 => self.wifi_tx_addr = value & 0x7,
-            0x41a0 => self.pulse_a.volume(value),
-            0x41a1 => self.pulse_a.freq_low(value),
-            0x41a2 => self.pulse_a.freq_high(value),
-            0x41a3 => self.pulse_b.volume(value),
-            0x41a4 => self.pulse_b.freq_low(value),
-            0x41a5 => self.pulse_b.freq_high(value),
-            0x41a6 => self.sawtooth.accumulator_rate(value),
-            0x41a7 => self.sawtooth.freq_low(value),
-            0x41a8 => self.sawtooth.freq_high(value),
-            0x41a9 => {
-                self.audio_enable = value & 3 != 0;
-                self.audio_4011_out = value & 4 != 0;
-            }
-            0x41aa => {
-                let vol = (value & 0xf) as f32 / 15.0;
-                self.master_volume = (i16::MAX as f32 * vol / 64.0) as i16;
-            }
-            0x4200..=0x423f => self.spr_ext_lo[(addr & 0x3f) as usize] = value,
-            0x4240 => self.spr_ext_hi = value,
-            0x4800..=0x4fff => {
-                let addr = addr - 0x4800;
-                self.fpga_ram.write(addr + 0x1800, value);
-            }
-            0x5000..=0x5fff => {
-                let bank = if self.fpga_ram_reg & 1 != 0 {
-                    0x1000
-                } else {
-                    0x0000
-                };
-                self.fpga_ram.write((addr & 0xfff) | bank, value);
-            }
-            0x6000..0x8000 => {
-                let bank = (addr >> 12) & 1;
-                let fpga = if self.prg_mode & 0x80 == 0 {
-                    (self.prg_ram_hi_regs[0] >> 6) & 3 == 3
-                } else {
-                    (self.prg_ram_hi_regs[bank as usize] >> 6) & 3 == 3
-                };
-
-                if fpga {
-                    if self.prg_mode & 0x80 == 0 {
-                        let addr = addr & 0x1fff;
-                        self.fpga_ram.write(addr, value);
-                    } else {
-                        let addr = (addr & 0xfff)
-                            | ((self.prg_ram_lo_regs[bank as usize] as u16 & 1) << 12);
-                        self.fpga_ram.write(addr, value);
-                    }
-                } else {
-                    self.prg.write(addr, value);
-                }
-            }
-            0x8000.. => self.prg.write(addr, value),
-            _ => tracing::debug!("unsupported rainbow write reg: {addr:04x}:{value:02x}"),
-        }
-    }
-
-    fn read_ppu(&self, addr: u16) -> u8 {
-        if addr & 0x2000 != 0 {
-            let (addr, nt_idx) = if let Some(win_addr) = self.window_address(addr) {
-                (win_addr, 4)
-            } else {
-                (addr, ((addr >> 10) & 0x3) as usize)
-            };
-            let mode = self.nt_mode_regs[nt_idx];
-            let bank = self.nt_bank_regs[nt_idx];
-
-            let read = self.ppu_state.read(None);
-            if mode & 0x20 != 0 {
-                match read {
-                    Some(PpuRead::Attribute) => return self.fill_attr,
-                    Some(PpuRead::Nametable) => return self.fill_tile,
-                    _ => (),
-                }
-            }
-
-            if mode & 0x1 != 0 {
-                match read {
-                    Some(PpuRead::ExtAttribute(attr)) => return attr,
-                    _ => (),
-                }
-            }
-
-            match (mode >> 6) & 3 {
-                0 => {
-                    let bank = (bank & 1) as usize;
-                    self.nt_ram[bank].read(addr & 0x3ff)
-                }
-                1 => {
-                    let chr_ram_limit = (self.cartridge.chr_ram_bytes >> 10) - 1;
-                    let bank = bank as usize & chr_ram_limit;
-                    let addr = (addr & 0x3ff) as usize;
-                    self.chr
-                        .read_in_bank(&self.cartridge, addr, 1, bank, BankKind::Ram)
-                }
-                2 => {
-                    let bank = (bank as u16 & 3) * 0x400;
-                    let addr = (addr & 0x3ff) | bank;
-                    self.fpga_ram.read(addr)
-                }
-                3 => {
-                    let chr_rom_limit = (self.cartridge.chr_rom.len() >> 10) - 1;
-                    let bank = bank as usize & chr_rom_limit;
-                    let addr = (addr & 0x3ff) as usize;
-                    self.chr
-                        .read_in_bank(&self.cartridge, addr, 1, bank, BankKind::Rom)
-                }
-                _ => unreachable!(),
-            }
-        } else {
-            let addr = if let Some(win_addr) = self.window_address(addr) {
-                win_addr
-            } else {
-                addr
-            };
-
-            let oam = (self.chr_mode & 0x20 != 0).then_some(&self.oam_state);
-            let ppu_read = self.ppu_state.read(oam);
-
-            let read_from_bank = |addr, bank| {
-                let addr = addr & 0xfff;
-                match self.chr_mode >> 6 {
-                    0 => {
-                        let chr_rom_limit = (self.cartridge.chr_rom.len() >> 12) - 1;
-                        let bank = bank as usize & chr_rom_limit;
-                        self.chr.read_in_bank(
-                            &self.cartridge,
-                            addr as usize,
-                            4,
-                            bank,
-                            BankKind::Rom,
-                        )
-                    }
-                    1 => {
-                        let chr_ram_limit = (self.cartridge.chr_ram_bytes >> 12) - 1;
-                        let bank = bank as usize & chr_ram_limit;
-                        self.chr.read_in_bank(
-                            &self.cartridge,
-                            addr as usize,
-                            4,
-                            bank,
-                            BankKind::Ram,
-                        )
-                    }
-                    _ => self.fpga_ram.read(addr),
-                }
-            };
-
-            if let Some(PpuRead::ExtBg(bank)) = ppu_read {
-                let bank = (bank as usize) | ((self.bg_ext_hi as usize & 0x1f) << 6);
-                read_from_bank(addr, bank)
-            } else if let Some(PpuRead::ExtSprite(sprite)) = ppu_read {
-                let bank = self.spr_ext_lo[sprite as usize] as usize
-                    | ((self.spr_ext_hi as usize & 0x07) << 8);
-                read_from_bank(addr, bank)
-            } else if self.chr_mode & 0x80 != 0 {
-                self.fpga_ram.read(addr & 0xfff)
-            } else {
-                if self.chr_mode & 4 == 0 {
-                    self.chr.read(&self.cartridge, addr)
-                } else {
-                    let bank_idx = (addr >> 9) as usize;
-                    let hi = self.chr_hi_regs[bank_idx] as usize;
-                    let lo = self.chr_lo_regs[bank_idx] as usize;
-                    let bank = (hi << 8) | lo;
-                    let addr = (addr as usize & 0x1ff) | ((bank & 1) << 9);
-                    let bank = bank >> 1;
-
-                    match self.chr_mode & 0x40 {
-                        0 => {
-                            let chr_rom_limit = (self.cartridge.chr_rom.len() >> 10) - 1;
-                            let bank = bank as usize & chr_rom_limit;
-                            self.chr.read_in_bank(
-                                &self.cartridge,
-                                addr as usize,
-                                1,
-                                bank,
-                                BankKind::Rom,
-                            )
-                        }
-                        _ => {
-                            let chr_ram_limit = (self.cartridge.chr_ram_bytes >> 10) - 1;
-                            let bank = bank as usize & chr_ram_limit;
-                            self.chr.read_in_bank(
-                                &self.cartridge,
-                                addr as usize,
-                                1,
-                                bank,
-                                BankKind::Ram,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fn write_ppu(&mut self, addr: u16, value: u8) {
-        if addr & 0x2000 != 0 {
-            let nt_idx = ((addr >> 10) & 0x3) as usize;
-            let mode = self.nt_mode_regs[nt_idx];
-            let bank = self.nt_bank_regs[nt_idx];
-
-            match (mode >> 6) & 3 {
-                0 => {
-                    let bank = (bank & 1) as usize;
-                    self.nt_ram[bank].write(addr & 0x3ff, value)
-                }
-                1 => {
-                    let chr_ram_limit = (self.cartridge.chr_ram_bytes >> 10) - 1;
-                    let bank = bank as usize & chr_ram_limit;
-                    self.chr
-                        .write_in_bank((addr & 0x3ff) as usize, 1, value, bank);
-                }
-                2 => {
-                    let bank = (bank as u16 & 3) * 0x400;
-                    let addr = (addr & 0x3ff) | bank;
-                    self.fpga_ram.write(addr, value);
-                }
-                3 => (), // chr-rom,
-                _ => unreachable!(),
-            }
-        } else if self.chr_mode & 0x80 != 0 {
-            self.fpga_ram.write(addr & 0xfff, value)
-        } else {
-            if self.chr_mode & 4 == 0 {
-                self.chr.write(addr, value)
-            } else {
-                let bank_idx = (addr >> 9) as usize;
-                let hi = self.chr_hi_regs[bank_idx] as usize;
-                let lo = self.chr_lo_regs[bank_idx] as usize;
-                let bank = (hi << 8) | lo;
-                let addr = (addr as usize & 0x1ff) | ((bank & 1) << 9);
-                let bank = bank >> 1;
-
-                if self.chr_mode & 0x40 != 0 {
-                    let bank_limit = (self.cartridge.chr_ram_bytes >> 10) - 1;
-                    self.chr.write_in_bank(addr, 1, value, bank & bank_limit)
-                };
-            }
-        }
-    }
-
-    fn sync_prg(&mut self) {
-        let prg_rom_limit = (self.cartridge.prg_rom.len() >> 10) - 1;
-        let prg_ram_limit = (self.cartridge.prg_ram_bytes >> 10) - 1;
-
-        let map_ram = |idx, size: usize| {
-            let ram = self.prg_ram_hi_regs[idx] & 0x80 != 0;
-            let hi = self.prg_ram_hi_regs[idx] & 0x7f;
-            let lo = self.prg_ram_lo_regs[idx];
-
-            let bank = ((hi as usize) << 8) | lo as usize;
-
-            if ram {
-                let bank_limit = prg_ram_limit >> size.trailing_zeros();
-                (BankKind::Ram, bank & bank_limit)
-            } else {
-                let bank_limit = prg_rom_limit >> size.trailing_zeros();
-                (BankKind::Rom, bank & bank_limit)
-            }
-        };
-
-        if self.prg_mode & 0x80 == 0 {
-            let (kind, bank) = map_ram(0, 8);
-            self.prg.map(0x6000, 8, bank, kind);
-        } else {
-            let (kind, bank) = map_ram(0, 4);
-            self.prg.map(0x6000, 4, bank, kind);
-            let (kind, bank) = map_ram(1, 4);
-            self.prg.map(0x7000, 4, bank, kind);
-        }
-
-        let map_rom = |idx, size: usize| {
-            let ram = self.prg_hi_regs[idx] & 0x80 != 0;
-            let hi = self.prg_hi_regs[idx] & 0x7f;
-            let lo = self.prg_lo_regs[idx];
-
-            let bank = ((hi as usize) << 8) | lo as usize;
-
-            if ram {
-                let bank_limit = prg_ram_limit >> size.trailing_zeros();
-                (BankKind::Ram, bank & bank_limit)
-            } else {
-                let bank_limit = prg_rom_limit >> size.trailing_zeros();
-                (BankKind::Rom, bank & bank_limit)
-            }
-        };
-
-        match self.prg_mode & 0x7 {
-            0 => {
-                let (kind, bank) = map_rom(0, 32);
-                self.prg.map(0x8000, 32, bank, kind);
-            }
-            1 => {
-                let (kind, bank) = map_rom(0, 16);
-                self.prg.map(0x8000, 16, bank, kind);
-                let (kind, bank) = map_rom(4, 16);
-                self.prg.map(0xc000, 16, bank, kind);
-            }
-            2 => {
-                let (kind, bank) = map_rom(0, 16);
-                self.prg.map(0x8000, 16, bank, kind);
-                let (kind, bank) = map_rom(4, 8);
-                self.prg.map(0xc000, 8, bank, kind);
-                let (kind, bank) = map_rom(6, 8);
-                self.prg.map(0xe000, 8, bank, kind);
-            }
-            3 => {
-                for i in 0..4 {
-                    let addr = 0x8000 + (i as u16 * 0x2000);
-                    let (kind, bank) = map_rom(i * 2, 8);
-                    self.prg.map(addr, 8, bank, kind);
-                }
-            }
-            _ => {
-                for i in 0..8 {
-                    let addr = 0x8000 + (i as u16 * 0x1000);
-                    let (kind, bank) = map_rom(i, 4);
-                    self.prg.map(addr, 4, bank, kind);
-                }
-            }
-        }
-    }
-
-    fn sync_chr(&mut self) {
-        let ram = self.chr_mode & 0x40 != 0;
-        let chr_rom_limit = (self.cartridge.chr_rom.len() >> 10) - 1;
-        let chr_ram_limit = (self.cartridge.chr_ram_bytes >> 10) - 1;
-
-        let map_chr = |idx, size: usize| {
-            let hi = self.chr_hi_regs[idx];
-            let lo = self.chr_lo_regs[idx];
-
-            let bank = ((hi as usize) << 8) | lo as usize;
-
-            if ram {
-                let bank_limit = chr_ram_limit >> size.trailing_zeros();
-                (BankKind::Ram, bank & bank_limit)
-            } else {
-                let bank_limit = chr_rom_limit >> size.trailing_zeros();
-                (BankKind::Rom, bank & bank_limit)
-            }
-        };
-        match self.chr_mode & 7 {
-            0 => {
-                let (kind, bank) = map_chr(0, 8);
-                self.chr.map(0x0000, 8, bank, kind);
-            }
-            1 => {
-                let (kind, bank) = map_chr(0, 4);
-                self.chr.map(0x0000, 4, bank, kind);
-                let (kind, bank) = map_chr(1, 4);
-                self.chr.map(0x1000, 4, bank, kind);
-            }
-            2 => {
-                for i in 0..4 {
-                    let (kind, bank) = map_chr(i, 2);
-                    let addr = i as u16 * 0x800;
-                    self.chr.map(addr, 2, bank, kind);
-                }
-            }
-            3 => {
-                for i in 0..8 {
-                    let (kind, bank) = map_chr(i, 1);
-                    let addr = i as u16 * 0x400;
-                    self.chr.map(addr, 1, bank, kind);
-                }
-            }
-            // 512b sized banks have to be handled explicitly in read/write
-            _ => (),
-        }
-    }
-
-    fn is_in_window(&self) -> bool {
-        if self.chr_mode & 0x10 == 0 {
-            return false;
-        }
-
-        let Some(tile) = self.ppu_state.tile_number() else {
-            return false;
-        };
-        let scanline = self.ppu_state.scanline;
-
-        if self.window_tile_start <= self.window_tile_end {
-            if tile < self.window_tile_start || tile > self.window_tile_end {
-                return false;
-            }
-        } else {
-            if tile < self.window_tile_start && tile > self.window_tile_end {
-                return false;
-            }
-        }
-
-        if self.window_line_start <= self.window_line_end {
-            if scanline < self.window_line_start || scanline > self.window_line_end {
-                return false;
-            }
-        } else {
-            if scanline < self.window_line_start && scanline > self.window_line_end {
-                return false;
-            }
-        }
-
-        true
-    }
-
-    fn window_address(&self, addr: u16) -> Option<u16> {
-        if !self.is_in_window() {
-            return None;
-        }
-
-        let tile = self.ppu_state.tile_number()?;
-        let scanline = self.ppu_state.scanline;
-
-        let x = self.window_tile_scroll as u16 + tile as u16;
-        let y = self.window_line_scroll as u16 + scanline as u16;
-        let mut coarse_y = y >> 3;
-        if coarse_y >= 30 {
-            coarse_y -= 30;
-        }
-
-        let nt_addr = ((coarse_y) << 5) | (x & 0x1f);
-
-        match self.ppu_state.read(None)? {
-            PpuRead::Attribute => Some(
-                0x23c0 | (nt_addr & 0x0c00) | ((nt_addr >> 4) & 0x38) | ((nt_addr >> 2) & 0x07),
-            ),
-            PpuRead::Nametable => Some(0x2000 | (nt_addr & 0xfff)),
-            PpuRead::Bg => Some((addr & 0xfff8) | (y & 7)),
-            _ => None,
-        }
-    }
-}
-
-impl Mapper for Rainbow {
-    fn register(&self, cpu: &mut AddressBus) {
-        cpu.register_read(DeviceKind::Mapper, AndAndMask(0x8000, 0xffff));
-        cpu.register_write(DeviceKind::Mapper, AndAndMask(0x8000, 0xffff));
-        cpu.register_read(DeviceKind::Mapper, AndEqualsAndMask(0xe000, 0x6000, 0x7fff));
-        cpu.register_write(DeviceKind::Mapper, AndEqualsAndMask(0xe000, 0x6000, 0x7fff));
-
-        cpu.register_read(DeviceKind::Mapper, AndEqualsAndMask(0xf000, 0x5000, 0xffff));
-        cpu.register_write(DeviceKind::Mapper, AndEqualsAndMask(0xf000, 0x5000, 0xffff));
-
-        cpu.register_read(DeviceKind::Mapper, AndEqualsAndMask(0xff00, 0x4100, 0xffff));
-        cpu.register_write(DeviceKind::Mapper, AndEqualsAndMask(0xff00, 0x4100, 0xffff));
-
-        cpu.register_read(DeviceKind::Mapper, AndEqualsAndMask(0xff00, 0x4200, 0xffff));
-        cpu.register_write(DeviceKind::Mapper, AndEqualsAndMask(0xff00, 0x4200, 0xffff));
-
-        cpu.register_read(DeviceKind::Mapper, AndEqualsAndMask(0xff00, 0x4200, 0xffff));
-        cpu.register_write(DeviceKind::Mapper, AndEqualsAndMask(0xff00, 0x4200, 0xffff));
-
-        cpu.register_read(DeviceKind::Mapper, AndEqualsAndMask(0xf800, 0x4800, 0xffff));
-        cpu.register_write(DeviceKind::Mapper, AndEqualsAndMask(0xf800, 0x4800, 0xffff));
-
-        cpu.register_write(DeviceKind::Mapper, Address(0x2000));
-        cpu.register_write(DeviceKind::Mapper, Address(0x2003));
-        cpu.register_write(DeviceKind::Mapper, Address(0x2004));
-
-        cpu.register_read(DeviceKind::Mapper, Address(0x4011));
-    }
-
-    fn peek(&self, bus: BusKind, addr: u16) -> u8 {
-        match bus {
-            BusKind::Cpu => self.peek_cpu(addr),
-            BusKind::Ppu => self.read_ppu(addr),
-        }
-    }
-
-    fn read(&mut self, bus: BusKind, addr: u16) -> u8 {
-        match bus {
-            BusKind::Cpu => self.read_cpu(addr),
-            BusKind::Ppu => self.read_ppu(addr),
-        }
-    }
-
-    fn write(&mut self, bus: BusKind, addr: u16, value: u8) {
-        match bus {
-            BusKind::Cpu => self.write_cpu(addr, value),
-            BusKind::Ppu => self.write_ppu(addr, value),
-        }
-    }
-
-    fn peek_ppu_fetch(&self, _address: u16, _kind: PpuFetchKind) -> Nametable {
-        // Storing CIRAM inside mapper to give a chance to apply windowing and ext-attr
-        Nametable::External
-    }
-
-    fn ppu_fetch(&mut self, address: u16, kind: PpuFetchKind) -> Nametable {
-        if kind != PpuFetchKind::Idle {
-            let nt_mode = if (address & 0x2000) != 0 {
-                let nt_idx = ((address >> 10) & 0x3) as usize;
-                Some(self.nt_mode_regs[nt_idx])
-            } else {
-                None
-            };
-            let was_irq = self.ppu_state.irq_pending;
-            self.ppu_state
-                .fetch(address, nt_mode, &self.fpga_ram, &mut self.oam_state);
-            if self.ppu_irq_enabled && !was_irq && self.ppu_state.irq_pending {
-                self.debug.event(crate::DebugEvent::MapperIrq);
-            }
-        }
-
-        self.peek_ppu_fetch(address, kind)
-    }
-
-    fn tick(&mut self) {
-        if self.cpu_irq_enable {
-            self.cpu_irq_counter = self.cpu_irq_counter.saturating_sub(1);
-            if self.cpu_irq_counter == 0 {
-                self.cpu_irq_counter = self.cpu_irq_latch;
-                self.cpu_irq_pending = true;
-                self.debug.event(crate::DebugEvent::MapperIrq);
-            }
-        }
-        self.ppu_state.tick();
-        self.pulse_a.tick(FreqMode::X1);
-        self.pulse_b.tick(FreqMode::X1);
-        self.sawtooth.tick(FreqMode::X1);
-    }
-
-    fn get_irq(&mut self) -> bool {
-        (self.ppu_irq_enabled && self.ppu_state.irq_pending)
-            || (self.cpu_irq_enable && self.cpu_irq_pending)
-    }
-
-    fn get_sample(&self) -> Option<i16> {
-        if self.audio_enable {
-            let val = (self.pulse_a.sample() as i16
-                + self.pulse_b.sample() as i16
-                + self.sawtooth.sample() as i16)
-                * self.master_volume;
-
-            Some(val)
-        } else {
-            Some(0)
-        }
-    }
-
-    fn save_wram(&self) -> Option<super::SaveWram> {
-        if self.cartridge.battery {
-            self.prg.save_wram()
-        } else {
-            None
-        }
     }
 }
 
