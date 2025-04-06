@@ -1,5 +1,5 @@
 use crate::debug::Debug;
-use crate::mapper::{self, SaveWram};
+use crate::mapper::{self, Nametable, SaveWram};
 use crate::memory::RomBlock;
 
 use std::{fmt, io, rc::Rc};
@@ -42,6 +42,21 @@ enum RomType {
 pub enum CartMirroring {
     Horizontal,
     Vertical,
+}
+
+impl CartMirroring {
+    pub fn ppu_fetch(&self, address: u16) -> Nametable {
+        if address & 0x2000 != 0 {
+            match self {
+                CartMirroring::Horizontal if address & 0x800 != 0 => Nametable::InternalA,
+                CartMirroring::Horizontal => Nametable::InternalB,
+                CartMirroring::Vertical if address & 0x400 != 0 => Nametable::InternalA,
+                CartMirroring::Vertical => Nametable::InternalB,
+            }
+        } else {
+            Nametable::External
+        }
+    }
 }
 
 impl From<CartMirroring> for mapper::Mirroring {

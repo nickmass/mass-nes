@@ -30,6 +30,7 @@ use crate::bus::{AddressBus, BusKind};
 use crate::cartridge::{Fds, INes};
 use crate::debug::Debug;
 use crate::machine::MapperInput;
+use crate::memory::Memory;
 use crate::ppu::PpuFetchKind;
 
 use std::cell::RefCell;
@@ -191,9 +192,10 @@ pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
         },
         22 => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc2a, debug)),
         23 => match cart.submapper {
+            Some(1) => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4f, debug)),
             Some(2) => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4e, debug)),
             Some(3) => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc2b, debug)),
-            _ => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4f, debug)),
+            _ => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc2b, debug)),
         },
         24 => RcMapper::new(vrc6::Vrc6::new(cart, vrc6::Vrc6Variant::A, debug)),
         25 => match cart.submapper {
@@ -252,6 +254,27 @@ pub enum Mirroring {
     FourScreen,
 }
 
+impl Mirroring {
+    fn ppu_fetch(&self, address: u16) -> Nametable {
+        if address & 0x2000 != 0 {
+            match self {
+                Mirroring::Single(n) => *n,
+                Mirroring::Horizontal if address & 0x800 != 0 => Nametable::InternalA,
+                Mirroring::Horizontal => Nametable::InternalB,
+                Mirroring::Vertical if address & 0x400 != 0 => Nametable::InternalA,
+                Mirroring::Vertical => Nametable::InternalB,
+                Mirroring::FourScreen => match address & 0xc00 {
+                    0x000 => Nametable::InternalA,
+                    0x400 => Nametable::InternalB,
+                    _ => Nametable::External,
+                },
+            }
+        } else {
+            Nametable::External
+        }
+    }
+}
+
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Nametable {
@@ -267,8 +290,10 @@ pub struct SimpleMirroring {
 }
 
 impl SimpleMirroring {
-    pub fn new(mirroring: Mirroring) -> Self {
-        Self { mirroring }
+    pub fn new<T: Into<Mirroring>>(mirroring: T) -> Self {
+        Self {
+            mirroring: mirroring.into(),
+        }
     }
 
     pub fn internal_a(&mut self) {
@@ -292,21 +317,6 @@ impl SimpleMirroring {
     }
 
     pub fn ppu_fetch(&self, address: u16) -> Nametable {
-        if address & 0x2000 != 0 {
-            match self.mirroring {
-                Mirroring::Single(n) => n,
-                Mirroring::Horizontal if address & 0x800 != 0 => Nametable::InternalA,
-                Mirroring::Horizontal => Nametable::InternalB,
-                Mirroring::Vertical if address & 0x400 != 0 => Nametable::InternalA,
-                Mirroring::Vertical => Nametable::InternalB,
-                Mirroring::FourScreen => match address & 0xc00 {
-                    0x000 => Nametable::InternalA,
-                    0x400 => Nametable::InternalB,
-                    _ => Nametable::External,
-                },
-            }
-        } else {
-            Nametable::External
-        }
+        self.mirroring.ppu_fetch(address)
     }
 }

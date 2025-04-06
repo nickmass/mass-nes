@@ -10,7 +10,7 @@ use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::{CartMirroring, INes};
 use crate::debug::Debug;
 use crate::mapper::Mapper;
-use crate::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
+use crate::memory::{Memory, MemoryBlock};
 use crate::ppu::PpuFetchKind;
 
 use super::Nametable;
@@ -44,6 +44,12 @@ enum MmcNametable {
     InternalB,
     Exram,
     Fill,
+}
+
+#[derive(Debug, Copy, Clone)]
+enum Prg {
+    Ram { bank: usize, size: usize },
+    Rom { bank: usize, size: usize },
 }
 
 impl From<u8> for MmcNametable {
@@ -197,10 +203,7 @@ pub struct Mmc5 {
     cartridge: INes,
     #[cfg_attr(feature = "save-states", save(skip))]
     debug: Rc<Debug>,
-    prg: MappedMemory,
-    chr_spr: MappedMemory,
-    chr_bg: MappedMemory,
-    chr_vert: MappedMemory,
+    prg_ram: MemoryBlock,
     chr_ram: Option<MemoryBlock>,
     exram: MemoryBlock,
     tall_sprites: bool,
@@ -225,6 +228,7 @@ pub struct Mmc5 {
     vert_split_side: VertSplitSide,
     vert_split_enabled: bool,
     vert_split_scroll: u8,
+    vert_chr_bank: u8,
     ex_attr_bank: u8,
     ex_attr_pal: u8,
     #[cfg_attr(feature = "save-states", save(skip))]
@@ -244,25 +248,18 @@ impl Mmc5 {
             cartridge.prg_ram_bytes / (1024 * 8)
         };
 
-        let mut prg = MappedMemory::new(
-            &cartridge,
-            0x6000,
-            (prg_ram_count * 8) as u32,
-            40,
-            MemKind::Prg,
-        );
-
+        let mut prg_ram = MemoryBlock::new(prg_ram_count * 8);
         if let Some(wram) = cartridge.wram.take() {
-            prg.restore_wram(wram);
+            prg_ram.restore_wram(wram);
         }
 
-        let chr_spr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
-        let chr_bg = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
-        let mut chr_vert = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
-        chr_vert.map(0x0000, 4, 0, BankKind::Rom);
-        chr_vert.map(0x1000, 4, 0, BankKind::Rom);
-
         let exram = MemoryBlock::new(1);
+
+        let chr_ram = if cartridge.chr_ram_bytes > 0 {
+            Some(MemoryBlock::new(8))
+        } else {
+            None
+        };
 
         let mut pulse_table = Vec::new();
         for x in 0..32 {
@@ -279,19 +276,10 @@ impl Mmc5 {
             CartMirroring::Vertical => [M::InternalA, M::InternalB, M::InternalA, M::InternalB],
         };
 
-        let chr_ram = if cartridge.chr_ram_bytes > 0 {
-            Some(MemoryBlock::new(8))
-        } else {
-            None
-        };
-
-        let mut rom = Self {
+        Self {
             cartridge,
             debug,
-            prg,
-            chr_spr,
-            chr_bg,
-            chr_vert,
+            prg_ram,
             chr_ram,
             exram,
             tall_sprites: false,
@@ -316,24 +304,26 @@ impl Mmc5 {
             vert_split_side: VertSplitSide::Left,
             vert_split_enabled: false,
             vert_split_scroll: 0,
+            vert_chr_bank: 0,
             ex_attr_bank: 0,
             ex_attr_pal: 0,
             pulse_table,
             pulse_1: Pulse::new(),
             pulse_2: Pulse::new(),
             pcm: Pcm::new(),
-        };
-
-        rom.sync_prg();
-        rom.sync_chr();
-
-        rom
+        }
     }
 
     fn peek_cpu(&self, addr: u16) -> u8 {
         match addr {
-            0x5c00..=0x5fff => self.exram.read(addr & 0x3ff),
-            0x6000.. => self.prg.read(&self.cartridge, addr),
+            0x5c00..=0x5fff => self.exram.read_mapped(0, 1024, addr),
+            0x6000.. => {
+                let prg = self.map_prg(addr);
+                match prg {
+                    Prg::Ram { bank, size } => self.prg_ram.read_mapped(bank, size, addr),
+                    Prg::Rom { bank, size } => self.cartridge.prg_rom.read_mapped(bank, size, addr),
+                }
+            }
             _ => 0,
         }
     }
@@ -380,13 +370,12 @@ impl Mmc5 {
                 let val = self.mul_left as u16 * self.mul_right as u16;
                 (val >> 8) as u8
             }
-            0x5c00..=0x5fff => self.exram.read(addr & 0x3ff),
-            0x6000..=0x7fff => self.prg.read(&self.cartridge, addr),
+            0x5c00..=0x7fff => self.peek_cpu(addr),
             0x8000.. => {
                 if addr == 0xfffa || addr == 0xfffb {
                     self.ppu_state.leave_frame();
                 }
-                let value = self.prg.read(&self.cartridge, addr);
+                let value = self.peek_cpu(addr);
                 self.pcm.read(addr, value);
                 value
             }
@@ -427,14 +416,8 @@ impl Mmc5 {
                     self.pulse_2.disable();
                 }
             }
-            0x5100 => {
-                self.prg_bank_mode = value & 0x3;
-                self.sync_prg();
-            }
-            0x5101 => {
-                self.chr_bank_mode = value & 0x3;
-                self.sync_chr();
-            }
+            0x5100 => self.prg_bank_mode = value & 0x3,
+            0x5101 => self.chr_bank_mode = value & 0x3,
             0x5102 => self.prg_ram_protect_a = value & 0x3 != 0x2,
             0x5103 => self.prg_ram_protect_b = value & 0x3 != 0x1,
             0x5104 => self.ex_ram_mode = value & 0x3,
@@ -451,7 +434,6 @@ impl Mmc5 {
             0x5113..=0x5117 => {
                 let prg_reg_idx = addr - 0x5113;
                 self.prg_regs[prg_reg_idx as usize] = value;
-                self.sync_prg();
             }
             0x5120..=0x512b => {
                 let chr_reg_idx = addr - 0x5120;
@@ -461,12 +443,8 @@ impl Mmc5 {
                     ChrRegSet::Bg
                 };
                 self.chr_regs[chr_reg_idx as usize] = value;
-                self.sync_chr();
             }
-            0x5130 => {
-                self.chr_hi = value & 0x3;
-                self.sync_chr();
-            }
+            0x5130 => self.chr_hi = value & 0x3,
             0x5200 => {
                 self.vert_split_enabled = value & 0x80 != 0;
                 self.vert_split_side = if value & 0x40 != 0 {
@@ -477,25 +455,24 @@ impl Mmc5 {
                 self.vert_split_threshold = value & 0x1f;
             }
             0x5201 => self.vert_split_scroll = value,
-            0x5202 => {
-                let bank = value as usize | ((self.chr_hi as usize) << 8);
-                self.chr_vert.map(0x0000, 4, bank, BankKind::Rom);
-                self.chr_vert.map(0x1000, 4, bank, BankKind::Rom);
-            }
+            0x5202 => self.vert_chr_bank = value,
             0x5203 => self.ppu_state.scanline_compare = value,
             0x5204 => self.irq_enabled = value & 0x80 != 0,
             0x5205 => self.mul_left = value,
             0x5206 => self.mul_right = value,
             0x5c00..=0x5fff => {
                 if self.ex_ram_mode != 3 {
-                    self.exram.write(addr & 0x3ff, value)
+                    self.exram.write_mapped(0, 1024, addr, value)
                 }
             }
             0x6000.. => {
                 if self.prg_ram_protect_a || self.prg_ram_protect_b {
                     return;
                 }
-                self.prg.write(addr, value);
+                let prg = self.map_prg(addr);
+                if let Prg::Ram { bank, size } = prg {
+                    self.prg_ram.write_mapped(bank, size, addr, value);
+                }
             }
             _ => (),
         }
@@ -504,33 +481,32 @@ impl Mmc5 {
     fn read_ppu(&self, addr: u16) -> u8 {
         if let Some(chr_ram) = self.chr_ram.as_ref() {
             if addr < 0x2000 {
-                return chr_ram.read(addr);
+                return chr_ram.read_mapped(0, 8 * 1024, addr);
             }
         }
         if self.in_vert_split() {
             match self.ppu_state.read() {
                 Some(PpuRead::Nametable) => self.vert_split_nt(),
                 Some(PpuRead::Attribute) => self.vert_split_attr(),
-                Some(PpuRead::Bg) => self.chr_vert.read(&self.cartridge, addr),
+                Some(PpuRead::Bg) => {
+                    let bank = self.vert_chr_bank as usize | (self.chr_hi as usize) << 8;
+                    self.cartridge.chr_rom.read_mapped(bank, 4 * 1024, addr)
+                }
                 _ => 0x00,
             }
         } else if addr < 0x2000 {
             if !(self.tall_sprites || self.ex_ram_mode == 0x01) || !self.ppu_substitution {
-                self.chr_spr.read(&self.cartridge, addr)
+                self.read_chr(addr)
             } else {
                 match (self.ppu_state.read(), self.chr_last_regs) {
-                    (Some(PpuRead::Sprite), _) => self.chr_spr.read(&self.cartridge, addr),
+                    (Some(PpuRead::Sprite), _) => self.read_chr(addr),
                     (Some(PpuRead::Bg), _) if self.ex_ram_mode == 0x01 => {
-                        let addr = addr as usize;
-                        let high = (self.ex_attr_bank | (self.chr_hi << 6)) as usize;
-                        let low = addr & 0xfff;
-                        let ex_addr = low | (high << 12);
-                        let ex_addr = ex_addr % self.cartridge.chr_rom.len();
-                        self.cartridge.chr_rom[ex_addr]
+                        let bank = self.ex_attr_bank as usize | (self.chr_hi as usize) << 6;
+                        self.cartridge.chr_rom.read_mapped(bank, 4 * 1024, addr)
                     }
-                    (Some(PpuRead::Bg), _) => self.chr_bg.read(&self.cartridge, addr),
-                    (_, ChrRegSet::Sprite) => self.chr_spr.read(&self.cartridge, addr),
-                    (_, ChrRegSet::Bg) => self.chr_bg.read(&self.cartridge, addr),
+                    (Some(PpuRead::Bg), _) => self.read_ext_chr(addr),
+                    (_, ChrRegSet::Sprite) => self.read_chr(addr),
+                    (_, ChrRegSet::Bg) => self.read_ext_chr(addr),
                 }
             }
         } else {
@@ -543,7 +519,7 @@ impl Mmc5 {
             let table = (addr & 0xc00) >> 10;
             match self.mirroring[table as usize] {
                 MmcNametable::Exram => match self.ex_ram_mode {
-                    0 | 1 => self.exram.read(addr & 0x3ff),
+                    0 | 1 => self.exram.read_mapped(0, 1024, addr),
                     _ => 0,
                 },
                 MmcNametable::Fill => match read {
@@ -555,10 +531,20 @@ impl Mmc5 {
         }
     }
 
+    fn read_chr(&self, addr: u16) -> u8 {
+        let (bank, size) = self.map_chr(addr);
+        self.cartridge.chr_rom.read_mapped(bank, size, addr)
+    }
+
+    fn read_ext_chr(&self, addr: u16) -> u8 {
+        let (bank, size) = self.map_ext_chr(addr);
+        self.cartridge.chr_rom.read_mapped(bank, size, addr)
+    }
+
     fn write_ppu(&mut self, addr: u16, val: u8) {
         if addr < 0x2000 {
-            if let Some(chr_ram) = self.chr_ram.as_ref() {
-                chr_ram.write(addr, val);
+            if let Some(chr_ram) = self.chr_ram.as_mut() {
+                chr_ram.write_mapped(0, 8 * 1024, addr, val);
             }
             return;
         }
@@ -566,108 +552,81 @@ impl Mmc5 {
         let table = (addr & 0xc00) >> 10;
         if let MmcNametable::Exram = self.mirroring[table as usize] {
             if self.ex_ram_mode == 0 || self.ex_ram_mode == 1 {
-                self.exram.write(addr & 0x3ff, val);
+                self.exram.write_mapped(0, 1024, addr, val);
             }
         }
     }
 
-    fn sync_prg(&mut self) {
-        let regs = self.prg_regs;
-        let decode = move |reg_idx: usize| {
-            let v = regs[reg_idx] as usize;
-            if (v & 0x80 == 0 || reg_idx == 0) && reg_idx != 4 {
-                (BankKind::Ram, (v & 0xf))
-            } else {
-                (BankKind::Rom, (v & 0x7f))
+    fn map_prg(&self, addr: u16) -> Prg {
+        if addr & 0x8000 == 0 {
+            Prg::Ram {
+                bank: self.prg_regs[0] as usize & 0xf,
+                size: 8 * 1024,
             }
+        } else {
+            let (bank_idx, size) = match self.prg_bank_mode {
+                0x00 => (4, 32),
+                0x01 if addr & 0xc000 == 0x8000 => (2, 16),
+                0x01 if addr & 0xc000 == 0xc000 => (4, 16),
+                0x02 if addr & 0xc000 == 0x8000 => (2, 16),
+                0x02 if addr & 0xe000 == 0xc000 => (3, 8),
+                0x02 if addr & 0xe000 == 0xe000 => (4, 8),
+                0x03 if addr & 0xe000 == 0x8000 => (1, 8),
+                0x03 if addr & 0xe000 == 0xa000 => (2, 8),
+                0x03 if addr & 0xe000 == 0xc000 => (3, 8),
+                0x03 if addr & 0xe000 == 0xe000 => (4, 8),
+                _ => unreachable!(),
+            };
+
+            let bank = self.prg_regs[bank_idx];
+            let ram = bank & 0x80 == 0 && bank_idx != 4;
+            let bank = if ram { bank & 0xf } else { bank & 0x7f };
+
+            let bank = match size {
+                32 => bank >> 2,
+                16 => bank >> 1,
+                _ => bank,
+            };
+
+            let bank = bank as usize;
+            let size = size * 1024;
+
+            if ram {
+                Prg::Ram { bank, size }
+            } else {
+                Prg::Rom { bank, size }
+            }
+        }
+    }
+
+    fn map_chr(&self, addr: u16) -> (usize, usize) {
+        let addr = addr as usize & 0x1fff;
+        let (bank_idx, size) = match self.chr_bank_mode {
+            0x00 => (7, 8),
+            0x01 => (addr >> 10 | 3, 4),
+            0x02 => (addr >> 10 | 1, 2),
+            0x03 => (addr >> 10, 1),
+            _ => unreachable!(),
         };
 
-        let (kind, bank) = decode(0);
-        self.prg.map(0x6000, 8, bank, kind);
+        let bank = self.chr_regs[bank_idx] as usize | (self.chr_hi as usize) << 8;
 
-        match self.prg_bank_mode {
-            0x00 => {
-                let (kind, bank) = decode(4);
-                self.prg.map(0x8000, 32, bank >> 2, kind);
-            }
-            0x01 => {
-                let (kind, bank) = decode(2);
-                self.prg.map(0x8000, 16, bank >> 1, kind);
-                let (kind, bank) = decode(4);
-                self.prg.map(0xc000, 16, bank >> 1, kind);
-            }
-            0x02 => {
-                let (kind, bank) = decode(2);
-                self.prg.map(0x8000, 16, bank >> 1, kind);
-                let (kind, bank) = decode(3);
-                self.prg.map(0xc000, 8, bank, kind);
-                let (kind, bank) = decode(4);
-                self.prg.map(0xe000, 8, bank, kind);
-            }
-            0x03 => {
-                let (kind, bank) = decode(1);
-                self.prg.map(0x8000, 8, bank, kind);
-                let (kind, bank) = decode(2);
-                self.prg.map(0xa000, 8, bank, kind);
-                let (kind, bank) = decode(3);
-                self.prg.map(0xc000, 8, bank, kind);
-                let (kind, bank) = decode(4);
-                self.prg.map(0xe000, 8, bank, kind);
-            }
-            _ => unreachable!(),
-        }
+        (bank, size * 1024)
     }
 
-    fn sync_chr(&mut self) {
-        let regs = self.chr_regs;
-        let chr_hi = self.chr_hi as usize;
-
-        let decode = |reg_idx| regs[reg_idx] as usize | (chr_hi << 8);
-
-        match self.chr_bank_mode {
-            0x00 => {
-                self.chr_spr.map(0x0000, 8, decode(7), BankKind::Rom);
-                self.chr_bg.map(0x0000, 8, decode(11), BankKind::Rom);
-            }
-            0x01 => {
-                self.chr_spr.map(0x0000, 4, decode(3), BankKind::Rom);
-                self.chr_spr.map(0x1000, 4, decode(7), BankKind::Rom);
-
-                self.chr_bg.map(0x0000, 4, decode(11), BankKind::Rom);
-                self.chr_bg.map(0x1000, 4, decode(11), BankKind::Rom);
-            }
-            0x02 => {
-                self.chr_spr.map(0x0000, 2, decode(1), BankKind::Rom);
-                self.chr_spr.map(0x0800, 2, decode(3), BankKind::Rom);
-                self.chr_spr.map(0x1000, 2, decode(5), BankKind::Rom);
-                self.chr_spr.map(0x1800, 2, decode(7), BankKind::Rom);
-
-                self.chr_bg.map(0x0000, 2, decode(9), BankKind::Rom);
-                self.chr_bg.map(0x0800, 2, decode(11), BankKind::Rom);
-                self.chr_bg.map(0x1000, 2, decode(9), BankKind::Rom);
-                self.chr_bg.map(0x1800, 2, decode(11), BankKind::Rom);
-            }
-            0x03 => {
-                self.chr_spr.map(0x0000, 1, decode(0), BankKind::Rom);
-                self.chr_spr.map(0x0400, 1, decode(1), BankKind::Rom);
-                self.chr_spr.map(0x0800, 1, decode(2), BankKind::Rom);
-                self.chr_spr.map(0x0c00, 1, decode(3), BankKind::Rom);
-                self.chr_spr.map(0x1000, 1, decode(4), BankKind::Rom);
-                self.chr_spr.map(0x1400, 1, decode(5), BankKind::Rom);
-                self.chr_spr.map(0x1800, 1, decode(6), BankKind::Rom);
-                self.chr_spr.map(0x1c00, 1, decode(7), BankKind::Rom);
-
-                self.chr_bg.map(0x0000, 1, decode(8), BankKind::Rom);
-                self.chr_bg.map(0x0400, 1, decode(9), BankKind::Rom);
-                self.chr_bg.map(0x0800, 1, decode(10), BankKind::Rom);
-                self.chr_bg.map(0x0c00, 1, decode(11), BankKind::Rom);
-                self.chr_bg.map(0x1000, 1, decode(8), BankKind::Rom);
-                self.chr_bg.map(0x1400, 1, decode(9), BankKind::Rom);
-                self.chr_bg.map(0x1800, 1, decode(10), BankKind::Rom);
-                self.chr_bg.map(0x1c00, 1, decode(11), BankKind::Rom);
-            }
+    fn map_ext_chr(&self, addr: u16) -> (usize, usize) {
+        let addr = addr as usize & 0x0fff;
+        let (bank_idx, size) = match self.chr_bank_mode {
+            0x00 => (11, 8),
+            0x01 => (11, 4),
+            0x02 => (addr & 0x800 >> 10 | 9, 2),
+            0x03 => (addr >> 10 | 8, 1),
             _ => unreachable!(),
-        }
+        };
+
+        let bank = self.chr_regs[bank_idx] as usize | (self.chr_hi as usize) << 8;
+
+        (bank, size * 1024)
     }
 
     fn in_vert_split(&self) -> bool {
@@ -695,7 +654,7 @@ impl Mmc5 {
         let col = (self.ppu_state.tile_number().unwrap_or(0) as u16) % 32;
         let tile_idx = row * 32 + col;
 
-        self.exram.read(tile_idx & 0x3ff)
+        self.exram.read_mapped(0, 1024, tile_idx)
     }
 
     fn vert_split_attr(&self) -> u8 {
@@ -704,7 +663,7 @@ impl Mmc5 {
         let tile_idx = row * 32 + col;
         let attr_addr = 0x3c0 | (tile_idx >> 4 & 0x38) | (tile_idx >> 2 & 7);
 
-        self.exram.read(attr_addr & 0x3ff)
+        self.exram.read_mapped(0, 1024, attr_addr)
     }
 }
 
@@ -791,7 +750,7 @@ impl Mapper for Mmc5 {
             if let Some(state) = self.ppu_state.read() {
                 match state {
                     PpuRead::Nametable => {
-                        let val = self.exram.read(address & 0x3ff);
+                        let val = self.exram.read_mapped(0, 1024, address);
                         self.ex_attr_bank = val & 0x3f;
                         self.ex_attr_pal = (val >> 6) * 0b01010101;
                     }
@@ -815,7 +774,7 @@ impl Mapper for Mmc5 {
 
     fn save_wram(&self) -> Option<super::SaveWram> {
         if self.cartridge.battery {
-            self.prg.save_wram()
+            self.prg_ram.save_wram()
         } else {
             None
         }

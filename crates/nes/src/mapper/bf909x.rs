@@ -4,7 +4,7 @@ use nes_traits::SaveState;
 use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::mapper::Mapper;
-use crate::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
+use crate::memory::{Memory, MemoryBlock};
 use crate::ppu::PpuFetchKind;
 
 use super::SimpleMirroring;
@@ -13,38 +13,34 @@ use super::SimpleMirroring;
 pub struct Bf909x {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
-    mem: MappedMemory,
-    chr_ram: MemoryBlock,
+    prg_bank: u8,
+    prg_last_bank: usize,
+    chr_ram: Option<MemoryBlock>,
     mirroring: SimpleMirroring,
-    prg_len: usize,
 }
 
 impl Bf909x {
     pub fn new(cartridge: INes) -> Bf909x {
-        let mut mem = MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg);
+        let prg_last_bank = (cartridge.prg_rom.len() / (16 * 1024)) - 1;
 
-        let last_prg = (cartridge.prg_rom.len() / 0x4000) - 1;
-        mem.map(0xC000, 16, last_prg, BankKind::Rom);
+        let chr_ram = (cartridge.chr_ram_bytes >= 1024)
+            .then(|| MemoryBlock::new(cartridge.chr_ram_bytes >> 10));
 
         Bf909x {
-            mem,
-            chr_ram: MemoryBlock::new(cartridge.chr_ram_bytes >> 10),
-            mirroring: SimpleMirroring::new(cartridge.mirroring.into()),
-            prg_len: cartridge.prg_rom.len(),
+            prg_bank: 0,
+            prg_last_bank,
+            chr_ram,
+            mirroring: SimpleMirroring::new(cartridge.mirroring),
             cartridge,
         }
     }
 
     fn read_cpu(&self, addr: u16) -> u8 {
-        self.mem.read(&self.cartridge, addr)
-    }
-
-    fn read_ppu(&self, addr: u16) -> u8 {
-        if self.cartridge.chr_ram_bytes > 0 {
-            self.chr_ram.read(addr)
-        } else {
-            self.cartridge.chr_rom[addr as usize]
-        }
+        let bank = match addr & 0xc000 {
+            0xc000 => self.prg_last_bank,
+            _ => self.prg_bank as usize,
+        };
+        self.cartridge.prg_rom.read_mapped(bank, 16 * 1024, addr)
     }
 
     fn write_cpu(&mut self, addr: u16, value: u8) {
@@ -58,30 +54,30 @@ impl Bf909x {
                     self.mirroring.internal_b();
                 }
             }
-            0xc000 | 0xd000 => self
-                .mem
-                .map(0x8000, 16, (value & 0xf) as usize, BankKind::Rom),
+            0xc000 | 0xd000 => self.prg_bank = value & 0xf,
             _ => (),
         }
     }
 
-    fn write_ppu(&self, addr: u16, value: u8) {
-        if self.cartridge.chr_ram_bytes > 0 {
-            self.chr_ram.write(addr, value);
+    fn read_ppu(&self, addr: u16) -> u8 {
+        if let Some(chr_ram) = self.chr_ram.as_ref() {
+            chr_ram.read_mapped(0, 8 * 1024, addr)
+        } else {
+            self.cartridge.chr_rom.read_mapped(0, 8 * 1024, addr)
+        }
+    }
+
+    fn write_ppu(&mut self, addr: u16, value: u8) {
+        if let Some(chr_ram) = self.chr_ram.as_mut() {
+            chr_ram.write_mapped(0, 8 * 1024, addr, value)
         }
     }
 }
 
 impl Mapper for Bf909x {
     fn register(&self, cpu: &mut AddressBus) {
-        cpu.register_read(
-            DeviceKind::Mapper,
-            AndAndMask(0x8000, (self.prg_len - 1) as u16),
-        );
-        cpu.register_write(
-            DeviceKind::Mapper,
-            AndAndMask(0x8000, (self.prg_len - 1) as u16),
-        );
+        cpu.register_read(DeviceKind::Mapper, AndAndMask(0x8000, 0xffff));
+        cpu.register_write(DeviceKind::Mapper, AndAndMask(0x8000, 0xffff));
     }
 
     fn peek(&self, bus: BusKind, addr: u16) -> u8 {

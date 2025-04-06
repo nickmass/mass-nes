@@ -4,7 +4,7 @@ use nes_traits::SaveState;
 use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::mapper::Mapper;
-use crate::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
+use crate::memory::{Memory, MemoryBlock};
 use crate::ppu::PpuFetchKind;
 
 use super::SimpleMirroring;
@@ -13,39 +13,29 @@ use super::SimpleMirroring;
 pub struct Axrom {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
-    prg: MappedMemory,
-    prg_count: usize,
+    prg_bank: u8,
     chr_ram: MemoryBlock,
     mirroring: SimpleMirroring,
 }
 
 impl Axrom {
     pub fn new(cartridge: INes) -> Axrom {
-        let mut prg = MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg);
-        let prg_count = cartridge.prg_rom.len() / 32 * 1024;
-
-        prg.map(0x8000, 32, 0, BankKind::Rom);
-
         Axrom {
-            prg,
-            prg_count,
+            prg_bank: 0,
             chr_ram: MemoryBlock::new(8),
-            mirroring: SimpleMirroring::new(cartridge.mirroring.into()),
+            mirroring: SimpleMirroring::new(cartridge.mirroring),
             cartridge,
         }
     }
 
     fn read_cpu(&self, addr: u16) -> u8 {
-        self.prg.read(&self.cartridge, addr)
-    }
-
-    fn read_ppu(&self, addr: u16) -> u8 {
-        self.chr_ram.read(addr)
+        self.cartridge
+            .prg_rom
+            .read_mapped(self.prg_bank as usize, 32 * 1024, addr)
     }
 
     fn write_cpu(&mut self, _addr: u16, value: u8) {
-        let bank = value as usize % self.prg_count;
-        self.prg.map(0x8000, 32, bank, BankKind::Rom);
+        self.prg_bank = value & 7;
         if value & 0x10 == 0 {
             self.mirroring.internal_a()
         } else {
@@ -53,8 +43,12 @@ impl Axrom {
         }
     }
 
-    fn write_ppu(&self, addr: u16, value: u8) {
-        self.chr_ram.write(addr, value);
+    fn read_ppu(&self, addr: u16) -> u8 {
+        self.chr_ram.read_mapped(0, 8 * 1024, addr)
+    }
+
+    fn write_ppu(&mut self, addr: u16, value: u8) {
+        self.chr_ram.write_mapped(0, 8 * 1024, addr, value);
     }
 }
 

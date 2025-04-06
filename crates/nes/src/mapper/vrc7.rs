@@ -9,7 +9,7 @@ use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::debug::Debug;
 use crate::mapper::Mapper;
-use crate::memory::{BankKind, MappedMemory, MemKind};
+use crate::memory::{Memory, MemoryBlock};
 use crate::ppu::PpuFetchKind;
 
 use super::vrc_irq::VrcIrq;
@@ -55,125 +55,59 @@ pub struct Vrc7 {
     variant: Vrc7Variant,
     #[cfg_attr(feature = "save-states", save(nested))]
     irq: VrcIrq,
-    prg: MappedMemory,
-    chr: MappedMemory,
-    chr_kind: BankKind,
+    prg_ram: MemoryBlock,
+    chr_ram: Option<MemoryBlock>,
     ram_protect: bool,
-    prg_bank_regs: [u8; 3],
+    prg_bank_regs: [u8; 4],
     chr_bank_regs: [u8; 8],
 }
 
 impl Vrc7 {
     pub fn new(mut cartridge: INes, variant: Vrc7Variant, debug: Rc<Debug>) -> Self {
-        let mirroring = SimpleMirroring::new(cartridge.mirroring.into());
-        let mut prg = MappedMemory::new(&cartridge, 0x6000, 8, 40, MemKind::Prg);
-        let (chr, chr_kind) = if cartridge.chr_ram_bytes > 0 {
-            (
-                MappedMemory::new(
-                    &cartridge,
-                    0x0000,
-                    cartridge.chr_ram_bytes as u32 / 0x400,
-                    8,
-                    MemKind::Chr,
-                ),
-                BankKind::Ram,
-            )
-        } else {
-            (
-                MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr),
-                BankKind::Rom,
-            )
-        };
-
-        let last = (cartridge.prg_rom.len() / 0x2000) - 1;
-        prg.map(0x6000, 8, 0, BankKind::Ram);
-        prg.map(0xe000, 8, last, BankKind::Rom);
-
+        let mut prg_ram = MemoryBlock::new(8);
         if let Some(wram) = cartridge.wram.take() {
-            prg.restore_wram(wram);
+            prg_ram.restore_wram(wram);
         }
+        let last_bank = ((cartridge.prg_rom.len() / 0x2000) - 1) as u8;
 
-        let mut rom = Self {
+        let chr_ram = (cartridge.chr_ram_bytes > 0).then(|| MemoryBlock::new(8));
+
+        let mirroring = SimpleMirroring::new(cartridge.mirroring);
+
+        Self {
             cartridge,
             mirroring,
             audio: Audio::new(),
             variant,
             irq: VrcIrq::new(debug),
-            prg,
-            chr,
-            chr_kind,
+            prg_ram,
+            chr_ram,
             ram_protect: false,
-            prg_bank_regs: [0; 3],
+            prg_bank_regs: [0, 0, 0, last_bank],
             chr_bank_regs: [0; 8],
-        };
-
-        rom.sync();
-        rom
-    }
-
-    fn sync(&mut self) {
-        self.prg.map(
-            0x8000,
-            8,
-            self.prg_bank_regs[0] as usize & 0x7f,
-            BankKind::Rom,
-        );
-        self.prg.map(
-            0xa000,
-            8,
-            self.prg_bank_regs[1] as usize & 0x7f,
-            BankKind::Rom,
-        );
-        self.prg.map(
-            0xc000,
-            8,
-            self.prg_bank_regs[2] as usize & 0x7f,
-            BankKind::Rom,
-        );
-
-        for i in 0..8 {
-            self.chr.map(
-                i * 0x400,
-                1,
-                self.chr_bank_regs[i as usize] as usize,
-                self.chr_kind,
-            );
         }
     }
 
     fn read_cpu(&self, addr: u16) -> u8 {
         match addr {
-            0x6000..=0xffff => self.prg.read(&self.cartridge, addr),
-            _ => 0,
-        }
-    }
-
-    fn read_ppu(&self, addr: u16) -> u8 {
-        self.chr.read(&self.cartridge, addr)
-    }
-
-    fn write_ppu(&mut self, addr: u16, value: u8) {
-        if addr & 0x2000 == 0 {
-            self.chr.write(addr, value);
+            0x6000..=0x7fff => self.prg_ram.read_mapped(0, 8 * 1024, addr),
+            _ => {
+                let bank_idx = (addr as usize >> 13) & 3;
+                let bank = self.prg_bank_regs[bank_idx] as usize;
+                self.cartridge.prg_rom.read_mapped(bank, 8 * 1024, addr)
+            }
         }
     }
 
     fn write_cpu(&mut self, addr: u16, value: u8) {
         let addr = self.variant.register_decode(addr);
         match addr {
-            0x6000..=0x7fff if !self.ram_protect => self.prg.write(addr, value),
-            0x8000 => {
-                self.prg_bank_regs[0] = value;
-                self.sync();
+            0x6000..=0x7fff if !self.ram_protect => {
+                self.prg_ram.write_mapped(0, 8 * 1024, addr, value)
             }
-            0x8010 => {
-                self.prg_bank_regs[1] = value;
-                self.sync();
-            }
-            0x9000 => {
-                self.prg_bank_regs[2] = value;
-                self.sync();
-            }
+            0x8000 => self.prg_bank_regs[0] = value,
+            0x8010 => self.prg_bank_regs[1] = value,
+            0x9000 => self.prg_bank_regs[2] = value,
             0xa000..=0xdfff => {
                 let reg = match addr {
                     0xa000 => 0,
@@ -187,7 +121,6 @@ impl Vrc7 {
                     _ => return,
                 };
                 self.chr_bank_regs[reg] = value;
-                self.sync();
             }
             0xe000 => {
                 match value & 0x3 {
@@ -205,6 +138,28 @@ impl Vrc7 {
             0xf000 => self.irq.control(value),
             0xf010 => self.irq.acknowledge(),
             _ => (),
+        }
+    }
+
+    fn read_ppu(&self, addr: u16) -> u8 {
+        let bank_idx = addr as usize >> 10 & 7;
+        let bank = self.chr_bank_regs[bank_idx] as usize;
+
+        if let Some(ram) = self.chr_ram.as_ref() {
+            ram.read_mapped(bank, 1024, addr)
+        } else {
+            self.cartridge.chr_rom.read_mapped(bank, 1024, addr)
+        }
+    }
+
+    fn write_ppu(&mut self, addr: u16, value: u8) {
+        if addr & 0x2000 == 0 {
+            let bank_idx = addr as usize >> 10 & 7;
+            let bank = self.chr_bank_regs[bank_idx] as usize;
+
+            if let Some(ram) = self.chr_ram.as_mut() {
+                ram.write_mapped(bank, 1024, addr, value);
+            }
         }
     }
 }
@@ -251,7 +206,7 @@ impl Mapper for Vrc7 {
 
     fn save_wram(&self) -> Option<super::SaveWram> {
         if self.cartridge.battery {
-            self.prg.save_wram()
+            self.prg_ram.save_wram()
         } else {
             None
         }

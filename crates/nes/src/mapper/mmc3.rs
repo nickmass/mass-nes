@@ -9,10 +9,18 @@ use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::debug::Debug;
 use crate::mapper::Mapper;
-use crate::memory::{BankKind, MappedMemory, MemKind, MemoryBlock};
+use crate::memory::{Memory, MemoryBlock};
 use crate::ppu::PpuFetchKind;
 
 use super::{Nametable, SimpleMirroring};
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum PrgRamState {
+    ReadWrite,
+    ReadOnly,
+    Zero,
+    OpenBus,
+}
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Copy, Clone)]
@@ -40,10 +48,8 @@ pub struct Mmc3 {
     debug: Rc<Debug>,
     variant: Mmc3Variant,
     mirroring: SimpleMirroring,
-    prg: MappedMemory,
-    chr: MappedMemory,
-    chr_type: BankKind,
-    chr_count: usize,
+    prg_ram: MemoryBlock,
+    chr_ram: Option<MemoryBlock>,
     bank_data: [u8; 8],
     bank_select: u8,
     ram_enabled: bool,
@@ -56,66 +62,40 @@ pub struct Mmc3 {
     irq_force_reload_pending: bool,
     irq_a12: bool,
     irq_a12_low_cycles: u64,
-    last: usize,
-    ext_nt: Option<[MemoryBlock; 2]>,
+    last_prg: u8,
+    ext_nt: Option<MemoryBlock>,
 }
 
 impl Mmc3 {
     pub fn new(mut cartridge: INes, variant: Mmc3Variant, debug: Rc<Debug>) -> Mmc3 {
-        let chr_type = if cartridge.chr_rom.is_empty() {
-            BankKind::Ram
+        let mut prg_ram = if variant.is_mmc6() {
+            MemoryBlock::new(1)
         } else {
-            BankKind::Rom
-        };
-        let chr = match chr_type {
-            BankKind::Rom => MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr),
-            BankKind::Ram => {
-                let mut mem = MappedMemory::new(&cartridge, 0x0000, 8, 8, MemKind::Chr);
-                mem.map(0x0000, 8, 0, BankKind::Ram);
-                mem
-            }
-        };
-
-        let chr_count = match chr_type {
-            BankKind::Ram => 0,
-            BankKind::Rom => cartridge.chr_rom.len() / 1024,
-        };
-
-        let mut prg = if variant.is_mmc6() {
-            let mut prg = MappedMemory::new(&cartridge, 0x7000, 1, 36, MemKind::Prg);
-            prg.map(0x7000, 1, 0, BankKind::Ram);
-            prg.map(0x7400, 1, 0, BankKind::Ram);
-            prg.map(0x7800, 1, 0, BankKind::Ram);
-            prg.map(0x7c00, 1, 0, BankKind::Ram);
-            prg
-        } else {
-            let mut prg = MappedMemory::new(&cartridge, 0x6000, 8, 40, MemKind::Prg);
-            prg.map(0x6000, 8, 0, BankKind::Ram);
-            prg
+            MemoryBlock::new(8)
         };
 
         if let Some(wram) = cartridge.wram.take() {
-            prg.restore_wram(wram);
+            prg_ram.restore_wram(wram);
         }
+
+        let chr_ram = cartridge.chr_rom.is_empty().then(|| MemoryBlock::new(8));
 
         let (mirroring, ext_nt) = if cartridge.alternative_mirroring {
             let mirroring = SimpleMirroring::new(super::Mirroring::FourScreen);
-            (mirroring, Some([MemoryBlock::new(1), MemoryBlock::new(1)]))
+            (mirroring, Some(MemoryBlock::new(2)))
         } else {
-            (SimpleMirroring::new(cartridge.mirroring.into()), None)
+            (SimpleMirroring::new(cartridge.mirroring), None)
         };
 
-        let last = (cartridge.prg_rom.len() / 0x2000) - 1;
+        let last_prg = (cartridge.prg_rom.len() / 0x2000 - 1) as u8;
 
-        let mut rom = Mmc3 {
+        Self {
             cartridge,
             debug,
             variant,
             mirroring,
-            prg,
-            chr,
-            chr_type,
-            chr_count,
+            prg_ram,
+            chr_ram,
             bank_data: [0; 8],
             bank_select: 0,
             ram_enabled: true,
@@ -129,63 +109,36 @@ impl Mmc3 {
             irq_a12: false,
             irq_a12_low_cycles: 0,
             ext_nt,
-            last,
-        };
-
-        rom.sync();
-
-        rom
+            last_prg,
+        }
     }
 
     fn read_cpu(&self, addr: u16) -> u8 {
         if addr & 0xe000 == 0x6000 {
-            match addr {
-                _ if !self.ram_enabled => addr as u8,
-                _ if !self.variant.is_mmc6() => self.prg.read(&self.cartridge, addr),
-                _ if self.variant.is_mmc6() => match addr & 0x7200 {
-                    0x7000 if self.ram_reg & 0x20 != 0 => self.prg.read(&self.cartridge, addr),
-                    0x7200 if self.ram_reg & 0x80 != 0 => self.prg.read(&self.cartridge, addr),
-                    _ if self.ram_reg & 0xa0 != 0 => 0,
-                    _ => addr as u8,
-                },
-                _ => addr as u8,
-            }
-        } else {
-            self.prg.read(&self.cartridge, addr)
-        }
-    }
-
-    fn read_ppu(&self, addr: u16) -> u8 {
-        if addr & 0x2000 != 0 {
-            if let Some([a, b]) = self.ext_nt.as_ref() {
-                match addr & 0x400 {
-                    0x0000 => a.read(addr & 0x3ff),
-                    0x0400 => b.read(addr & 0x3ff),
-                    _ => unreachable!(),
+            match self.prg_ram_state(addr) {
+                PrgRamState::ReadWrite | PrgRamState::ReadOnly => {
+                    if self.variant.is_mmc6() {
+                        self.prg_ram.read_mapped(0, 1024, addr)
+                    } else {
+                        self.prg_ram.read_mapped(0, 8 * 1024, addr)
+                    }
                 }
-            } else {
-                0
+                PrgRamState::Zero => 0,
+                PrgRamState::OpenBus => addr as u8,
             }
         } else {
-            self.chr.read(&self.cartridge, addr)
+            self.read_prg(addr)
         }
     }
 
     fn write_cpu(&mut self, addr: u16, value: u8) {
         if addr & 0xe000 == 0x6000 {
-            match addr {
-                _ if !self.ram_enabled => (),
-                _ if !self.variant.is_mmc6() => {
-                    if self.ram_reg & 0x40 == 0 {
-                        self.prg.write(addr, value);
-                    }
+            if self.prg_ram_state(addr) == PrgRamState::ReadWrite {
+                if self.variant.is_mmc6() {
+                    self.prg_ram.write_mapped(0, 1024, addr, value)
+                } else {
+                    self.prg_ram.write_mapped(0, 8 * 1024, addr, value)
                 }
-                _ if self.variant.is_mmc6() => match addr & 0x7200 {
-                    0x7000 if self.ram_reg & 0x30 == 0x30 => self.prg.write(addr, value),
-                    0x7200 if self.ram_reg & 0xc0 == 0xc0 => self.prg.write(addr, value),
-                    _ => (),
-                },
-                _ => (),
             }
             return;
         }
@@ -196,22 +149,18 @@ impl Mmc3 {
                 if self.variant.is_mmc6() {
                     self.ram_enabled = value & 0x20 != 0;
                 }
-                self.sync();
             }
             0x8001 => {
                 let bank_index = self.bank_select & 0x7;
                 self.bank_data[bank_index as usize] = value;
-                self.sync();
             }
             0xa000 => {
                 if self.ext_nt.is_some() {
                     return;
-                }
-
-                match value & 1 {
-                    0 => self.mirroring.vertical(),
-                    1 => self.mirroring.horizontal(),
-                    _ => unreachable!(),
+                } else if value & 1 == 0 {
+                    self.mirroring.vertical()
+                } else {
+                    self.mirroring.horizontal()
                 }
             }
             0xa001 => {
@@ -220,34 +169,108 @@ impl Mmc3 {
                 }
                 self.ram_reg = value;
             }
-            0xc000 => {
-                self.irq_latch = value;
-            }
-            0xc001 => {
-                self.irq_force_reload_pending = true;
-            }
+            0xc000 => self.irq_latch = value,
+            0xc001 => self.irq_force_reload_pending = true,
             0xe000 => {
                 self.irq = false;
                 self.irq_enabled = false;
             }
-            0xe001 => {
-                self.irq_enabled = true;
-            }
+            0xe001 => self.irq_enabled = true,
             _ => unreachable!(),
+        }
+    }
+
+    fn read_ppu(&self, addr: u16) -> u8 {
+        if addr & 0x2000 != 0 {
+            if let Some(nt) = self.ext_nt.as_ref() {
+                nt.read_mapped(0, 2048, addr)
+            } else {
+                0
+            }
+        } else {
+            let (bank, size) = self.map_chr(addr);
+            if let Some(ram) = self.chr_ram.as_ref() {
+                ram.read_mapped(bank, size, addr)
+            } else {
+                self.cartridge.chr_rom.read_mapped(bank, size, addr)
+            }
         }
     }
 
     fn write_ppu(&mut self, addr: u16, value: u8) {
         if addr & 0x2000 != 0 {
-            if let Some([a, b]) = self.ext_nt.as_mut() {
-                match addr & 0x400 {
-                    0x0000 => a.write(addr & 0x3ff, value),
-                    0x0400 => b.write(addr & 0x3ff, value),
-                    _ => unreachable!(),
-                }
+            if let Some(nt) = self.ext_nt.as_mut() {
+                nt.write_mapped(0, 2048, addr, value)
             }
         } else {
-            self.chr.write(addr, value);
+            let (bank, size) = self.map_chr(addr);
+            if let Some(ram) = self.chr_ram.as_mut() {
+                ram.write_mapped(bank, size, addr, value)
+            }
+        }
+    }
+
+    fn map_chr(&self, addr: u16) -> (usize, usize) {
+        let (bank, size) = match &self.chr_ram {
+            Some(_) => (0, 8),
+            None if self.bank_select & 0x80 == 0 => match addr >> 10 & 7 {
+                0 | 1 => (self.bank_data[0] >> 1, 2),
+                2 | 3 => (self.bank_data[1] >> 1, 2),
+                n => (self.bank_data[n as usize - 2], 1),
+            },
+            None => match addr >> 10 & 7 {
+                4 | 5 => (self.bank_data[0] >> 1, 2),
+                6 | 7 => (self.bank_data[1] >> 1, 2),
+                n => (self.bank_data[n as usize + 2], 1),
+            },
+        };
+
+        (bank as usize, size * 1024)
+    }
+
+    fn read_prg(&self, addr: u16) -> u8 {
+        let block = addr >> 13 & 3;
+        let bank = if self.bank_select & 0x40 == 0 {
+            match block {
+                0 => self.bank_data[6],
+                1 => self.bank_data[7],
+                2 => self.last_prg - 1,
+                3 => self.last_prg,
+                _ => unreachable!(),
+            }
+        } else {
+            match block {
+                0 => self.last_prg - 1,
+                1 => self.bank_data[7],
+                2 => self.bank_data[6],
+                3 => self.last_prg,
+                _ => unreachable!(),
+            }
+        };
+
+        self.cartridge
+            .prg_rom
+            .read_mapped(bank as usize, 8 * 1024, addr)
+    }
+
+    fn prg_ram_state(&self, addr: u16) -> PrgRamState {
+        if !self.ram_enabled {
+            PrgRamState::OpenBus
+        } else if !self.variant.is_mmc6() {
+            if self.ram_reg & 0x40 == 0 {
+                PrgRamState::ReadWrite
+            } else {
+                PrgRamState::ReadOnly
+            }
+        } else {
+            match addr & 0x7200 {
+                0x7000 if self.ram_reg & 0x30 == 0x30 => PrgRamState::ReadWrite,
+                0x7200 if self.ram_reg & 0xc0 == 0xc0 => PrgRamState::ReadWrite,
+                0x7000 if self.ram_reg & 0x20 != 0 => PrgRamState::ReadOnly,
+                0x7200 if self.ram_reg & 0x80 != 0 => PrgRamState::ReadOnly,
+                _ if self.ram_reg & 0xa0 != 0 => PrgRamState::Zero,
+                _ => PrgRamState::OpenBus,
+            }
         }
     }
 
@@ -279,45 +302,6 @@ impl Mmc3 {
                 }
                 self.irq = true;
             }
-        }
-    }
-
-    fn sync(&mut self) {
-        if self.chr_type == BankKind::Rom {
-            let chr = |n| self.bank_data[n] as usize % self.chr_count;
-            if self.bank_select & 0x80 == 0 {
-                self.chr.map(0x0000, 2, chr(0) >> 1, BankKind::Rom);
-                self.chr.map(0x0800, 2, chr(1) >> 1, BankKind::Rom);
-                self.chr.map(0x1000, 1, chr(2), BankKind::Rom);
-                self.chr.map(0x1400, 1, chr(3), BankKind::Rom);
-                self.chr.map(0x1800, 1, chr(4), BankKind::Rom);
-                self.chr.map(0x1c00, 1, chr(5), BankKind::Rom);
-            } else {
-                self.chr.map(0x0000, 1, chr(2), BankKind::Rom);
-                self.chr.map(0x0400, 1, chr(3), BankKind::Rom);
-                self.chr.map(0x0800, 1, chr(4), BankKind::Rom);
-                self.chr.map(0x0c00, 1, chr(5), BankKind::Rom);
-                self.chr.map(0x1000, 2, chr(0) >> 1, BankKind::Rom);
-                self.chr.map(0x1800, 2, chr(1) >> 1, BankKind::Rom);
-            }
-        }
-
-        if self.bank_select & 0x40 == 0 {
-            self.prg
-                .map(0x8000, 8, self.bank_data[6] as usize, BankKind::Rom);
-            self.prg
-                .map(0xa000, 8, self.bank_data[7] as usize, BankKind::Rom);
-            self.prg
-                .map(0xc000, 8, (self.last - 1) as usize, BankKind::Rom);
-            self.prg.map(0xe000, 8, self.last as usize, BankKind::Rom);
-        } else {
-            self.prg
-                .map(0x8000, 8, (self.last - 1) as usize, BankKind::Rom);
-            self.prg
-                .map(0xa000, 8, self.bank_data[7] as usize, BankKind::Rom);
-            self.prg
-                .map(0xc000, 8, self.bank_data[6] as usize, BankKind::Rom);
-            self.prg.map(0xe000, 8, self.last as usize, BankKind::Rom);
         }
     }
 }
@@ -367,7 +351,7 @@ impl Mapper for Mmc3 {
 
     fn save_wram(&self) -> Option<super::SaveWram> {
         if self.cartridge.battery {
-            self.prg.save_wram()
+            self.prg_ram.save_wram()
         } else {
             None
         }

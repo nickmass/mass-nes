@@ -1,10 +1,12 @@
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;
+#[cfg(feature = "save-states")]
+use serde::{Deserialize, Serialize};
 
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::mapper::Mapper;
-use crate::memory::{BankKind, MappedMemory, MemKind};
+use crate::memory::{Memory, MemoryBlock};
 use crate::ppu::PpuFetchKind;
 
 use super::SimpleMirroring;
@@ -42,15 +44,22 @@ impl Channel {
     }
 }
 
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
+enum PrgBank {
+    Ram(u8),
+    Rom(u8),
+}
+
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Fme7 {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
-    prg: MappedMemory,
-    chr: MappedMemory,
-    chr_kind: BankKind,
+    prg_ram: MemoryBlock,
+    prg_banks: [PrgBank; 5],
+    chr_ram: Option<MemoryBlock>,
+    chr_banks: [u8; 8],
     command: u8,
-    parameter: u8,
     irq_enable: bool,
     irq_counter_enable: bool,
     irq_counter: u16,
@@ -82,27 +91,26 @@ pub struct Fme7 {
 
 impl Fme7 {
     pub fn new(mut cartridge: INes) -> Fme7 {
-        let (chr, chr_kind) = if cartridge.chr_ram_bytes > 0 {
-            let chr = MappedMemory::new(&cartridge, 0x0000, 8, 8, MemKind::Chr);
-            (chr, BankKind::Ram)
-        } else {
-            let chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
-            (chr, BankKind::Rom)
-        };
-        let mut prg = MappedMemory::new(&cartridge, 0x6000, 16, 40, MemKind::Prg);
-        prg.map(0x6000, 8, 0, BankKind::Ram);
-        prg.map(
-            0xe000,
-            8,
-            (cartridge.prg_rom.len() / 0x2000) - 1,
-            BankKind::Rom,
-        );
+        let fixed_bank = ((cartridge.prg_rom.len() / 0x2000) - 1) as u8;
+        let prg_banks = [
+            PrgBank::Ram(0),
+            PrgBank::Rom(0),
+            PrgBank::Rom(0),
+            PrgBank::Rom(0),
+            PrgBank::Rom(fixed_bank),
+        ];
+
+        let prg_ram_size = (8 * 1024).max(cartridge.prg_ram_bytes);
+        let mut prg_ram = MemoryBlock::new(prg_ram_size / 1024);
 
         if let Some(wram) = cartridge.wram.take() {
-            prg.restore_wram(wram);
+            prg_ram.restore_wram(wram);
         }
 
-        let mirroring = SimpleMirroring::new(cartridge.mirroring.into());
+        let chr_ram = (cartridge.chr_ram_bytes > 0).then(|| MemoryBlock::new(8));
+        let chr_banks = [0; 8];
+
+        let mirroring = SimpleMirroring::new(cartridge.mirroring);
 
         let inc = 10.0f32.powf(1.0 / 10.0);
         let max = inc.powf(29.0);
@@ -122,11 +130,11 @@ impl Fme7 {
 
         let mut mapper = Fme7 {
             cartridge,
-            prg,
-            chr,
-            chr_kind,
+            prg_ram,
+            prg_banks,
+            chr_ram,
+            chr_banks,
             command: 0,
-            parameter: 0,
             irq_enable: false,
             irq_counter_enable: false,
             irq_counter: 0,
@@ -155,35 +163,35 @@ impl Fme7 {
             sample: 0,
         };
 
-        mapper.sync();
+        mapper.command(0);
 
         mapper
     }
 
     fn read_cpu(&self, addr: u16) -> u8 {
-        self.prg.read(&self.cartridge, addr)
+        let bank_idx = (addr >> 13) - 3;
+        match self.prg_banks[bank_idx as usize] {
+            PrgBank::Ram(bank) => self.prg_ram.read_mapped(bank as usize, 8 * 1024, addr),
+            PrgBank::Rom(bank) => self
+                .cartridge
+                .prg_rom
+                .read_mapped(bank as usize, 8 * 1024, addr),
+        }
     }
-
-    fn read_ppu(&self, addr: u16) -> u8 {
-        self.chr.read(&self.cartridge, addr)
-    }
-
     fn write_cpu(&mut self, addr: u16, value: u8) {
         if addr & 0xe000 == 0x6000 {
             if self.ram_enable && !self.ram_protect {
-                self.prg.write(addr, value);
+                if let PrgBank::Ram(bank) = self.prg_banks[0] {
+                    self.prg_ram
+                        .write_mapped(bank as usize, 8 * 1024, addr, value);
+                }
             }
             return;
         }
 
         match addr {
-            0x8000 => {
-                self.command = value & 0xf;
-            }
-            0xa000 => {
-                self.parameter = value;
-                self.sync();
-            }
+            0x8000 => self.command = value & 0xf,
+            0xa000 => self.command(value),
             0xc000 => {
                 self.audio_protect = value & 0xf0 != 0;
                 self.audio_reg_select = value & 0xf;
@@ -209,34 +217,39 @@ impl Fme7 {
         }
     }
 
-    fn write_ppu(&mut self, addr: u16, value: u8) {
-        if addr < 0x2000 {
-            self.chr.write(addr, value);
+    fn read_ppu(&self, addr: u16) -> u8 {
+        let bank_idx = addr >> 10 & 7;
+        let bank = self.chr_banks[bank_idx as usize] as usize;
+        if let Some(ram) = self.chr_ram.as_ref() {
+            ram.read_mapped(bank, 1024, addr)
+        } else {
+            self.cartridge.chr_rom.read_mapped(bank, 1024, addr)
         }
     }
 
-    fn sync(&mut self) {
-        let bank = ((self.parameter & 0x3f) as usize) % self.cartridge.prg_rom.len();
+    fn write_ppu(&mut self, addr: u16, value: u8) {
+        let bank_idx = addr >> 10 & 7;
+        let bank = self.chr_banks[bank_idx as usize];
+        if let Some(ram) = self.chr_ram.as_mut() {
+            ram.write_mapped(bank as usize, 1024, addr, value);
+        }
+    }
+
+    fn command(&mut self, parameter: u8) {
         match self.command {
-            0..=7 => self.chr.map(
-                0x400 * self.command as u16,
-                1,
-                self.parameter as usize,
-                self.chr_kind,
-            ),
+            n @ 0..=7 => self.chr_banks[n as usize] = parameter,
             8 => {
-                self.ram_protect = self.parameter & 0x80 == 0;
-                self.ram_enable = self.parameter & 0x40 != 0;
+                self.ram_protect = parameter & 0x80 == 0;
+                self.ram_enable = parameter & 0x40 != 0;
+                let bank = parameter & 0x3f;
                 if self.ram_enable {
-                    self.prg.map(0x6000, 8, 0, BankKind::Ram);
+                    self.prg_banks[0] = PrgBank::Ram(bank);
                 } else {
-                    self.prg.map(0x6000, 8, bank, BankKind::Rom);
+                    self.prg_banks[0] = PrgBank::Rom(bank);
                 }
             }
-            9 => self.prg.map(0x8000, 8, bank, BankKind::Rom),
-            0xa => self.prg.map(0xa000, 8, bank, BankKind::Rom),
-            0xb => self.prg.map(0xc000, 8, bank, BankKind::Rom),
-            0xc => match self.parameter & 0x3 {
+            n @ 9..=0xb => self.prg_banks[n as usize - 8] = PrgBank::Rom(parameter & 0x3f),
+            0xc => match parameter & 0x3 {
                 0 => self.mirroring.vertical(),
                 1 => self.mirroring.horizontal(),
                 2 => self.mirroring.internal_b(),
@@ -244,15 +257,15 @@ impl Fme7 {
                 _ => unreachable!(),
             },
             0xd => {
-                self.irq_enable = self.parameter & 1 != 0;
-                self.irq_counter_enable = self.parameter & 0x80 != 0;
+                self.irq_enable = parameter & 1 != 0;
+                self.irq_counter_enable = parameter & 0x80 != 0;
                 self.irq = false;
             }
             0xe => {
-                self.irq_counter = (self.irq_counter & 0xff00) | self.parameter as u16;
+                self.irq_counter = (self.irq_counter & 0xff00) | parameter as u16;
             }
             0xf => {
-                self.irq_counter = (self.irq_counter & 0x00ff) | ((self.parameter as u16) << 8);
+                self.irq_counter = (self.irq_counter & 0x00ff) | ((parameter as u16) << 8);
             }
             _ => unreachable!(),
         }
@@ -462,7 +475,7 @@ impl Mapper for Fme7 {
 
     fn save_wram(&self) -> Option<super::SaveWram> {
         if self.cartridge.battery {
-            self.prg.save_wram()
+            self.prg_ram.save_wram()
         } else {
             None
         }

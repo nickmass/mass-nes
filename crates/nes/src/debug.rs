@@ -33,7 +33,7 @@ mod debugger {
     use crate::bus::{AddressBus, DeviceKind, RangeAndMask};
     use crate::cpu::{CpuDebugState, ops::*};
     use crate::machine::BreakpointHandler;
-    use crate::memory::MemoryBlock;
+    use crate::memory::{Memory, MemoryBlock};
     use crate::ppu::PpuDebugState;
 
     use super::DebugEvent;
@@ -236,16 +236,16 @@ mod debugger {
         pub fn read(&self, addr: u16) -> u8 {
             let state = self.state.borrow();
             if let Some(mem) = &state.mem {
-                mem.read(addr)
+                mem.read(addr as usize)
             } else {
                 0x00
             }
         }
 
         pub fn write(&self, addr: u16, value: u8) {
-            let state = self.state.borrow();
-            if let Some(mem) = &state.mem {
-                mem.write(addr, value);
+            let mut state = self.state.borrow_mut();
+            if let Some(mem) = state.mem.as_mut() {
+                mem.write(addr as usize, value);
             }
         }
 

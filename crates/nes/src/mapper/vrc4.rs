@@ -9,7 +9,7 @@ use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::debug::Debug;
 use crate::mapper::Mapper;
-use crate::memory::{BankKind, MappedMemory, MemKind};
+use crate::memory::{Memory, MemoryBlock};
 use crate::ppu::PpuFetchKind;
 
 use super::vrc_irq::VrcIrq;
@@ -123,13 +123,10 @@ pub struct Vrc4 {
     mirroring: SimpleMirroring,
     #[cfg_attr(feature = "save-states", save(nested))]
     irq: VrcIrq,
-    prg: MappedMemory,
-    chr: MappedMemory,
-    prg_regs: [u8; 2],
+    prg_ram: Option<MemoryBlock>,
+    prg_regs: [u8; 4],
     chr_lo_regs: [u8; 8],
     chr_hi_regs: [u8; 8],
-    fixed_bank: usize,
-    has_ram: bool,
     ram_protect: bool,
     swap_mode: bool,
     microwire_latch: u8,
@@ -137,91 +134,59 @@ pub struct Vrc4 {
 
 impl Vrc4 {
     pub fn new(mut cartridge: INes, variant: Vrc4Variant, debug: Rc<Debug>) -> Self {
-        let has_ram = cartridge.prg_ram_bytes > 0;
-
-        let mirroring = SimpleMirroring::new(cartridge.mirroring.into());
-        let mut prg = if has_ram {
-            let mut prg = MappedMemory::new(&cartridge, 0x6000, 8, 40, MemKind::Prg);
-            prg.map(0x6000, 8, 0, BankKind::Ram);
-            prg
+        let last_bank = ((cartridge.prg_rom.len() / 0x2000) - 1) as u8;
+        let fixed_bank = ((cartridge.prg_rom.len() / 0x2000) - 2) as u8;
+        let prg_ram = if cartridge.prg_ram_bytes > 0 {
+            let mut ram = MemoryBlock::new(8);
+            if let Some(wram) = cartridge.wram.take() {
+                ram.restore_wram(wram);
+            }
+            Some(ram)
         } else {
-            MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg)
+            None
         };
 
-        let chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
+        let mirroring = SimpleMirroring::new(cartridge.mirroring);
 
-        let last = (cartridge.prg_rom.len() / 0x2000) - 1;
-        let fixed_bank = (cartridge.prg_rom.len() / 0x2000) - 2;
-        prg.map(0xe000, 8, last, BankKind::Rom);
-
-        if let Some(wram) = cartridge.wram.take() {
-            prg.restore_wram(wram);
-        }
-
-        let mut rom = Self {
+        Self {
             variant,
             cartridge,
             mirroring,
             irq: VrcIrq::new(debug),
-            prg,
-            chr,
-            prg_regs: [0; 2],
+            prg_ram,
+            prg_regs: [0, 0, fixed_bank, last_bank],
             chr_lo_regs: [0; 8],
             chr_hi_regs: [0; 8],
-            fixed_bank,
-            has_ram,
             ram_protect: true,
             swap_mode: false,
             microwire_latch: 0,
-        };
-        rom.sync();
-        rom
-    }
-
-    fn sync(&mut self) {
-        if self.swap_mode {
-            self.prg.map(0x8000, 8, self.fixed_bank, BankKind::Rom);
-            self.prg
-                .map(0xa000, 8, self.prg_regs[1] as usize, BankKind::Rom);
-            self.prg
-                .map(0xc000, 8, self.prg_regs[0] as usize, BankKind::Rom);
-        } else {
-            self.prg
-                .map(0x8000, 8, self.prg_regs[0] as usize, BankKind::Rom);
-            self.prg
-                .map(0xa000, 8, self.prg_regs[1] as usize, BankKind::Rom);
-            self.prg.map(0xc000, 8, self.fixed_bank, BankKind::Rom);
         }
-
-        let decode_chr = |n| {
-            self.variant
-                .decode_chr_bank(self.chr_lo_regs[n], self.chr_hi_regs[n])
-        };
-
-        self.chr.map(0x0000, 1, decode_chr(0), BankKind::Rom);
-        self.chr.map(0x0400, 1, decode_chr(1), BankKind::Rom);
-        self.chr.map(0x0800, 1, decode_chr(2), BankKind::Rom);
-        self.chr.map(0x0c00, 1, decode_chr(3), BankKind::Rom);
-        self.chr.map(0x1000, 1, decode_chr(4), BankKind::Rom);
-        self.chr.map(0x1400, 1, decode_chr(5), BankKind::Rom);
-        self.chr.map(0x1800, 1, decode_chr(6), BankKind::Rom);
-        self.chr.map(0x1c00, 1, decode_chr(7), BankKind::Rom);
     }
 
     fn read_cpu(&self, addr: u16) -> u8 {
-        if addr >= 0x8000 {
-            self.prg.read(&self.cartridge, addr)
-        } else if self.has_ram && !self.ram_protect {
-            self.prg.read(&self.cartridge, addr)
-        } else if self.variant.has_microwire() && !self.has_ram {
-            if addr >= 0x6000 && addr < 0x7000 {
-                self.microwire_latch & 0x01
-            } else {
-                0
+        if addr & 0x8000 != 0 {
+            let bank_idx = match (self.swap_mode, addr & 0xe000) {
+                (_, 0xe000) => 3,
+                (_, 0xa000) => 1,
+                (true, 0x8000) => 2,
+                (true, 0xc000) => 0,
+                (false, 0x8000) => 0,
+                (false, 0xc000) => 2,
+                _ => unreachable!(),
+            };
+            let bank = self.prg_regs[bank_idx] as usize;
+            return self.cartridge.prg_rom.read_mapped(bank, 8 * 1024, addr);
+        } else if let Some(ram) = self.prg_ram.as_ref() {
+            if !self.ram_protect {
+                return ram.read_mapped(0, 8 * 1024, addr);
             }
-        } else {
-            0
+        } else if self.variant.has_microwire() {
+            if addr >= 0x6000 && addr < 0x7000 {
+                return self.microwire_latch & 0x01;
+            }
         }
+
+        0
     }
 
     fn write_cpu(&mut self, addr: u16, value: u8) {
@@ -230,14 +195,8 @@ impl Vrc4 {
             let mut chr_lo = None;
             let mut chr_hi = None;
             match addr {
-                0x8000 | 0x8001 | 0x8002 | 0x8003 => {
-                    self.prg_regs[0] = value;
-                    self.sync();
-                }
-                0xa000 | 0xa001 | 0xa002 | 0xa003 => {
-                    self.prg_regs[1] = value;
-                    self.sync();
-                }
+                0x8000 | 0x8001 | 0x8002 | 0x8003 => self.prg_regs[0] = value,
+                0xa000 | 0xa001 | 0xa002 | 0xa003 => self.prg_regs[1] = value,
                 0xb000 => chr_lo = Some(0),
                 0xb002 => chr_lo = Some(1),
                 0xc000 => chr_lo = Some(2),
@@ -261,7 +220,6 @@ impl Vrc4 {
                 addr if self.variant.is_swap_reg(addr) => {
                     self.ram_protect = value & 0x01 == 0;
                     self.swap_mode = value & 0x02 != 0;
-                    self.sync();
                 }
                 addr if self.variant.is_mirroring_reg(addr) => {
                     let mirroring = self.variant.decode_mirroring(value);
@@ -272,21 +230,25 @@ impl Vrc4 {
 
             if let Some(lo) = chr_lo {
                 self.chr_lo_regs[lo] = value;
-                self.sync();
             }
             if let Some(hi) = chr_hi {
                 self.chr_hi_regs[hi] = value;
-                self.sync();
             }
-        } else {
-            if self.has_ram {
-                if !self.ram_protect {
-                    self.prg.write(addr, value);
-                }
-            } else if self.variant.has_microwire() && addr >= 0x6000 && addr < 0x7000 {
-                self.microwire_latch = value;
+        } else if let Some(ram) = self.prg_ram.as_mut() {
+            if !self.ram_protect {
+                ram.write_mapped(0, 8 * 1024, addr, value);
             }
+        } else if self.variant.has_microwire() && addr >= 0x6000 && addr < 0x7000 {
+            self.microwire_latch = value;
         }
+    }
+
+    fn read_ppu(&self, addr: u16) -> u8 {
+        let bank_idx = addr as usize >> 10;
+        let bank = self
+            .variant
+            .decode_chr_bank(self.chr_lo_regs[bank_idx], self.chr_hi_regs[bank_idx]);
+        self.cartridge.chr_rom.read_mapped(bank, 1024, addr)
     }
 }
 
@@ -301,7 +263,7 @@ impl Mapper for Vrc4 {
     fn peek(&self, bus: BusKind, addr: u16) -> u8 {
         match bus {
             BusKind::Cpu => self.read_cpu(addr),
-            BusKind::Ppu => self.chr.read(&self.cartridge, addr),
+            BusKind::Ppu => self.read_ppu(addr),
         }
     }
 
@@ -332,7 +294,7 @@ impl Mapper for Vrc4 {
 
     fn save_wram(&self) -> Option<super::SaveWram> {
         if self.cartridge.battery {
-            self.prg.save_wram()
+            self.prg_ram.as_ref().and_then(|r| r.save_wram())
         } else {
             None
         }

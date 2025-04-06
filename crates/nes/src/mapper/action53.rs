@@ -4,7 +4,7 @@ use nes_traits::SaveState;
 use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind, RangeAndMask};
 use crate::cartridge::INes;
 use crate::mapper::Mapper;
-use crate::memory::{BankKind, MappedMemory, MemKind};
+use crate::memory::{Memory, MemoryBlock};
 use crate::ppu::PpuFetchKind;
 
 use super::SimpleMirroring;
@@ -13,8 +13,7 @@ use super::SimpleMirroring;
 pub struct Action53 {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
-    prg: MappedMemory,
-    chr: MappedMemory,
+    chr_ram: Option<MemoryBlock>,
     regs: [u8; 4],
     mirroring: SimpleMirroring,
     reg_index: usize,
@@ -22,51 +21,26 @@ pub struct Action53 {
 
 impl Action53 {
     pub fn new(cartridge: INes) -> Action53 {
-        let chr_type = if cartridge.chr_rom.is_empty() {
-            BankKind::Ram
-        } else {
-            BankKind::Rom
-        };
-        let mut chr = match chr_type {
-            BankKind::Rom => MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr),
-            BankKind::Ram => MappedMemory::new(
-                &cartridge,
-                0x0000,
-                cartridge.chr_ram_bytes as u32 / 1024,
-                cartridge.chr_ram_bytes as u32 / 1024,
-                MemKind::Chr,
-            ),
-        };
-
-        let mut prg = MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg);
-        let last = (cartridge.prg_rom.len() / 0x4000) - 1;
-        prg.map(0x8000, 16, 0, BankKind::Rom);
-        prg.map(0xC000, 16, last, BankKind::Rom);
-        chr.map(0x0000, 8, 0, BankKind::Ram);
+        let chr_ram = cartridge
+            .chr_rom
+            .is_empty()
+            .then(|| MemoryBlock::new(cartridge.chr_ram_bytes / 1024));
 
         let regs = [0x00, 0x00, 0x02, 0xff];
-        let mirroring = SimpleMirroring::new(cartridge.mirroring.into());
+        let mirroring = SimpleMirroring::new(cartridge.mirroring);
 
-        let mut rom = Action53 {
+        Self {
             cartridge,
-            prg,
-            chr,
+            chr_ram,
             regs,
             reg_index: 0,
             mirroring,
-        };
-
-        rom.sync();
-
-        rom
+        }
     }
 
     fn read_cpu(&self, addr: u16) -> u8 {
-        self.prg.read(&self.cartridge, addr)
-    }
-
-    fn read_ppu(&self, addr: u16) -> u8 {
-        self.chr.read(&self.cartridge, addr)
+        let bank = self.map_prg(addr);
+        self.cartridge.prg_rom.read_mapped(bank, 16 * 1024, addr)
     }
 
     fn write_cpu(&mut self, addr: u16, value: u8) {
@@ -81,46 +55,55 @@ impl Action53 {
             _ => {
                 let index = self.reg_index & 3;
                 self.regs[index] = value;
-                self.sync();
+                match index {
+                    0x00 => {
+                        if self.regs[2] & 0x02 == 0 {
+                            if self.regs[0] & 0x10 == 0 {
+                                self.mirroring.internal_b();
+                            } else {
+                                self.mirroring.internal_a();
+                            }
+                        }
+                    }
+                    0x01 => {
+                        if self.regs[2] & 0x02 == 0 {
+                            if self.regs[1] & 0x10 == 0 {
+                                self.mirroring.internal_b();
+                            } else {
+                                self.mirroring.internal_a();
+                            }
+                        }
+                    }
+                    0x02 => match self.regs[2] & 3 {
+                        0 => self.mirroring.internal_b(),
+                        1 => self.mirroring.internal_a(),
+                        2 => self.mirroring.vertical(),
+                        3 => self.mirroring.horizontal(),
+                        _ => unreachable!(),
+                    },
+                    _ => (),
+                }
             }
         }
     }
 
-    fn write_ppu(&self, addr: u16, value: u8) {
-        self.chr.write(addr, value);
+    fn read_ppu(&self, addr: u16) -> u8 {
+        let bank = self.regs[0] as usize & 3;
+        if let Some(ram) = self.chr_ram.as_ref() {
+            ram.read_mapped(bank, 8 * 1024, addr)
+        } else {
+            self.cartridge.chr_rom.read_mapped(bank, 8 * 1024, addr)
+        }
     }
 
-    fn sync(&mut self) {
-        match self.reg_index {
-            0x00 => {
-                if self.regs[2] & 0x02 == 0 {
-                    if self.regs[0] & 0x10 == 0 {
-                        self.mirroring.internal_b();
-                    } else {
-                        self.mirroring.internal_a();
-                    }
-                }
-            }
-            0x01 => {
-                if self.regs[2] & 0x02 == 0 {
-                    if self.regs[1] & 0x10 == 0 {
-                        self.mirroring.internal_b();
-                    } else {
-                        self.mirroring.internal_a();
-                    }
-                }
-            }
-            0x02 => match self.regs[2] & 3 {
-                0 => self.mirroring.internal_b(),
-                1 => self.mirroring.internal_a(),
-                2 => self.mirroring.vertical(),
-                3 => self.mirroring.horizontal(),
-                _ => unreachable!(),
-            },
-            0x03 => {}
-            _ => unreachable!(),
+    fn write_ppu(&mut self, addr: u16, value: u8) {
+        if let Some(ram) = self.chr_ram.as_mut() {
+            let bank = self.regs[0] as usize & 3;
+            ram.write_mapped(bank, 8 * 1024, addr, value);
         }
+    }
 
+    fn map_prg(&self, addr: u16) -> usize {
         let low;
         let high;
         let mode = (self.regs[2] >> 2) & 0x03;
@@ -168,13 +151,9 @@ impl Action53 {
                 }
             }
             _ => unreachable!(),
-        }
+        };
 
-        self.prg.map(0x8000, 16, low as usize, BankKind::Rom);
-        self.prg.map(0xc000, 16, high as usize, BankKind::Rom);
-
-        let chr = self.regs[0] & 0x03;
-        self.chr.map(0x0000, 8, chr as usize, BankKind::Ram);
+        if addr & 0x4000 == 0 { low } else { high }
     }
 }
 

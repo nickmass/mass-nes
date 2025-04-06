@@ -4,76 +4,58 @@ use nes_traits::SaveState;
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::mapper::Mapper;
-use crate::memory::{BankKind, MappedMemory, MemKind};
+use crate::memory::{Memory, MemoryBlock};
 use crate::ppu::PpuFetchKind;
-
-use super::SimpleMirroring;
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Nina001 {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
-    prg: MappedMemory,
-    prg_count: usize,
-    chr: MappedMemory,
-    chr_count: usize,
-    mirroring: SimpleMirroring,
+    prg_ram: MemoryBlock,
+    prg_bank: u8,
+    chr_banks: [u8; 2],
 }
 
 impl Nina001 {
     pub fn new(mut cartridge: INes) -> Nina001 {
-        let mut prg = MappedMemory::new(&cartridge, 0x6000, 8, 40, MemKind::Prg);
-
-        prg.map(0x6000, 8, 0, BankKind::Ram);
-        prg.map(0x8000, 32, 0, BankKind::Rom);
-
+        let mut prg_ram = MemoryBlock::new(8);
         if let Some(wram) = cartridge.wram.take() {
-            prg.restore_wram(wram);
+            prg_ram.restore_wram(wram);
         }
 
-        let prg_count = cartridge.prg_rom.len() / 32 * 1024;
-
-        let mut chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
-        chr.map(0x0000, 4, 0, BankKind::Rom);
-        chr.map(0x1000, 4, 0, BankKind::Rom);
-
-        let chr_count = cartridge.chr_rom.len() / 4 * 1024;
-
         Self {
-            prg,
-            prg_count,
-            chr,
-            chr_count,
-            mirroring: SimpleMirroring::new(cartridge.mirroring.into()),
             cartridge,
+            prg_ram,
+            prg_bank: 0,
+            chr_banks: [0; 2],
         }
     }
 
     fn read_cpu(&self, addr: u16) -> u8 {
-        self.prg.read(&self.cartridge, addr)
+        if addr & 0x8000 == 0 {
+            self.prg_ram.read_mapped(0, 8 * 1024, addr)
+        } else {
+            self.cartridge
+                .prg_rom
+                .read_mapped(self.prg_bank as usize, 32 * 1024, addr)
+        }
     }
 
     fn read_ppu(&self, addr: u16) -> u8 {
-        self.chr.read(&self.cartridge, addr)
+        let bank_idx = if addr & 0x1000 == 0 { 0 } else { 1 };
+        let bank = self.chr_banks[bank_idx] as usize;
+        self.cartridge.chr_rom.read_mapped(bank, 4 * 1024, addr)
     }
 
     fn write_cpu(&mut self, addr: u16, value: u8) {
         match addr {
-            0x7ffd => {
-                let bank = (value as usize) % self.prg_count;
-                self.prg.map(0x8000, 32, bank, BankKind::Rom);
-            }
-            0x7ffe => {
-                let bank = (value as usize) % self.chr_count;
-                self.chr.map(0x0000, 4, bank, BankKind::Rom);
-            }
-            0x7fff => {
-                let bank = (value as usize) % self.chr_count;
-                self.chr.map(0x1000, 4, bank, BankKind::Rom);
-            }
+            0x7ffd => self.prg_bank = value & 0x3,
+            0x7ffe => self.chr_banks[0] = value & 0xf,
+            0x7fff => self.chr_banks[1] = value & 0xf,
             _ => (),
         }
-        self.prg.write(addr, value)
+
+        self.prg_ram.write_mapped(0, 8 * 1024, addr, value);
     }
 }
 
@@ -99,12 +81,12 @@ impl Mapper for Nina001 {
     }
 
     fn peek_ppu_fetch(&self, address: u16, _kind: PpuFetchKind) -> super::Nametable {
-        self.mirroring.ppu_fetch(address)
+        self.cartridge.mirroring.ppu_fetch(address)
     }
 
     fn save_wram(&self) -> Option<super::SaveWram> {
         if self.cartridge.battery {
-            self.prg.save_wram()
+            self.prg_ram.save_wram()
         } else {
             None
         }

@@ -9,7 +9,7 @@ use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::debug::Debug;
 use crate::mapper::Mapper;
-use crate::memory::{BankKind, MappedMemory, MemKind};
+use crate::memory::{Memory, MemoryBlock};
 use crate::ppu::PpuFetchKind;
 
 use super::Nametable;
@@ -43,12 +43,11 @@ pub struct Vrc6 {
     variant: Vrc6Variant,
     #[cfg_attr(feature = "save-states", save(nested))]
     irq: VrcIrq,
-    prg: MappedMemory,
-    chr: MappedMemory,
+    prg_ram: MemoryBlock,
     ram_protect: bool,
+    prg_regs: [u8; 3],
     chr_regs: [u8; 8],
     chr_mode: u8,
-    nt_regs: [u8; 4],
 
     halt_audio: bool,
     freq_mode: FreqMode,
@@ -60,88 +59,71 @@ pub struct Vrc6 {
 
 impl Vrc6 {
     pub fn new(mut cartridge: INes, variant: Vrc6Variant, debug: Rc<Debug>) -> Self {
-        let mut prg = MappedMemory::new(&cartridge, 0x6000, 8, 40, MemKind::Prg);
-        let chr = MappedMemory::new(&cartridge, 0x0000, 0, 12, MemKind::Chr);
-
-        let last = (cartridge.prg_rom.len() / 0x2000) - 1;
-        prg.map(0x6000, 8, 0, BankKind::Ram);
-        prg.map(0x8000, 16, 0, BankKind::Rom);
-        prg.map(0xc000, 8, 0, BankKind::Rom);
-        prg.map(0xe000, 8, last, BankKind::Rom);
-
+        let mut prg_ram = MemoryBlock::new(8);
         if let Some(wram) = cartridge.wram.take() {
-            prg.restore_wram(wram);
+            prg_ram.restore_wram(wram);
         }
+        let last_bank = ((cartridge.prg_rom.len() / 0x2000) - 1) as u8;
 
         let mix = (i16::MAX as f32 / 64.0) as i16;
 
-        let mut rom = Self {
+        Self {
             cartridge,
             variant,
             irq: VrcIrq::new(debug),
-            prg,
-            chr,
+            prg_ram,
             ram_protect: true,
+            prg_regs: [0, 0, last_bank],
             chr_regs: [0; 8],
             chr_mode: 0x20,
-            nt_regs: [0; 4],
             halt_audio: true,
             freq_mode: FreqMode::X1,
             pulse_a: Pulse::new(),
             pulse_b: Pulse::new(),
             sawtooth: Sawtooth::new(),
             mix,
-        };
-
-        rom.sync_chr();
-
-        rom
-    }
-
-    fn read_cpu(&self, addr: u16) -> u8 {
-        if addr < 0x8000 && self.ram_protect {
-            0
-        } else {
-            self.prg.read(&self.cartridge, addr)
         }
     }
 
-    fn read_ppu(&self, addr: u16) -> u8 {
-        if addr & 0x2000 != 0 {
-            let addr = (addr & 0xfff) | 0x2000;
-            self.chr.read(&self.cartridge, addr)
+    fn read_cpu(&self, addr: u16) -> u8 {
+        if addr < 0x8000 {
+            if self.ram_protect {
+                0
+            } else {
+                self.prg_ram.read_mapped(0, 8 * 1024, addr)
+            }
         } else {
-            self.chr.read(&self.cartridge, addr)
+            let (bank_idx, size) = match addr & 0xe000 {
+                0x8000 | 0xa000 => (0, 16),
+                0xc000 => (1, 8),
+                0xe000 => (2, 8),
+                _ => unreachable!(),
+            };
+
+            let bank = self.prg_regs[bank_idx] as usize;
+            self.cartridge.prg_rom.read_mapped(bank, size * 1024, addr)
         }
     }
 
     fn write_cpu(&mut self, addr: u16, value: u8) {
         if addr < 0x8000 {
             if !self.ram_protect {
-                self.prg.write(addr, value)
+                self.prg_ram.write_mapped(0, 8 * 1024, addr, value)
             }
             return;
         }
 
         let addr = self.variant.address(addr);
         match addr {
-            0x8000..=0x8003 => {
-                let bank = (value & 0xf) as usize;
-                self.prg.map(0x8000, 16, bank, BankKind::Rom);
-            }
-            0xc000..=0xc003 => {
-                let bank = (value & 0x1f) as usize;
-                self.prg.map(0xc000, 8, bank, BankKind::Rom);
-            }
+            0x8000..=0x8003 => self.prg_regs[0] = value & 0xf,
+            0xc000..=0xc003 => self.prg_regs[1] = value & 0x1f,
             0xb003 => {
                 self.ram_protect = value & 0x80 == 0;
                 self.chr_mode = value & 0x3f;
-                self.sync_chr();
             }
             0xd000..=0xe003 => {
                 let reg = addr & 0x3 | ((addr & 0x2000) >> 11);
                 self.chr_regs[reg as usize] = value;
-                self.sync_chr();
             }
             0xf000 => self.irq.latch(value),
             0xf001 => self.irq.control(value),
@@ -171,139 +153,76 @@ impl Vrc6 {
         }
     }
 
-    fn sync_chr(&mut self) {
-        let r = self.chr_regs;
-        match (self.chr_mode & 0x3, self.chr_mode & 0x20 != 0) {
-            (0x0, _) => {
-                self.chr.map(0x0000, 1, r[0] as usize, BankKind::Rom);
-                self.chr.map(0x0400, 1, r[1] as usize, BankKind::Rom);
-                self.chr.map(0x0800, 1, r[2] as usize, BankKind::Rom);
-                self.chr.map(0x0c00, 1, r[3] as usize, BankKind::Rom);
-                self.chr.map(0x1000, 1, r[4] as usize, BankKind::Rom);
-                self.chr.map(0x1400, 1, r[5] as usize, BankKind::Rom);
-                self.chr.map(0x1800, 1, r[6] as usize, BankKind::Rom);
-                self.chr.map(0x1c00, 1, r[7] as usize, BankKind::Rom);
-            }
-            (0x1, true) => {
-                self.chr.map(0x0000, 2, r[0] as usize >> 1, BankKind::Rom);
-                self.chr.map(0x0800, 2, r[1] as usize >> 1, BankKind::Rom);
-                self.chr.map(0x1000, 2, r[2] as usize >> 1, BankKind::Rom);
-                self.chr.map(0x1800, 2, r[3] as usize >> 1, BankKind::Rom);
-            }
-            (0x2 | 0x3, true) => {
-                self.chr.map(0x0000, 1, r[0] as usize, BankKind::Rom);
-                self.chr.map(0x0400, 1, r[1] as usize, BankKind::Rom);
-                self.chr.map(0x0800, 1, r[2] as usize, BankKind::Rom);
-                self.chr.map(0x0c00, 1, r[3] as usize, BankKind::Rom);
-                self.chr.map(0x1000, 2, r[4] as usize >> 1, BankKind::Rom);
-                self.chr.map(0x1800, 2, r[5] as usize >> 1, BankKind::Rom);
-            }
-            (0x1, false) => {
-                self.chr.map(0x0000, 1, r[0] as usize, BankKind::Rom);
-                self.chr.map(0x0400, 1, r[0] as usize, BankKind::Rom);
-                self.chr.map(0x0800, 1, r[1] as usize, BankKind::Rom);
-                self.chr.map(0x0c00, 1, r[1] as usize, BankKind::Rom);
-                self.chr.map(0x1000, 1, r[2] as usize, BankKind::Rom);
-                self.chr.map(0x1400, 1, r[2] as usize, BankKind::Rom);
-                self.chr.map(0x1800, 1, r[3] as usize, BankKind::Rom);
-                self.chr.map(0x1c00, 1, r[3] as usize, BankKind::Rom);
-            }
-            (0x2 | 0x3, false) => {
-                self.chr.map(0x0000, 1, r[0] as usize, BankKind::Rom);
-                self.chr.map(0x0400, 1, r[1] as usize, BankKind::Rom);
-                self.chr.map(0x0800, 1, r[2] as usize, BankKind::Rom);
-                self.chr.map(0x0c00, 1, r[3] as usize, BankKind::Rom);
-                self.chr.map(0x1000, 1, r[4] as usize, BankKind::Rom);
-                self.chr.map(0x1400, 1, r[4] as usize, BankKind::Rom);
-                self.chr.map(0x1800, 1, r[5] as usize, BankKind::Rom);
-                self.chr.map(0x1c00, 1, r[5] as usize, BankKind::Rom);
-            }
-            _ => unreachable!(),
+    fn read_ppu(&self, addr: u16) -> u8 {
+        if addr & 0x2000 != 0 {
+            self.read_nt(addr)
+        } else {
+            self.read_chr(addr)
         }
+    }
+
+    fn read_chr(&self, addr: u16) -> u8 {
+        let r = self.chr_regs;
+        let a = addr as usize;
+        let (bank, size) = match (self.chr_mode & 0x3, self.chr_mode & 0x20 != 0) {
+            (0x0, _) => (r[a >> 10 & 7], 1),
+            (0x1, true) => (r[a >> 11 & 3] >> 1, 2),
+            (0x2 | 0x3, true) => match a & 0x1000 {
+                0x0000 => (r[a >> 10 & 7], 1),
+                0x1000 => (r[(a >> 11 & 3) + 2] >> 1, 2),
+                _ => unreachable!(),
+            },
+            (0x1, false) => (r[a >> 11 & 3], 1),
+            (0x2 | 0x3, false) => match a & 0x1000 {
+                0x0000 => (r[a >> 10 & 7], 1),
+                0x1000 => (r[(a >> 11 & 3) + 2], 1),
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
+        };
+
+        self.cartridge
+            .chr_rom
+            .read_mapped(bank as usize, size * 1024, addr as u16)
+    }
+
+    fn read_nt(&self, addr: u16) -> u8 {
+        let bank = self.map_nt(addr);
+
+        self.cartridge
+            .chr_rom
+            .read_mapped(bank as usize, 1024, addr as u16)
+    }
+
+    fn map_nt(&self, addr: u16) -> u8 {
+        let nt = (addr as usize >> 10) & 3;
+        let r = self.chr_regs;
+
+        let horz = r[6 + (nt >> 1)];
+        let vert = r[6 + (nt & 1)];
+        let four_screen = r[nt | 4];
 
         // Every game sets this bit, the unset bit logic was intended for a different board that was not released
         if self.chr_mode & 0x20 != 0 {
             let mirror_mode = self.chr_mode >> 2 & 0x3;
             match (self.chr_mode & 0x3, mirror_mode) {
-                (0x0, 0x0) | (0x3, 0x1) => {
-                    self.nt_regs[0] = r[6] & 0xfe;
-                    self.nt_regs[1] = r[6] | 0x01;
-                    self.nt_regs[2] = r[7] & 0xfe;
-                    self.nt_regs[3] = r[7] | 0x01;
-                }
-                (0x0, 0x1) | (0x3, 0x0) => {
-                    self.nt_regs[0] = r[6] & 0xfe;
-                    self.nt_regs[1] = r[7] & 0xfe;
-                    self.nt_regs[2] = r[6] | 0x01;
-                    self.nt_regs[3] = r[7] | 0x01;
-                }
-                (0x0, 0x2) | (0x3, 0x3) => {
-                    self.nt_regs[0] = r[6] & 0xfe;
-                    self.nt_regs[1] = r[6] & 0xfe;
-                    self.nt_regs[2] = r[7] & 0xfe;
-                    self.nt_regs[3] = r[7] & 0xfe;
-                }
-                (0x0, 0x3) | (0x3, 0x2) => {
-                    self.nt_regs[0] = r[6] | 0x01;
-                    self.nt_regs[1] = r[7] | 0x01;
-                    self.nt_regs[2] = r[6] | 0x01;
-                    self.nt_regs[3] = r[7] | 0x01;
-                }
-                (0x1, _) => {
-                    self.nt_regs[0] = r[4];
-                    self.nt_regs[1] = r[5];
-                    self.nt_regs[2] = r[6];
-                    self.nt_regs[3] = r[7];
-                }
-                (0x2, 0x0 | 0x2) => {
-                    self.nt_regs[0] = r[6];
-                    self.nt_regs[1] = r[7];
-                    self.nt_regs[2] = r[6];
-                    self.nt_regs[3] = r[7];
-                }
-                (0x2, 0x1 | 0x3) => {
-                    self.nt_regs[0] = r[6];
-                    self.nt_regs[1] = r[6];
-                    self.nt_regs[2] = r[7];
-                    self.nt_regs[3] = r[7];
-                }
+                (0x0, 0x0) | (0x3, 0x1) => horz & 0xfe | nt as u8 & 1,
+                (0x0, 0x1) | (0x3, 0x0) => vert & 0xfe | (nt as u8) >> 1,
+                (0x0, 0x2) | (0x3, 0x3) => horz & 0xfe,
+                (0x0, 0x3) | (0x3, 0x2) => vert | 1,
+                (0x1, _) => four_screen,
+                (0x2, 0x0 | 0x2) => vert,
+                (0x2, 0x1 | 0x3) => horz,
                 _ => unreachable!(),
             }
         } else {
             match self.chr_mode & 0xf {
-                0x0 | 0x6 | 0x7 | 0x8 | 0xe | 0xf => {
-                    // horizontal
-                    self.nt_regs[0] = r[6];
-                    self.nt_regs[1] = r[6];
-                    self.nt_regs[2] = r[7];
-                    self.nt_regs[3] = r[7];
-                }
-                0x1 | 0x5 | 0x9 | 0xd => {
-                    // 4-screen
-                    self.nt_regs[0] = r[4];
-                    self.nt_regs[1] = r[5];
-                    self.nt_regs[2] = r[6];
-                    self.nt_regs[3] = r[7];
-                }
-                0x2 | 0x3 | 0x4 | 0xa | 0xb | 0xc => {
-                    // vertical
-                    self.nt_regs[0] = r[6];
-                    self.nt_regs[1] = r[7];
-                    self.nt_regs[2] = r[6];
-                    self.nt_regs[3] = r[7];
-                }
+                0x0 | 0x6 | 0x7 | 0x8 | 0xe | 0xf => horz,
+                0x1 | 0x5 | 0x9 | 0xd => four_screen,
+                0x2 | 0x3 | 0x4 | 0xa | 0xb | 0xc => vert,
                 _ => unreachable!(),
             }
         }
-
-        self.chr
-            .map(0x2000, 1, self.nt_regs[0] as usize, BankKind::Rom);
-        self.chr
-            .map(0x2400, 1, self.nt_regs[1] as usize, BankKind::Rom);
-        self.chr
-            .map(0x2800, 1, self.nt_regs[2] as usize, BankKind::Rom);
-        self.chr
-            .map(0x2c00, 1, self.nt_regs[3] as usize, BankKind::Rom);
     }
 }
 
@@ -334,8 +253,8 @@ impl Mapper for Vrc6 {
             if address & 0x2000 == 0 {
                 Nametable::External
             } else {
-                let reg = (address & 0xc00) >> 10;
-                if self.nt_regs[reg as usize] & 1 == 0 {
+                let nt = self.map_nt(address);
+                if nt & 1 == 0 {
                     Nametable::InternalB
                 } else {
                     Nametable::InternalA
@@ -369,7 +288,7 @@ impl Mapper for Vrc6 {
 
     fn save_wram(&self) -> Option<super::SaveWram> {
         if self.cartridge.battery {
-            self.prg.save_wram()
+            self.prg_ram.save_wram()
         } else {
             None
         }

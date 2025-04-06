@@ -8,7 +8,7 @@ use crate::{
     bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind, RangeAndMask},
     machine::{FdsInput, MapperInput},
     mapper::Mapper,
-    memory::MemoryBlock,
+    memory::{Memory, MemoryBlock},
 };
 
 use super::SimpleMirroring;
@@ -98,7 +98,9 @@ impl Fds {
 
     fn peek_cpu(&self, addr: u16) -> u8 {
         match addr {
-            addr if addr >= 0x6000 && addr < 0xe000 => self.prg_ram.read(addr & 0x7fff),
+            addr if addr >= 0x6000 && addr < 0xe000 => {
+                self.prg_ram.read_mapped(0, 32 * 1024, addr - 0x6000)
+            }
             addr if addr >= 0xe000 => self.bios[addr as usize & 0x1fff],
             _ => 0,
         }
@@ -152,14 +154,12 @@ impl Fds {
                 value
             } //drive status
             0x4033 if self.enable_disk_io => 0x80, //external
-            addr if addr >= 0x6000 && addr < 0xe000 => self.prg_ram.read(addr & 0x7fff),
+            addr if addr >= 0x6000 && addr < 0xe000 => {
+                self.prg_ram.read_mapped(0, 32 * 1024, addr - 0x6000)
+            }
             addr if addr >= 0xe000 => self.bios[addr as usize & 0x1fff],
             _ => 0,
         }
-    }
-
-    fn read_ppu(&self, addr: u16) -> u8 {
-        self.chr_ram.read(addr & 0x1fff)
     }
 
     fn write_cpu(&mut self, addr: u16, value: u8) {
@@ -220,17 +220,24 @@ impl Fds {
                 self.disk_irq_enabled = value & 0x80 != 0;
             } //fds ctl
             0x4026 if self.enable_disk_io => (),          //external
-            addr if addr >= 0x6000 && addr < 0xe000 => self.prg_ram.write(addr & 0x7fff, value),
+            addr if addr >= 0x6000 && addr < 0xe000 => {
+                self.prg_ram
+                    .write_mapped(0, 32 * 1024, addr - 0x6000, value)
+            }
             _ => (),
         }
     }
 
-    fn write_ppu(&self, addr: u16, value: u8) {
+    fn read_ppu(&self, addr: u16) -> u8 {
+        self.chr_ram.read_mapped(0, 8 * 1024, addr)
+    }
+
+    fn write_ppu(&mut self, addr: u16, value: u8) {
         if addr >= 0x2000 {
             return;
         }
 
-        self.chr_ram.write(addr, value);
+        self.chr_ram.write_mapped(0, 8 * 1024, addr, value);
     }
 
     fn disk_read(&self) -> u8 {

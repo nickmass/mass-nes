@@ -10,7 +10,7 @@ use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind, 
 use crate::cartridge::INes;
 use crate::debug::Debug;
 use crate::mapper::Mapper;
-use crate::memory::{BankKind, MappedMemory, MemKind};
+use crate::memory::{Memory, MemoryBlock};
 use crate::ppu::PpuFetchKind;
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
@@ -19,15 +19,13 @@ pub struct Namco163 {
     cartridge: INes,
     #[cfg_attr(feature = "save-states", save(skip))]
     debug: Rc<Debug>,
-    prg: MappedMemory,
-    chr: MappedMemory,
-    prg_ram: bool,
+    prg_ram: Option<MemoryBlock>,
     sound: Sound,
     irq_enabled: bool,
     irq_counter: u16,
     irq: bool,
     chr_bank_regs: [u8; 12],
-    prg_bank_regs: [u8; 3],
+    prg_bank_regs: [u8; 4],
     high_chr_ram: bool,
     low_chr_ram: bool,
     write_protect: [bool; 4],
@@ -35,67 +33,61 @@ pub struct Namco163 {
 
 impl Namco163 {
     pub fn new(mut cartridge: INes, debug: Rc<Debug>) -> Self {
-        let prg_ram = cartridge.prg_ram_bytes > 0;
-        let mut prg = if prg_ram {
-            let mut prg = MappedMemory::new(&cartridge, 0x6000, 8, 40, MemKind::Prg);
-            prg.map(0x6000, 8, 0, BankKind::Ram);
-
+        let prg_ram = if cartridge.prg_ram_bytes > 0 {
+            let mut ram = MemoryBlock::new(8);
             if let Some(wram) = cartridge.wram.take() {
-                prg.restore_wram(wram);
+                ram.restore_wram(wram);
             }
-
-            prg
+            Some(ram)
         } else {
-            MappedMemory::new(&cartridge, 0x8000, 0, 32, MemKind::Prg)
+            None
         };
 
-        let last_bank = (cartridge.prg_rom.len() / 0x2000) - 1;
-        prg.map(0xe000, 8, last_bank, BankKind::Rom);
+        let fixed_bank = ((cartridge.prg_rom.len() / 0x2000) - 1) as u8;
 
-        let chr = MappedMemory::new(&cartridge, 0x0000, 0, 8, MemKind::Chr);
-
-        let mut rom = Self {
+        Self {
             cartridge,
             debug,
-            prg,
-            chr,
             prg_ram,
             sound: Sound::new(),
             irq_enabled: false,
             irq_counter: 0,
             irq: false,
             chr_bank_regs: [0; 12],
-            prg_bank_regs: [0; 3],
+            prg_bank_regs: [0, 0, 0, fixed_bank],
             low_chr_ram: false,
             high_chr_ram: false,
             write_protect: [true; 4],
-        };
-
-        rom.sync();
-        rom
+        }
     }
 
-    fn sync(&mut self) {
-        for i in 0..3 {
-            let bank = self.prg_bank_regs[i as usize] as usize;
-            self.prg.map(0x8000 + i * 0x2000, 8, bank, BankKind::Rom);
-        }
-
-        for i in 0..8 {
-            let bank = self.chr_bank_regs[i as usize] as usize;
-            self.chr.map(i * 0x400, 1, bank, BankKind::Rom);
+    fn peek_cpu(&self, addr: u16) -> u8 {
+        match addr {
+            0x5000..=0x57ff => (self.irq_counter & 0xff) as u8,
+            0x5800..=0x5fff => (self.irq_counter >> 8) as u8,
+            0x6000..=0x7fff => {
+                if let Some(ram) = self.prg_ram.as_ref() {
+                    ram.read_mapped(0, 8 * 1024, addr)
+                } else {
+                    0
+                }
+            }
+            0x8000.. => {
+                let bank_idx = addr as usize >> 13 & 3;
+                let bank = self.prg_bank_regs[bank_idx] as usize;
+                self.cartridge.prg_rom.read_mapped(bank, 8 * 1024, addr)
+            }
+            _ => 0,
         }
     }
 
     fn read_cpu(&mut self, addr: u16) -> u8 {
         match addr {
-            0x4800..=0x4fff => self.sound.read(),
-            0x5000..=0x57ff => (self.irq_counter & 0xff) as u8,
-            0x5800..=0x5fff => (self.irq_counter >> 8) as u8,
-            0x6000..=0x7fff if self.prg_ram => self.prg.read(&self.cartridge, addr),
-            0x8000.. => self.prg.read(&self.cartridge, addr),
-            _ => 0,
+            0x4800..=0x4fff => return self.sound.read(),
+            _ => (),
         }
+
+        self.peek_cpu(addr)
     }
 
     fn write_cpu(&mut self, addr: u16, value: u8) {
@@ -114,22 +106,18 @@ impl Namco163 {
             0x8000..=0xdfff => {
                 let reg = (addr - 0x8000) / 0x800;
                 self.chr_bank_regs[reg as usize] = value;
-                self.sync();
             }
             0xe000..=0xe7ff => {
                 self.prg_bank_regs[0] = value & 0x3f;
                 self.sound.enable(value);
-                self.sync();
             }
             0xe800..=0xefff => {
                 self.prg_bank_regs[1] = value & 0x3f;
                 self.low_chr_ram = value & 0x40 == 0;
                 self.high_chr_ram = value & 0x80 == 0;
-                self.sync();
             }
             0xf000..=0xf7ff => {
                 self.prg_bank_regs[2] = value & 0x3f;
-                self.sync();
             }
             0xf800..=0xffff => {
                 self.sound.address_port(value);
@@ -143,11 +131,13 @@ impl Namco163 {
                     self.write_protect[3] = value & 0x08 != 0;
                 }
             }
-            0x6000..=0x7fff if self.prg_ram => {
+            0x6000..=0x7fff => {
                 let range = (addr - 0x6000) / 0x800;
                 let write_protect = self.write_protect[range as usize];
                 if !write_protect {
-                    self.prg.write(addr, value)
+                    if let Some(ram) = self.prg_ram.as_mut() {
+                        ram.write_mapped(0, 8 * 1024, addr, value);
+                    }
                 }
             }
             _ => (),
@@ -155,18 +145,14 @@ impl Namco163 {
     }
 
     fn read_ppu(&self, addr: u16) -> u8 {
-        if addr < 0x2000 {
-            self.chr.read(&self.cartridge, addr)
+        let addr = if addr & 0x3000 == 0x3000 {
+            addr & 0x2fff
         } else {
-            let addr = addr as usize;
-            let bank = (addr & 0x2c00) / 0x400;
-            let reg = self.chr_bank_regs[bank] as usize;
-            self.cartridge
-                .chr_rom
-                .get(reg * 0x400 + (addr & 0x3ff))
-                .copied()
-                .unwrap_or_default()
-        }
+            addr
+        };
+        let bank_idx = (addr as usize >> 10) & 0xf;
+        let bank = self.chr_bank_regs[bank_idx] as usize;
+        self.cartridge.chr_rom.read_mapped(bank, 1024, addr)
     }
 }
 
@@ -182,9 +168,7 @@ impl Mapper for Namco163 {
 
     fn peek(&self, bus: BusKind, addr: u16) -> u8 {
         match bus {
-            BusKind::Cpu if addr >= 0x6000 && self.prg_ram => self.prg.read(&self.cartridge, addr),
-            BusKind::Cpu if addr >= 0x8000 => self.prg.read(&self.cartridge, addr),
-            BusKind::Cpu => 0,
+            BusKind::Cpu => self.peek_cpu(addr),
             BusKind::Ppu => self.read_ppu(addr),
         }
     }
@@ -250,8 +234,8 @@ impl Mapper for Namco163 {
     }
 
     fn save_wram(&self) -> Option<super::SaveWram> {
-        if self.cartridge.battery && self.prg_ram {
-            self.prg.save_wram()
+        if self.cartridge.battery {
+            self.prg_ram.as_ref().and_then(|r| r.save_wram())
         } else {
             None
         }

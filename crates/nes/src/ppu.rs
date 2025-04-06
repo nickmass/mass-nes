@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use crate::bus::{AddressBus, BusKind, DeviceKind, RangeAndMask};
 use crate::debug::{Debug, DebugEvent};
 use crate::mapper::{Nametable, RcMapper};
-use crate::memory::MemoryBlock;
+use crate::memory::{Memory, MemoryBlock};
 use crate::ppu_step::*;
 use crate::region::{EmphMode, Region};
 
@@ -1033,8 +1033,8 @@ impl Ppu {
             .mapper
             .peek_ppu_fetch(address & 0x3fff, PpuFetchKind::Read);
         match bank {
-            Nametable::InternalA => self.nt_internal_a.read(address & 0x3ff),
-            Nametable::InternalB => self.nt_internal_b.read(address & 0x3ff),
+            Nametable::InternalA => self.nt_internal_a.read(address as usize & 0x3ff),
+            Nametable::InternalB => self.nt_internal_b.read(address as usize & 0x3ff),
             Nametable::External => self.mapper.peek(BusKind::Ppu, address & 0x3fff),
         }
     }
@@ -1043,18 +1043,18 @@ impl Ppu {
         self.debug.event(DebugEvent::PpuRead(address));
         let bank = self.mapper.ppu_fetch(address & 0x3fff, PpuFetchKind::Read);
         match bank {
-            Nametable::InternalA => self.nt_internal_a.read(address & 0x3ff),
-            Nametable::InternalB => self.nt_internal_b.read(address & 0x3ff),
+            Nametable::InternalA => self.nt_internal_a.read(address as usize & 0x3ff),
+            Nametable::InternalB => self.nt_internal_b.read(address as usize & 0x3ff),
             Nametable::External => self.mapper.read(BusKind::Ppu, address & 0x3fff),
         }
     }
 
-    fn ppu_write(&self, address: u16, value: u8) {
+    fn ppu_write(&mut self, address: u16, value: u8) {
         self.debug.event(DebugEvent::PpuWrite(address));
         let bank = self.mapper.ppu_fetch(address & 0x3fff, PpuFetchKind::Write);
         match bank {
-            Nametable::InternalA => self.nt_internal_a.write(address & 0x3ff, value),
-            Nametable::InternalB => self.nt_internal_b.write(address & 0x3ff, value),
+            Nametable::InternalA => self.nt_internal_a.write(address as usize & 0x3ff, value),
+            Nametable::InternalB => self.nt_internal_b.write(address as usize & 0x3ff, value),
             Nametable::External => self.mapper.write(BusKind::Ppu, address & 0x3fff, value),
         }
     }
