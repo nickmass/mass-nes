@@ -8,7 +8,7 @@ use crate::{
     bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind, RangeAndMask},
     machine::{FdsInput, MapperInput},
     mapper::Mapper,
-    memory::{Memory, MemoryBlock},
+    memory::{FixedMemoryBlock, Memory},
 };
 
 use super::SimpleMirroring;
@@ -26,8 +26,8 @@ pub struct Fds {
     disk_sides: Vec<Vec<u8>>,
     #[cfg_attr(feature = "save-states", save(skip))]
     bios: Vec<u8>,
-    prg_ram: MemoryBlock,
-    chr_ram: MemoryBlock,
+    prg_ram: FixedMemoryBlock<32>,
+    chr_ram: FixedMemoryBlock<8>,
     mirroring: SimpleMirroring,
     timer_irq_counter: u16,
     timer_irq_reload_low: u8,
@@ -59,8 +59,8 @@ pub struct Fds {
 
 impl Fds {
     pub fn new(disk: crate::cartridge::Fds) -> Self {
-        let prg_ram = MemoryBlock::new(32);
-        let chr_ram = MemoryBlock::new(8);
+        let prg_ram = FixedMemoryBlock::new();
+        let chr_ram = FixedMemoryBlock::new();
         Fds {
             disk_sides: disk.disk_sides,
             bios: disk.bios,
@@ -98,9 +98,7 @@ impl Fds {
 
     fn peek_cpu(&self, addr: u16) -> u8 {
         match addr {
-            addr if addr >= 0x6000 && addr < 0xe000 => {
-                self.prg_ram.read_mapped(0, 32 * 1024, addr - 0x6000)
-            }
+            addr if addr >= 0x6000 && addr < 0xe000 => self.prg_ram.read(addr - 0x6000),
             addr if addr >= 0xe000 => self.bios[addr as usize & 0x1fff],
             _ => 0,
         }
@@ -154,9 +152,7 @@ impl Fds {
                 value
             } //drive status
             0x4033 if self.enable_disk_io => 0x80, //external
-            addr if addr >= 0x6000 && addr < 0xe000 => {
-                self.prg_ram.read_mapped(0, 32 * 1024, addr - 0x6000)
-            }
+            addr if addr >= 0x6000 && addr < 0xe000 => self.prg_ram.read(addr - 0x6000),
             addr if addr >= 0xe000 => self.bios[addr as usize & 0x1fff],
             _ => 0,
         }
@@ -220,16 +216,13 @@ impl Fds {
                 self.disk_irq_enabled = value & 0x80 != 0;
             } //fds ctl
             0x4026 if self.enable_disk_io => (),          //external
-            addr if addr >= 0x6000 && addr < 0xe000 => {
-                self.prg_ram
-                    .write_mapped(0, 32 * 1024, addr - 0x6000, value)
-            }
+            addr if addr >= 0x6000 && addr < 0xe000 => self.prg_ram.write(addr - 0x6000, value),
             _ => (),
         }
     }
 
     fn read_ppu(&self, addr: u16) -> u8 {
-        self.chr_ram.read_mapped(0, 8 * 1024, addr)
+        self.chr_ram.read(addr)
     }
 
     fn write_ppu(&mut self, addr: u16, value: u8) {
@@ -237,7 +230,7 @@ impl Fds {
             return;
         }
 
-        self.chr_ram.write_mapped(0, 8 * 1024, addr, value);
+        self.chr_ram.write(addr, value);
     }
 
     fn disk_read(&self) -> u8 {

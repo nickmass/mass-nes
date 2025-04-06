@@ -10,7 +10,7 @@ use crate::cpu::{Cpu, CpuPinIn, TickResult};
 use crate::debug::{Debug, DebugEvent};
 use crate::input::Input;
 use crate::mapper::{RcMapper, SaveWram};
-use crate::memory::{Memory, MemoryBlock};
+use crate::memory::{FixedMemoryBlock, Memory};
 use crate::ppu::{FrameEnd, Ppu};
 use crate::region::Region;
 
@@ -69,7 +69,7 @@ pub struct Machine {
     pub(crate) cpu: Cpu,
     #[cfg_attr(feature = "save-states", save(skip))]
     pub(crate) cpu_bus: AddressBus,
-    pub(crate) cpu_mem: MemoryBlock,
+    pub(crate) cpu_mem: FixedMemoryBlock<2>,
     #[cfg_attr(feature = "save-states", save(nested))]
     pub(crate) apu: Apu,
     #[cfg_attr(feature = "save-states", save(nested))]
@@ -86,7 +86,7 @@ impl Machine {
         let cpu = Cpu::new();
         let debug = Rc::new(Debug::new());
         let mut cpu_bus = AddressBus::new(0, 0xffff);
-        let cpu_mem = MemoryBlock::new(2);
+        let cpu_mem = FixedMemoryBlock::new();
         let input = Input::new();
         let mapper = cartridge.build_mapper(debug.clone());
         let apu = Apu::new(region, mapper.clone());
@@ -241,7 +241,7 @@ impl Machine {
 
     fn read(&mut self, addr: u16) -> u8 {
         let value = match self.cpu_bus.read_addr(addr) {
-            Some((addr, DeviceKind::CpuRam)) => self.cpu_mem.read(addr as usize),
+            Some((addr, DeviceKind::CpuRam)) => self.cpu_mem.read(addr),
             Some((addr, DeviceKind::Ppu)) => self.ppu.read(addr),
             Some((addr, DeviceKind::Mapper)) => self.mapper.read(BusKind::Cpu, addr),
             Some((addr, DeviceKind::Input)) => self.input.read(addr, self.cpu_bus.open_bus.get()),
@@ -263,7 +263,7 @@ impl Machine {
         // Loop through potential mappings to allow MMC5 to snoop on PPU register writes
         for mapping in self.cpu_bus.write_addrs(addr) {
             match mapping {
-                (addr, DeviceKind::CpuRam) => self.cpu_mem.write(addr as usize, value),
+                (addr, DeviceKind::CpuRam) => self.cpu_mem.write(addr, value),
                 (addr, DeviceKind::Ppu) => self.ppu.write(addr, value),
                 (addr, DeviceKind::Mapper) => self.mapper.write(BusKind::Cpu, addr, value),
                 (addr, DeviceKind::Input) => self.input.write(addr, value),
@@ -281,7 +281,7 @@ impl Machine {
     #[cfg(feature = "debugger")]
     pub fn peek(&self, addr: u16) -> u8 {
         match self.cpu_bus.read_addr(addr) {
-            Some((addr, DeviceKind::CpuRam)) => self.cpu_mem.read(addr as usize),
+            Some((addr, DeviceKind::CpuRam)) => self.cpu_mem.read(addr),
             Some((addr, DeviceKind::Ppu)) => self.ppu.peek(addr),
             Some((addr, DeviceKind::Mapper)) => self.mapper.peek(BusKind::Cpu, addr),
             Some((addr, DeviceKind::Input)) => self.input.peek(addr, self.cpu_bus.open_bus.get()),
@@ -344,7 +344,7 @@ impl Machine {
 
     pub fn power(&mut self) {
         self.cpu_pin_in.power = true;
-        for addr in 0..0x800 {
+        for addr in 0u16..0x800 {
             let v = if addr & 1 == 1 { 0xff } else { 0x00 };
             self.cpu_mem.write(addr, v);
         }

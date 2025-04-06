@@ -9,7 +9,7 @@ use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::debug::Debug;
 use crate::mapper::Mapper;
-use crate::memory::{Memory, MemoryBlock};
+use crate::memory::{FixedMemoryBlock, Memory};
 use crate::ppu::PpuFetchKind;
 
 use super::vrc_irq::VrcIrq;
@@ -55,8 +55,8 @@ pub struct Vrc7 {
     variant: Vrc7Variant,
     #[cfg_attr(feature = "save-states", save(nested))]
     irq: VrcIrq,
-    prg_ram: MemoryBlock,
-    chr_ram: Option<MemoryBlock>,
+    prg_ram: FixedMemoryBlock<8>,
+    chr_ram: Option<FixedMemoryBlock<8>>,
     ram_protect: bool,
     prg_bank_regs: [u8; 4],
     chr_bank_regs: [u8; 8],
@@ -64,13 +64,13 @@ pub struct Vrc7 {
 
 impl Vrc7 {
     pub fn new(mut cartridge: INes, variant: Vrc7Variant, debug: Rc<Debug>) -> Self {
-        let mut prg_ram = MemoryBlock::new(8);
+        let mut prg_ram = FixedMemoryBlock::new();
         if let Some(wram) = cartridge.wram.take() {
             prg_ram.restore_wram(wram);
         }
         let last_bank = ((cartridge.prg_rom.len() / 0x2000) - 1) as u8;
 
-        let chr_ram = (cartridge.chr_ram_bytes > 0).then(|| MemoryBlock::new(8));
+        let chr_ram = (cartridge.chr_ram_bytes > 0).then(|| FixedMemoryBlock::new());
 
         let mirroring = SimpleMirroring::new(cartridge.mirroring);
 
@@ -90,7 +90,7 @@ impl Vrc7 {
 
     fn read_cpu(&self, addr: u16) -> u8 {
         match addr {
-            0x6000..=0x7fff => self.prg_ram.read_mapped(0, 8 * 1024, addr),
+            0x6000..=0x7fff => self.prg_ram.read(addr),
             _ => {
                 let bank_idx = (addr as usize >> 13) & 3;
                 let bank = self.prg_bank_regs[bank_idx] as usize;
@@ -102,9 +102,7 @@ impl Vrc7 {
     fn write_cpu(&mut self, addr: u16, value: u8) {
         let addr = self.variant.register_decode(addr);
         match addr {
-            0x6000..=0x7fff if !self.ram_protect => {
-                self.prg_ram.write_mapped(0, 8 * 1024, addr, value)
-            }
+            0x6000..=0x7fff if !self.ram_protect => self.prg_ram.write(addr, value),
             0x8000 => self.prg_bank_regs[0] = value,
             0x8010 => self.prg_bank_regs[1] = value,
             0x9000 => self.prg_bank_regs[2] = value,

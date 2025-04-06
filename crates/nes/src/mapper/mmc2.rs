@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::mapper::Mapper;
-use crate::memory::{Memory, MemoryBlock};
+use crate::memory::{FixedMemoryBlock, Memory};
 use crate::ppu::PpuFetchKind;
 
 use super::SimpleMirroring;
@@ -31,7 +31,7 @@ pub struct Mmc2 {
     cartridge: INes,
     variant: Mmc2Variant,
     prg_bank_count: usize,
-    prg_ram: Option<MemoryBlock>,
+    prg_ram: Option<FixedMemoryBlock<8>>,
     prg_bank: u8,
     chr_banks: [u8; 4],
     chr_latches: [u8; 2],
@@ -41,7 +41,7 @@ pub struct Mmc2 {
 impl Mmc2 {
     pub fn new(mut cartridge: INes, variant: Mmc2Variant) -> Self {
         let prg_ram = if cartridge.prg_ram_bytes > 0 {
-            let mut ram = MemoryBlock::new(8);
+            let mut ram = FixedMemoryBlock::new();
             if let Some(wram) = cartridge.wram.take() {
                 ram.restore_wram(wram);
             }
@@ -67,7 +67,7 @@ impl Mmc2 {
     fn read_cpu(&self, addr: u16) -> u8 {
         if addr & 0x8000 == 0 {
             if let Some(ram) = self.prg_ram.as_ref() {
-                ram.read_mapped(0, 8 * 1024, addr)
+                ram.read(addr)
             } else {
                 0
             }
@@ -88,7 +88,7 @@ impl Mmc2 {
             0xf000 if value & 1 == 1 => self.mirroring.horizontal(),
             0x6000..=0x7fff => {
                 if let Some(ram) = self.prg_ram.as_mut() {
-                    ram.write_mapped(0, 8 * 1024, addr, value)
+                    ram.write(addr, value)
                 }
             }
             _ => return,

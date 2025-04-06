@@ -9,7 +9,7 @@ use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::debug::Debug;
 use crate::mapper::Mapper;
-use crate::memory::{Memory, MemoryBlock};
+use crate::memory::{FixedMemoryBlock, Memory, MemoryBlock};
 use crate::ppu::PpuFetchKind;
 
 use super::{Nametable, SimpleMirroring};
@@ -49,7 +49,7 @@ pub struct Mmc3 {
     variant: Mmc3Variant,
     mirroring: SimpleMirroring,
     prg_ram: MemoryBlock,
-    chr_ram: Option<MemoryBlock>,
+    chr_ram: Option<FixedMemoryBlock<8>>,
     bank_data: [u8; 8],
     bank_select: u8,
     ram_enabled: bool,
@@ -63,7 +63,7 @@ pub struct Mmc3 {
     irq_a12: bool,
     irq_a12_low_cycles: u64,
     last_prg: u8,
-    ext_nt: Option<MemoryBlock>,
+    ext_nt: Option<FixedMemoryBlock<2>>,
 }
 
 impl Mmc3 {
@@ -78,11 +78,14 @@ impl Mmc3 {
             prg_ram.restore_wram(wram);
         }
 
-        let chr_ram = cartridge.chr_rom.is_empty().then(|| MemoryBlock::new(8));
+        let chr_ram = cartridge
+            .chr_rom
+            .is_empty()
+            .then(|| FixedMemoryBlock::new());
 
         let (mirroring, ext_nt) = if cartridge.alternative_mirroring {
             let mirroring = SimpleMirroring::new(super::Mirroring::FourScreen);
-            (mirroring, Some(MemoryBlock::new(2)))
+            (mirroring, Some(FixedMemoryBlock::new()))
         } else {
             (SimpleMirroring::new(cartridge.mirroring), None)
         };
@@ -183,7 +186,7 @@ impl Mmc3 {
     fn read_ppu(&self, addr: u16) -> u8 {
         if addr & 0x2000 != 0 {
             if let Some(nt) = self.ext_nt.as_ref() {
-                nt.read_mapped(0, 2048, addr)
+                nt.read(addr)
             } else {
                 0
             }
@@ -200,7 +203,7 @@ impl Mmc3 {
     fn write_ppu(&mut self, addr: u16, value: u8) {
         if addr & 0x2000 != 0 {
             if let Some(nt) = self.ext_nt.as_mut() {
-                nt.write_mapped(0, 2048, addr, value)
+                nt.write(addr, value)
             }
         } else {
             let (bank, size) = self.map_chr(addr);

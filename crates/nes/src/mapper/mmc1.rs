@@ -4,7 +4,7 @@ use nes_traits::SaveState;
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::mapper::Mapper;
-use crate::memory::{Memory, MemoryBlock};
+use crate::memory::{FixedMemoryBlock, Memory};
 use crate::ppu::PpuFetchKind;
 
 use super::SimpleMirroring;
@@ -15,8 +15,8 @@ pub struct Mmc1 {
     cartridge: INes,
     current_tick: u64,
     last_write_tick: u64,
-    prg_ram: MemoryBlock,
-    chr_ram: Option<MemoryBlock>,
+    prg_ram: FixedMemoryBlock<8>,
+    chr_ram: Option<FixedMemoryBlock<8>>,
     shift_reg: u32,
     counter: u32,
     regs: [u32; 4],
@@ -28,12 +28,15 @@ pub struct Mmc1 {
 
 impl Mmc1 {
     pub fn new(mut cartridge: INes) -> Mmc1 {
-        let mut prg_ram = MemoryBlock::new(8);
+        let mut prg_ram = FixedMemoryBlock::new();
         if let Some(wram) = cartridge.wram.take() {
             prg_ram.restore_wram(wram);
         }
 
-        let chr_ram = cartridge.chr_rom.is_empty().then(|| MemoryBlock::new(8));
+        let chr_ram = cartridge
+            .chr_rom
+            .is_empty()
+            .then(|| FixedMemoryBlock::new());
 
         let mirroring = SimpleMirroring::new(cartridge.mirroring);
         let last = (cartridge.prg_rom.len() / 0x4000) - 1;
@@ -57,7 +60,7 @@ impl Mmc1 {
 
     fn read_cpu(&self, addr: u16) -> u8 {
         if addr & 0x8000 == 0 {
-            self.prg_ram.read_mapped(0, 8 * 1024, addr)
+            self.prg_ram.read(addr)
         } else {
             let (bank, size) = self.map_prg(addr);
             self.cartridge.prg_rom.read_mapped(bank, size, addr)
@@ -68,7 +71,7 @@ impl Mmc1 {
         if addr & 0x8000 == 0 {
             //prg ram
             if !self.prg_ram_write_protect {
-                self.prg_ram.write_mapped(0, 8 * 1024, addr, value);
+                self.prg_ram.write(addr, value);
             }
             return;
         }

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::mapper::Mapper;
-use crate::memory::{Memory, MemoryBlock};
+use crate::memory::{FixedMemoryBlock, Memory, MemoryBlock};
 use crate::ppu::PpuFetchKind;
 
 use super::SimpleMirroring;
@@ -57,7 +57,7 @@ pub struct Fme7 {
     cartridge: INes,
     prg_ram: MemoryBlock,
     prg_banks: [PrgBank; 5],
-    chr_ram: Option<MemoryBlock>,
+    chr_ram: Option<FixedMemoryBlock<8>>,
     chr_banks: [u8; 8],
     command: u8,
     irq_enable: bool,
@@ -107,7 +107,7 @@ impl Fme7 {
             prg_ram.restore_wram(wram);
         }
 
-        let chr_ram = (cartridge.chr_ram_bytes > 0).then(|| MemoryBlock::new(8));
+        let chr_ram = (cartridge.chr_ram_bytes > 0).then(|| FixedMemoryBlock::new());
         let chr_banks = [0; 8];
 
         let mirroring = SimpleMirroring::new(cartridge.mirroring);

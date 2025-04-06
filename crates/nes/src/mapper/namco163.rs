@@ -10,7 +10,7 @@ use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind, 
 use crate::cartridge::INes;
 use crate::debug::Debug;
 use crate::mapper::Mapper;
-use crate::memory::{Memory, MemoryBlock};
+use crate::memory::{FixedMemoryBlock, Memory};
 use crate::ppu::PpuFetchKind;
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
@@ -19,7 +19,7 @@ pub struct Namco163 {
     cartridge: INes,
     #[cfg_attr(feature = "save-states", save(skip))]
     debug: Rc<Debug>,
-    prg_ram: Option<MemoryBlock>,
+    prg_ram: Option<FixedMemoryBlock<8>>,
     sound: Sound,
     irq_enabled: bool,
     irq_counter: u16,
@@ -34,7 +34,7 @@ pub struct Namco163 {
 impl Namco163 {
     pub fn new(mut cartridge: INes, debug: Rc<Debug>) -> Self {
         let prg_ram = if cartridge.prg_ram_bytes > 0 {
-            let mut ram = MemoryBlock::new(8);
+            let mut ram = FixedMemoryBlock::new();
             if let Some(wram) = cartridge.wram.take() {
                 ram.restore_wram(wram);
             }
@@ -67,7 +67,7 @@ impl Namco163 {
             0x5800..=0x5fff => (self.irq_counter >> 8) as u8,
             0x6000..=0x7fff => {
                 if let Some(ram) = self.prg_ram.as_ref() {
-                    ram.read_mapped(0, 8 * 1024, addr)
+                    ram.read(addr)
                 } else {
                     0
                 }
@@ -136,7 +136,7 @@ impl Namco163 {
                 let write_protect = self.write_protect[range as usize];
                 if !write_protect {
                     if let Some(ram) = self.prg_ram.as_mut() {
-                        ram.write_mapped(0, 8 * 1024, addr, value);
+                        ram.write(addr, value);
                     }
                 }
             }

@@ -11,7 +11,7 @@ use crate::bus::{Address, AddressBus, AndAndMask, AndEqualsAndMask, BusKind, Dev
 use crate::cartridge::INes;
 use crate::debug::Debug;
 use crate::mapper::Mapper;
-use crate::memory::{Memory, MemoryBlock};
+use crate::memory::{FixedMemoryBlock, Memory, MemoryBlock};
 use crate::ppu::PpuFetchKind;
 
 use super::Nametable;
@@ -60,9 +60,9 @@ pub struct Rainbow {
     debug: Rc<Debug>,
     prg_ram: MemoryBlock,
     chr_ram: MemoryBlock,
-    fpga_ram: MemoryBlock,
+    fpga_ram: FixedMemoryBlock<8>,
     // Storing CIRAM inside mapper greatly simplifies applying window/ext-bg effects
-    nt_ram: MemoryBlock,
+    nt_ram: FixedMemoryBlock<2>,
     prg_mode: u8,
     prg_lo_regs: [u8; 8],
     prg_hi_regs: [u8; 8],
@@ -123,13 +123,13 @@ impl Rainbow {
             prg_ram.restore_wram(wram);
         }
 
-        let mut fpga_ram = MemoryBlock::new(8);
+        let mut fpga_ram = FixedMemoryBlock::new();
         for (addr, &value) in BOOTROM_FPGA.iter().enumerate() {
-            fpga_ram.write_mapped(0, 8 * 1024, addr as u16, value);
+            fpga_ram.write(addr, value);
         }
 
         let chr_ram = MemoryBlock::new(cartridge.chr_ram_bytes / 1024);
-        let nt_ram = MemoryBlock::new(2);
+        let nt_ram = FixedMemoryBlock::new();
 
         let master_volume = (i16::MAX as f32 / 64.0) as i16;
 
@@ -219,9 +219,7 @@ impl Rainbow {
                 val
             }
             0x4154 => self.ppu_state.irq_jitter,
-            0x415f => self
-                .fpga_ram
-                .read_mapped(0, 8 * 1024, self.fpga_reader_addr),
+            0x415f => self.fpga_ram.read(self.fpga_reader_addr),
             0x4160 => 0x20,
             0x4161 => {
                 let mut val = 0;
@@ -287,9 +285,7 @@ impl Rainbow {
                 return val;
             }
             0x415f => {
-                let val = self
-                    .fpga_ram
-                    .read_mapped(0, 8 * 1024, self.fpga_reader_addr);
+                let val = self.fpga_ram.read(self.fpga_reader_addr);
                 self.fpga_reader_addr += self.fpga_reader_inc as u16;
                 self.fpga_reader_addr &= 0x1fff;
                 return val;
@@ -356,8 +352,7 @@ impl Rainbow {
             0x415d => self.fpga_reader_addr = (self.fpga_reader_addr & 0xff00) | (value as u16),
             0x415e => self.fpga_reader_inc = value,
             0x415f => {
-                self.fpga_ram
-                    .write_mapped(0, 8 * 1024, self.fpga_reader_addr, value);
+                self.fpga_ram.write(self.fpga_reader_addr, value);
                 self.fpga_reader_addr += self.fpga_reader_inc as u16;
                 self.fpga_reader_addr &= 0x1fff;
             }
@@ -548,7 +543,7 @@ impl Rainbow {
 
     fn read_chr(&self, addr: u16) -> u8 {
         if self.chr_mode & 0x80 != 0 {
-            return self.fpga_ram.read_mapped(0, 8 * 1024, addr & 0xfff);
+            return self.fpga_ram.read(addr);
         }
 
         let ram = self.chr_mode & 0x40 != 0;
@@ -564,7 +559,7 @@ impl Rainbow {
 
     fn read_bank_chr(&self, bank: usize, addr: u16, size: usize) -> u8 {
         if self.chr_mode & 0x80 != 0 {
-            return self.fpga_ram.read_mapped(0, 8 * 1024, addr & 0xfff);
+            return self.fpga_ram.read(addr);
         }
 
         let ram = self.chr_mode & 0x40 != 0;
@@ -578,7 +573,7 @@ impl Rainbow {
 
     fn write_chr(&mut self, addr: u16, value: u8) {
         if self.chr_mode & 0x80 != 0 {
-            return self.fpga_ram.write_mapped(0, 8 * 1024, addr & 0xfff, value);
+            return self.fpga_ram.write(addr, value);
         }
 
         let ram = self.chr_mode & 0x40 != 0;
@@ -810,7 +805,13 @@ impl PpuState {
         }
     }
 
-    fn fetch(&mut self, addr: u16, nt_mode: Option<u8>, fpga: &MemoryBlock, oam: &mut ShadowOam) {
+    fn fetch(
+        &mut self,
+        addr: u16,
+        nt_mode: Option<u8>,
+        fpga: &FixedMemoryBlock<8>,
+        oam: &mut ShadowOam,
+    ) {
         self.line_fetches = self.line_fetches.saturating_add(1);
 
         if self.line_fetches == self.irq_offset
@@ -849,7 +850,7 @@ impl PpuState {
                 if self.line_fetches & 3 == 0 {
                     let fpga_bank = (nt_mode >> 2) & 3;
                     let fpga_addr = (fpga_bank as u16 * 0x400) | (addr & 0x3ff);
-                    let value = fpga.read_mapped(0, 8 * 1024, fpga_addr);
+                    let value = fpga.read(fpga_addr);
                     self.ext_bg = Some((nt_mode & 1 != 0, nt_mode & 2 != 0, value));
                 }
             } else {

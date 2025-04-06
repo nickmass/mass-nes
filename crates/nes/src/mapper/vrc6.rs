@@ -9,7 +9,7 @@ use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::debug::Debug;
 use crate::mapper::Mapper;
-use crate::memory::{Memory, MemoryBlock};
+use crate::memory::{FixedMemoryBlock, Memory};
 use crate::ppu::PpuFetchKind;
 
 use super::Nametable;
@@ -43,7 +43,7 @@ pub struct Vrc6 {
     variant: Vrc6Variant,
     #[cfg_attr(feature = "save-states", save(nested))]
     irq: VrcIrq,
-    prg_ram: MemoryBlock,
+    prg_ram: FixedMemoryBlock<8>,
     ram_protect: bool,
     prg_regs: [u8; 3],
     chr_regs: [u8; 8],
@@ -59,7 +59,7 @@ pub struct Vrc6 {
 
 impl Vrc6 {
     pub fn new(mut cartridge: INes, variant: Vrc6Variant, debug: Rc<Debug>) -> Self {
-        let mut prg_ram = MemoryBlock::new(8);
+        let mut prg_ram = FixedMemoryBlock::new();
         if let Some(wram) = cartridge.wram.take() {
             prg_ram.restore_wram(wram);
         }
@@ -90,7 +90,7 @@ impl Vrc6 {
             if self.ram_protect {
                 0
             } else {
-                self.prg_ram.read_mapped(0, 8 * 1024, addr)
+                self.prg_ram.read(addr)
             }
         } else {
             let (bank_idx, size) = match addr & 0xe000 {
@@ -108,7 +108,7 @@ impl Vrc6 {
     fn write_cpu(&mut self, addr: u16, value: u8) {
         if addr < 0x8000 {
             if !self.ram_protect {
-                self.prg_ram.write_mapped(0, 8 * 1024, addr, value)
+                self.prg_ram.write(addr, value)
             }
             return;
         }

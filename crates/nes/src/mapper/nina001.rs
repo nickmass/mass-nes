@@ -4,21 +4,21 @@ use nes_traits::SaveState;
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::mapper::Mapper;
-use crate::memory::{Memory, MemoryBlock};
+use crate::memory::{FixedMemoryBlock, Memory};
 use crate::ppu::PpuFetchKind;
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Nina001 {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
-    prg_ram: MemoryBlock,
+    prg_ram: FixedMemoryBlock<8>,
     prg_bank: u8,
     chr_banks: [u8; 2],
 }
 
 impl Nina001 {
     pub fn new(mut cartridge: INes) -> Nina001 {
-        let mut prg_ram = MemoryBlock::new(8);
+        let mut prg_ram = FixedMemoryBlock::new();
         if let Some(wram) = cartridge.wram.take() {
             prg_ram.restore_wram(wram);
         }
@@ -33,18 +33,12 @@ impl Nina001 {
 
     fn read_cpu(&self, addr: u16) -> u8 {
         if addr & 0x8000 == 0 {
-            self.prg_ram.read_mapped(0, 8 * 1024, addr)
+            self.prg_ram.read(addr)
         } else {
             self.cartridge
                 .prg_rom
                 .read_mapped(self.prg_bank as usize, 32 * 1024, addr)
         }
-    }
-
-    fn read_ppu(&self, addr: u16) -> u8 {
-        let bank_idx = if addr & 0x1000 == 0 { 0 } else { 1 };
-        let bank = self.chr_banks[bank_idx] as usize;
-        self.cartridge.chr_rom.read_mapped(bank, 4 * 1024, addr)
     }
 
     fn write_cpu(&mut self, addr: u16, value: u8) {
@@ -55,7 +49,13 @@ impl Nina001 {
             _ => (),
         }
 
-        self.prg_ram.write_mapped(0, 8 * 1024, addr, value);
+        self.prg_ram.write(addr, value);
+    }
+
+    fn read_ppu(&self, addr: u16) -> u8 {
+        let bank_idx = if addr & 0x1000 == 0 { 0 } else { 1 };
+        let bank = self.chr_banks[bank_idx] as usize;
+        self.cartridge.chr_rom.read_mapped(bank, 4 * 1024, addr)
     }
 }
 

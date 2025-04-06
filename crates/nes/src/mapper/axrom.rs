@@ -4,7 +4,7 @@ use nes_traits::SaveState;
 use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::mapper::Mapper;
-use crate::memory::{Memory, MemoryBlock};
+use crate::memory::{FixedMemoryBlock, Memory};
 use crate::ppu::PpuFetchKind;
 
 use super::SimpleMirroring;
@@ -14,7 +14,7 @@ pub struct Axrom {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
     prg_bank: u8,
-    chr_ram: MemoryBlock,
+    chr_ram: FixedMemoryBlock<8>,
     mirroring: SimpleMirroring,
 }
 
@@ -22,7 +22,7 @@ impl Axrom {
     pub fn new(cartridge: INes) -> Axrom {
         Axrom {
             prg_bank: 0,
-            chr_ram: MemoryBlock::new(8),
+            chr_ram: FixedMemoryBlock::new(),
             mirroring: SimpleMirroring::new(cartridge.mirroring),
             cartridge,
         }
@@ -44,11 +44,11 @@ impl Axrom {
     }
 
     fn read_ppu(&self, addr: u16) -> u8 {
-        self.chr_ram.read_mapped(0, 8 * 1024, addr)
+        self.chr_ram.read(addr)
     }
 
     fn write_ppu(&mut self, addr: u16, value: u8) {
-        self.chr_ram.write_mapped(0, 8 * 1024, addr, value);
+        self.chr_ram.write(addr, value);
     }
 }
 

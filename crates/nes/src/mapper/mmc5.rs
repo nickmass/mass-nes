@@ -10,7 +10,7 @@ use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::{CartMirroring, INes};
 use crate::debug::Debug;
 use crate::mapper::Mapper;
-use crate::memory::{Memory, MemoryBlock};
+use crate::memory::{FixedMemoryBlock, Memory, MemoryBlock};
 use crate::ppu::PpuFetchKind;
 
 use super::Nametable;
@@ -204,8 +204,8 @@ pub struct Mmc5 {
     #[cfg_attr(feature = "save-states", save(skip))]
     debug: Rc<Debug>,
     prg_ram: MemoryBlock,
-    chr_ram: Option<MemoryBlock>,
-    exram: MemoryBlock,
+    chr_ram: Option<FixedMemoryBlock<8>>,
+    exram: FixedMemoryBlock<1>,
     tall_sprites: bool,
     ppu_substitution: bool,
     prg_bank_mode: u8,
@@ -253,10 +253,10 @@ impl Mmc5 {
             prg_ram.restore_wram(wram);
         }
 
-        let exram = MemoryBlock::new(1);
+        let exram = FixedMemoryBlock::new();
 
         let chr_ram = if cartridge.chr_ram_bytes > 0 {
-            Some(MemoryBlock::new(8))
+            Some(FixedMemoryBlock::new())
         } else {
             None
         };
@@ -316,7 +316,7 @@ impl Mmc5 {
 
     fn peek_cpu(&self, addr: u16) -> u8 {
         match addr {
-            0x5c00..=0x5fff => self.exram.read_mapped(0, 1024, addr),
+            0x5c00..=0x5fff => self.exram.read(addr),
             0x6000.. => {
                 let prg = self.map_prg(addr);
                 match prg {
@@ -462,7 +462,7 @@ impl Mmc5 {
             0x5206 => self.mul_right = value,
             0x5c00..=0x5fff => {
                 if self.ex_ram_mode != 3 {
-                    self.exram.write_mapped(0, 1024, addr, value)
+                    self.exram.write(addr, value)
                 }
             }
             0x6000.. => {
@@ -481,7 +481,7 @@ impl Mmc5 {
     fn read_ppu(&self, addr: u16) -> u8 {
         if let Some(chr_ram) = self.chr_ram.as_ref() {
             if addr < 0x2000 {
-                return chr_ram.read_mapped(0, 8 * 1024, addr);
+                return chr_ram.read(addr);
             }
         }
         if self.in_vert_split() {
@@ -519,7 +519,7 @@ impl Mmc5 {
             let table = (addr & 0xc00) >> 10;
             match self.mirroring[table as usize] {
                 MmcNametable::Exram => match self.ex_ram_mode {
-                    0 | 1 => self.exram.read_mapped(0, 1024, addr),
+                    0 | 1 => self.exram.read(addr),
                     _ => 0,
                 },
                 MmcNametable::Fill => match read {
@@ -544,7 +544,7 @@ impl Mmc5 {
     fn write_ppu(&mut self, addr: u16, val: u8) {
         if addr < 0x2000 {
             if let Some(chr_ram) = self.chr_ram.as_mut() {
-                chr_ram.write_mapped(0, 8 * 1024, addr, val);
+                chr_ram.write(addr, val);
             }
             return;
         }
@@ -552,7 +552,7 @@ impl Mmc5 {
         let table = (addr & 0xc00) >> 10;
         if let MmcNametable::Exram = self.mirroring[table as usize] {
             if self.ex_ram_mode == 0 || self.ex_ram_mode == 1 {
-                self.exram.write_mapped(0, 1024, addr, val);
+                self.exram.write(addr, val);
             }
         }
     }
@@ -654,7 +654,7 @@ impl Mmc5 {
         let col = (self.ppu_state.tile_number().unwrap_or(0) as u16) % 32;
         let tile_idx = row * 32 + col;
 
-        self.exram.read_mapped(0, 1024, tile_idx)
+        self.exram.read(tile_idx)
     }
 
     fn vert_split_attr(&self) -> u8 {
@@ -663,7 +663,7 @@ impl Mmc5 {
         let tile_idx = row * 32 + col;
         let attr_addr = 0x3c0 | (tile_idx >> 4 & 0x38) | (tile_idx >> 2 & 7);
 
-        self.exram.read_mapped(0, 1024, attr_addr)
+        self.exram.read(attr_addr)
     }
 }
 
@@ -750,7 +750,7 @@ impl Mapper for Mmc5 {
             if let Some(state) = self.ppu_state.read() {
                 match state {
                     PpuRead::Nametable => {
-                        let val = self.exram.read_mapped(0, 1024, address);
+                        let val = self.exram.read(address);
                         self.ex_attr_bank = val & 0x3f;
                         self.ex_attr_pal = (val >> 6) * 0b01010101;
                     }

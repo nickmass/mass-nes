@@ -4,7 +4,7 @@ use nes_traits::SaveState;
 use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::mapper::Mapper;
-use crate::memory::{Memory, MemoryBlock};
+use crate::memory::{FixedMemoryBlock, Memory};
 use crate::ppu::PpuFetchKind;
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
@@ -12,14 +12,14 @@ pub struct Bxrom {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
     prg_bank: u8,
-    chr_ram: MemoryBlock,
+    chr_ram: FixedMemoryBlock<8>,
 }
 
 impl Bxrom {
     pub fn new(cartridge: INes) -> Bxrom {
         Self {
             prg_bank: 0,
-            chr_ram: MemoryBlock::new(8),
+            chr_ram: FixedMemoryBlock::new(),
             cartridge,
         }
     }
@@ -38,14 +38,14 @@ impl Mapper for Bxrom {
                     .prg_rom
                     .read_mapped(self.prg_bank as usize, 32 * 1024, addr)
             }
-            BusKind::Ppu => self.chr_ram.read_mapped(0, 8 * 1024, addr),
+            BusKind::Ppu => self.chr_ram.read(addr),
         }
     }
 
     fn write(&mut self, bus: BusKind, addr: u16, value: u8) {
         match bus {
             BusKind::Cpu => self.prg_bank = value,
-            BusKind::Ppu => self.chr_ram.write_mapped(0, 8 * 1024, addr, value),
+            BusKind::Ppu => self.chr_ram.write(addr, value),
         }
     }
 

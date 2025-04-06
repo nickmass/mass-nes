@@ -4,7 +4,7 @@ use nes_traits::SaveState;
 use crate::bus::{AddressBus, AndAndMask, BusKind, DeviceKind};
 use crate::cartridge::{CartMirroring, INes};
 use crate::mapper::Mapper;
-use crate::memory::{Memory, MemoryBlock};
+use crate::memory::{FixedMemoryBlock, Memory};
 use crate::ppu::PpuFetchKind;
 
 use super::{Mirroring, Nametable};
@@ -14,8 +14,8 @@ pub struct Uxrom {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
     prg_banks: [u8; 2],
-    chr_ram: Option<MemoryBlock>,
-    nt_ram: Option<MemoryBlock>,
+    chr_ram: Option<FixedMemoryBlock<8>>,
+    nt_ram: Option<FixedMemoryBlock<2>>,
     mirroring: Mirroring,
 }
 
@@ -23,12 +23,12 @@ impl Uxrom {
     pub fn new(cartridge: INes) -> Uxrom {
         let fixed_bank = ((cartridge.prg_rom.len() / 0x4000) - 1) as u8;
 
-        let chr_ram = (cartridge.chr_ram_bytes > 0).then(|| MemoryBlock::new(8));
+        let chr_ram = (cartridge.chr_ram_bytes > 0).then(|| FixedMemoryBlock::new());
 
         let (mirroring, nt_ram) = if cartridge.alternative_mirroring {
             match cartridge.mirroring {
                 CartMirroring::Horizontal => (Mirroring::Single(Nametable::InternalA), None),
-                CartMirroring::Vertical => (Mirroring::FourScreen, Some(MemoryBlock::new(2))),
+                CartMirroring::Vertical => (Mirroring::FourScreen, Some(FixedMemoryBlock::new())),
             }
         } else {
             (cartridge.mirroring.into(), None)
@@ -60,12 +60,12 @@ impl Uxrom {
     fn read_ppu(&self, addr: u16) -> u8 {
         if addr & 0x2000 != 0 {
             if let Some(nt_ram) = self.nt_ram.as_ref() {
-                nt_ram.read_mapped(0, 2 * 1024, addr)
+                nt_ram.read(addr)
             } else {
                 0
             }
         } else if let Some(ram) = self.chr_ram.as_ref() {
-            ram.read_mapped(0, 8 * 1024, addr)
+            ram.read(addr)
         } else {
             self.cartridge.chr_rom.read_mapped(0, 8 * 1024, addr)
         }
@@ -74,10 +74,10 @@ impl Uxrom {
     fn write_ppu(&mut self, addr: u16, value: u8) {
         if addr & 0x2000 != 0 {
             if let Some(nt_ram) = self.nt_ram.as_mut() {
-                nt_ram.write_mapped(0, 2 * 1024, addr, value);
+                nt_ram.write(addr, value);
             }
         } else if let Some(ram) = self.chr_ram.as_mut() {
-            ram.write_mapped(0, 8 * 1024, addr, value);
+            ram.write(addr, value);
         }
     }
 }

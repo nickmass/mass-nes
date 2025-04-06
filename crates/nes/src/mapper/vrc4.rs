@@ -9,7 +9,7 @@ use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::debug::Debug;
 use crate::mapper::Mapper;
-use crate::memory::{Memory, MemoryBlock};
+use crate::memory::{FixedMemoryBlock, Memory};
 use crate::ppu::PpuFetchKind;
 
 use super::vrc_irq::VrcIrq;
@@ -123,7 +123,7 @@ pub struct Vrc4 {
     mirroring: SimpleMirroring,
     #[cfg_attr(feature = "save-states", save(nested))]
     irq: VrcIrq,
-    prg_ram: Option<MemoryBlock>,
+    prg_ram: Option<FixedMemoryBlock<8>>,
     prg_regs: [u8; 4],
     chr_lo_regs: [u8; 8],
     chr_hi_regs: [u8; 8],
@@ -137,7 +137,7 @@ impl Vrc4 {
         let last_bank = ((cartridge.prg_rom.len() / 0x2000) - 1) as u8;
         let fixed_bank = ((cartridge.prg_rom.len() / 0x2000) - 2) as u8;
         let prg_ram = if cartridge.prg_ram_bytes > 0 {
-            let mut ram = MemoryBlock::new(8);
+            let mut ram = FixedMemoryBlock::new();
             if let Some(wram) = cartridge.wram.take() {
                 ram.restore_wram(wram);
             }
@@ -178,7 +178,7 @@ impl Vrc4 {
             return self.cartridge.prg_rom.read_mapped(bank, 8 * 1024, addr);
         } else if let Some(ram) = self.prg_ram.as_ref() {
             if !self.ram_protect {
-                return ram.read_mapped(0, 8 * 1024, addr);
+                return ram.read(addr);
             }
         } else if self.variant.has_microwire() {
             if addr >= 0x6000 && addr < 0x7000 {
@@ -236,7 +236,7 @@ impl Vrc4 {
             }
         } else if let Some(ram) = self.prg_ram.as_mut() {
             if !self.ram_protect {
-                ram.write_mapped(0, 8 * 1024, addr, value);
+                ram.write(addr, value);
             }
         } else if self.variant.has_microwire() && addr >= 0x6000 && addr < 0x7000 {
             self.microwire_latch = value;
