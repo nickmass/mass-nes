@@ -1,4 +1,4 @@
-use eframe::{CreationContext, egui::Event};
+use eframe::CreationContext;
 use nes::{SaveWram, UserInput};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
@@ -18,7 +18,7 @@ use std::{
     },
 };
 
-use crate::egui;
+use crate::egui::{self, Event};
 use crate::gfx::{Filter, Gfx, GfxBackBuffer};
 use crate::runner::{DebugRequest, EmulatorInput};
 use crate::widgets::*;
@@ -35,6 +35,12 @@ use crate::{
 pub enum Region {
     Ntsc,
     Pal,
+}
+
+impl Default for Region {
+    fn default() -> Self {
+        Region::Ntsc
+    }
 }
 
 impl Into<nes::Region> for Region {
@@ -63,6 +69,7 @@ struct UiState {
     show_code: bool,
     show_events: bool,
     show_filter_config: bool,
+    show_input_viewer: bool,
     auto_open_most_recent: bool,
     interests: Interests,
     recent_files: Vec<PathBuf>,
@@ -89,6 +96,7 @@ impl Default for UiState {
             show_code: false,
             show_events: false,
             show_filter_config: false,
+            show_input_viewer: false,
             auto_open_most_recent: true,
             interests: Interests::new(),
             recent_files: Vec::new(),
@@ -123,6 +131,8 @@ pub struct DebuggerApp<A> {
     fds_disk_sides: usize,
     fds_current_side: Option<usize>,
     wram: Option<ui::wram::WramStorage>,
+    svg_renderer: svg::SvgRenderer,
+    controller_svg: svg::SvgGlView,
 }
 
 impl<A: Audio> DebuggerApp<A> {
@@ -138,7 +148,7 @@ impl<A: Audio> DebuggerApp<A> {
         let gl = cc.gl.as_ref().expect("require glow opengl context").clone();
         let app_events = AppEvents::new();
         let back_buffer = GfxBackBuffer::new(Repainter::new(cc.egui_ctx.clone()));
-        let gfx = Gfx::new(gl, back_buffer.clone(), &palette)?;
+        let gfx = Gfx::new(gl.clone(), back_buffer.clone(), &palette)?;
         let nes_screen = NesScreen::new(gfx);
         let palette = Palette::new(palette);
 
@@ -193,6 +203,8 @@ impl<A: Audio> DebuggerApp<A> {
 
         let state: UiState = state.unwrap_or_default();
 
+        let svg_renderer = svg::SvgRenderer::new(gl).unwrap();
+
         let mut app = DebuggerApp {
             first_update: true,
             app_events,
@@ -216,6 +228,8 @@ impl<A: Audio> DebuggerApp<A> {
             fds_disk_sides: 0,
             fds_current_side: None,
             wram,
+            controller_svg: svg::nes_controller().with_scale(1.0),
+            svg_renderer,
         };
 
         app.hydrate();
@@ -585,6 +599,7 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
                     {
                         self.update_debug_req();
                     }
+                    ui.checkbox(&mut self.state.show_input_viewer, "Input Viewer");
                     ui.checkbox(&mut self.state.show_messages, "Messages");
                 });
                 ui.menu_button("Filter", |ui| {
@@ -708,6 +723,41 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
 
         if self.state.show_filter_config {
             self.nes_screen.configure_filter(ctx);
+        }
+
+        if self.state.show_input_viewer {
+            egui::Window::new("Input Viewer").show(ctx, |ui| {
+                let mut buttons = svg::NesButtons::empty();
+                let controller = self.last_input.controller;
+
+                if controller.up {
+                    buttons |= svg::NesButtons::UP;
+                }
+                if controller.down {
+                    buttons |= svg::NesButtons::DOWN;
+                }
+                if controller.left {
+                    buttons |= svg::NesButtons::LEFT;
+                }
+                if controller.right {
+                    buttons |= svg::NesButtons::RIGHT;
+                }
+                if controller.a {
+                    buttons |= svg::NesButtons::A;
+                }
+                if controller.b {
+                    buttons |= svg::NesButtons::B;
+                }
+                if controller.select {
+                    buttons |= svg::NesButtons::SELECT;
+                }
+                if controller.start {
+                    buttons |= svg::NesButtons::START;
+                }
+
+                self.controller_svg
+                    .view(&self.svg_renderer, buttons.bits(), ui)
+            });
         }
 
         if self.first_update {

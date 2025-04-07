@@ -10,6 +10,7 @@ mod popup_message;
 mod recents;
 mod screen;
 mod sprite_viewer;
+pub mod svg;
 mod volume;
 
 pub use chr_tiles::ChrTiles;

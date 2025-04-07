@@ -29,7 +29,7 @@ pub enum TickResult {
     Fetch(u16),
     Read(u16),
     Write(u16, u8),
-    Idle(u16),
+    Idle(#[allow(unused)] u16),
 }
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]

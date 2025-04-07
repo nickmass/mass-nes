@@ -18,6 +18,12 @@ pub enum Filter {
     Crt,
 }
 
+impl Default for Filter {
+    fn default() -> Self {
+        Filter::Crt
+    }
+}
+
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 struct Vertex {
@@ -155,7 +161,7 @@ impl Gfx {
         let view = paint_info.viewport_in_pixels();
         let size = (view.width_px as f64, view.height_px as f64);
         let uniforms = filter.process(&ctx, size, &self.frame);
-        program.draw(&ctx, &self.vertex_buffer, &uniforms);
+        program.draw(&ctx, &self.vertex_buffer, None, &uniforms);
         self.tracy.frame(&self.frame);
     }
 }

@@ -15,6 +15,7 @@ fn main() {
 
     let options = eframe::NativeOptions {
         vsync: false,
+        multisampling: 2,
         ..Default::default()
     };
 

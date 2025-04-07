@@ -7,12 +7,14 @@ pub type GlowContext = Arc<Context>;
 
 #[derive(Debug, Copy, Clone)]
 pub enum Polygon {
+    Triangles,
     TriangleFan,
 }
 
 impl Polygon {
     fn as_gl_type(&self) -> u32 {
         match self {
+            Polygon::Triangles => glow::TRIANGLES,
             Polygon::TriangleFan => glow::TRIANGLE_FAN,
         }
     }
@@ -21,12 +23,16 @@ impl Polygon {
 #[derive(Debug, Copy, Clone)]
 pub enum AttrType {
     Vec2,
+    Vec4,
+    U32,
 }
 
 impl AttrType {
     fn size(&self) -> i32 {
         match self {
             AttrType::Vec2 => 8,
+            AttrType::Vec4 => 16,
+            AttrType::U32 => 4,
         }
     }
 
@@ -41,6 +47,12 @@ impl AttrType {
             match self {
                 AttrType::Vec2 => {
                     ctx.vertex_attrib_pointer_f32(location, 2, glow::FLOAT, false, stride, offset);
+                }
+                AttrType::Vec4 => {
+                    ctx.vertex_attrib_pointer_f32(location, 4, glow::FLOAT, false, stride, offset);
+                }
+                AttrType::U32 => {
+                    ctx.vertex_attrib_pointer_i32(location, 1, glow::UNSIGNED_INT, stride, offset);
                 }
             }
         }
@@ -102,6 +114,43 @@ impl<V: Vertex> VertexBuffer<V> {
             ctx.draw_arrays(self.poly_type.as_gl_type(), 0, self.count);
         }
     }
+
+    fn draw_indexed(&self, ctx: &GlowContext, indicies: &IndexBuffer) {
+        unsafe {
+            ctx.draw_elements(
+                self.poly_type.as_gl_type(),
+                indicies.count,
+                glow::UNSIGNED_SHORT,
+                0,
+            );
+        }
+    }
+}
+
+pub struct IndexBuffer {
+    buffer: Buffer,
+    count: i32,
+}
+
+impl IndexBuffer {
+    pub fn new(ctx: &GlowContext, data: &[u16]) -> Result<Self, String> {
+        unsafe {
+            let ctx = ctx.clone();
+            let buffer = ctx.create_buffer()?;
+            ctx.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(buffer));
+            ctx.buffer_data_u8_slice(
+                glow::ELEMENT_ARRAY_BUFFER,
+                bytemuck::cast_slice(data),
+                glow::STATIC_DRAW,
+            );
+            ctx.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, None);
+
+            Ok(Self {
+                buffer,
+                count: data.len() as i32,
+            })
+        }
+    }
 }
 
 pub struct Program {
@@ -161,14 +210,24 @@ impl Program {
         }
     }
 
-    fn create_vao<V: Vertex>(&mut self, ctx: &GlowContext, vertex_buffer: &VertexBuffer<V>) {
+    fn create_vao<V: Vertex>(
+        &mut self,
+        ctx: &GlowContext,
+        vertex_buffer: &VertexBuffer<V>,
+        index_buffer: Option<&IndexBuffer>,
+    ) {
         unsafe {
             let vao = ctx.create_vertex_array().ok();
-            ctx.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer.buffer));
             ctx.bind_vertex_array(vao);
+            if let Some(index_buffer) = index_buffer {
+                ctx.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(index_buffer.buffer));
+            }
+            ctx.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer.buffer));
             vertex_buffer.enable_attrs(ctx, &self.program);
+            ctx.bind_vertex_array(None);
             self.vao = vao;
             ctx.bind_buffer(glow::ARRAY_BUFFER, None);
+            ctx.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, None);
         }
     }
 
@@ -176,17 +235,22 @@ impl Program {
         &mut self,
         ctx: &GlowContext,
         vertex_buffer: &VertexBuffer<V>,
+        index_buffer: Option<&IndexBuffer>,
         uniforms: &Uniforms,
     ) {
         unsafe {
             if let Some(vao) = self.vao.as_ref() {
                 ctx.bind_vertex_array(Some(*vao));
             } else {
-                self.create_vao(ctx, vertex_buffer);
+                self.create_vao(ctx, vertex_buffer, index_buffer);
             }
             ctx.use_program(Some(self.program));
             uniforms.bind(ctx, self);
-            vertex_buffer.draw(ctx);
+            if let Some(index_buffer) = index_buffer {
+                vertex_buffer.draw_indexed(ctx, index_buffer);
+            } else {
+                vertex_buffer.draw(ctx);
+            }
             self.reset_texture_unit();
         }
     }
@@ -215,6 +279,14 @@ pub trait AsUniform {
     fn bind(&self, ctx: &GlowContext, program: &Program, location: Option<&UniformLocation>);
 
     fn delete(&self, _ctx: &GlowContext) {}
+}
+
+impl AsUniform for u32 {
+    fn bind(&self, ctx: &GlowContext, _program: &Program, location: Option<&UniformLocation>) {
+        unsafe {
+            ctx.uniform_1_u32(location, *self);
+        }
+    }
 }
 
 impl AsUniform for f32 {

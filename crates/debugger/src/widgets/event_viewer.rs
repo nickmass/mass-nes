@@ -34,7 +34,7 @@ struct Interest {
     color: Color32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Interests {
     interests: Vec<Interest>,
 }

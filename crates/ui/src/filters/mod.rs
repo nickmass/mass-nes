@@ -57,6 +57,7 @@ pub enum TextureFilter {
 pub(crate) const PALETTED_SHADER: &'static str = include_str!("../../shaders/paletted.glsl");
 pub(crate) const NTSC_SHADER: &'static str = include_str!("../../shaders/ntsc.glsl");
 pub(crate) const CRT_SHADER: &'static str = include_str!("../../shaders/crt.glsl");
+pub const SVG_SHADER: &'static str = include_str!("../../shaders/svg.glsl");
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) const PRELUDE_SHADER: &'static str = include_str!("../../shaders/prelude_gl.glsl");

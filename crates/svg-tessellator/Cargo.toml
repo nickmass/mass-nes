@@ -1,0 +1,11 @@
+[package]
+name = "svg-tessellator"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+epaint = "0.31.1"
+lyon = "1.0.1"
+usvg = "0.45.0"
