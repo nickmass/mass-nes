@@ -13,6 +13,8 @@ use interrupts::Interrupts;
 use ops::*;
 use registers::CpuRegs;
 
+use crate::machine::RunUntil;
+
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Default, Debug, Copy, Clone)]
 pub struct CpuPinIn {
@@ -123,8 +125,9 @@ impl Cpu {
         CpuDebugState
     }
 
-    pub fn tick(&mut self, pin_in: CpuPinIn) -> TickResult {
+    pub fn tick(&mut self, pin_in: CpuPinIn, until: &mut RunUntil) -> TickResult {
         self.pin_in = pin_in;
+        until.add_cycle();
 
         if pin_in.power {
             self.halt = false;

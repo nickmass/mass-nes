@@ -35,7 +35,7 @@ impl<T: FnMut(&Debug) -> bool> BreakpointHandler for T {
 #[derive(Debug, Copy, Clone)]
 pub enum RunResult {
     Breakpoint,
-    Frame,
+    Done,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -55,6 +55,58 @@ pub enum MapperInput {
 #[derive(Debug, Copy, Clone)]
 pub enum FdsInput {
     SetDisk(Option<usize>),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum RunUntil {
+    Cycles(u32),
+    Samples(u32),
+    Dots(u32),
+    Scanlines(u32),
+    Frames(u32),
+}
+
+impl RunUntil {
+    pub(crate) fn add_cycle(&mut self) {
+        if let RunUntil::Cycles(cycles) = self {
+            *cycles = cycles.saturating_sub(1);
+        }
+    }
+
+    pub(crate) fn add_sample(&mut self) {
+        if let RunUntil::Samples(samples) = self {
+            *samples = samples.saturating_sub(1);
+        }
+    }
+
+    pub(crate) fn add_dot(&mut self) {
+        if let RunUntil::Dots(dots) = self {
+            *dots = dots.saturating_sub(1);
+        }
+    }
+
+    pub(crate) fn add_scanline(&mut self) {
+        if let RunUntil::Scanlines(scanlines) = self {
+            *scanlines = scanlines.saturating_sub(1);
+        }
+    }
+
+    pub(crate) fn add_frame(&mut self) {
+        if let RunUntil::Frames(frames) = self {
+            *frames = frames.saturating_sub(1);
+        }
+    }
+
+    fn done(&self) -> bool {
+        match self {
+            RunUntil::Cycles(0)
+            | RunUntil::Samples(0)
+            | RunUntil::Dots(0)
+            | RunUntil::Scanlines(0)
+            | RunUntil::Frames(0) => true,
+            _ => false,
+        }
+    }
 }
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
@@ -142,29 +194,34 @@ impl Machine {
         self.region
     }
 
+    pub fn frame(&self) -> u32 {
+        self.ppu.frame()
+    }
+
     pub fn run_with_breakpoints<H: BreakpointHandler>(
         &mut self,
         frame_end: FrameEnd,
+        until: RunUntil,
         break_handler: H,
     ) -> RunResult {
-        self.do_run(frame_end, break_handler)
+        self.do_run(frame_end, until, break_handler)
     }
 
     pub fn run(&mut self) {
-        self.do_run(FrameEnd::ClearVblank, ());
+        self.do_run(FrameEnd::ClearVblank, RunUntil::Frames(1), ());
     }
 
     #[tracing::instrument(skip_all)]
     fn do_run<H: BreakpointHandler>(
         &mut self,
         frame_end: FrameEnd,
+        mut until: RunUntil,
         mut break_handler: H,
     ) -> RunResult {
         #[cfg(feature = "debugger")]
         let _ = self.debug.take_interest_notification();
-        let last_frame = self.ppu.frame();
-        while self.ppu.frame() == last_frame {
-            let tick_result = self.cpu.tick(self.cpu_pin_in);
+        while !until.done() {
+            let tick_result = self.cpu.tick(self.cpu_pin_in, &mut until);
 
             let cpu_state = self.cpu.debug_state();
             self.debug.trace(&self, cpu_state);
@@ -173,11 +230,11 @@ impl Machine {
                 self.apu.dmc.dmc_read(sample);
             }
 
-            self.apu.tick();
+            self.apu.tick(&mut until);
             self.mapper.tick();
 
-            self.tick_ppu(frame_end);
-            self.tick_ppu(frame_end);
+            self.tick_ppu(frame_end, &mut until);
+            self.tick_ppu(frame_end, &mut until);
 
             match tick_result {
                 TickResult::Fetch(addr) => {
@@ -201,10 +258,10 @@ impl Machine {
                 TickResult::Idle(_) => (),
             }
 
-            self.tick_ppu(frame_end);
+            self.tick_ppu(frame_end, &mut until);
 
             if self.region.extra_ppu_tick() && self.cycle % 5 == 0 {
-                self.tick_ppu(frame_end);
+                self.tick_ppu(frame_end, &mut until);
             }
 
             if let Some(addr) = self.apu.get_dmc_req() {
@@ -230,11 +287,11 @@ impl Machine {
             }
         }
 
-        RunResult::Frame
+        RunResult::Done
     }
 
-    fn tick_ppu(&mut self, frame_end: FrameEnd) {
-        self.ppu.tick(frame_end);
+    fn tick_ppu(&mut self, frame_end: FrameEnd, until: &mut RunUntil) {
+        self.ppu.tick(frame_end, until);
         let ppu_state = self.ppu.debug_state();
         self.debug.trace_ppu(&self, ppu_state);
     }

@@ -1,4 +1,6 @@
 #[cfg(feature = "save-states")]
+use nes_traits::SaveState;
+#[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
 
 use crate::region::Region;
@@ -47,10 +49,11 @@ pub struct PpuStep {
     pub dot: u32,
 }
 
-#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "save-states", derive(SaveState))]
 #[derive(Debug, Clone)]
 pub struct PpuSteps {
     index: usize,
+    #[cfg_attr(feature = "save-states", save(skip))]
     steps: Vec<PpuStep>,
 }
 

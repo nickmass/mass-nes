@@ -8,6 +8,9 @@ edition.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+jack = ["ui/jack"]
+
 [build-dependencies]
 ui = { path = "../ui", features = ["egui"] }
 

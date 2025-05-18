@@ -35,15 +35,11 @@ impl std::fmt::Display for Error {
 }
 
 impl BrowserAudio {
-    pub async fn new(
-        worklet_path: &str,
-        refresh_rate: f64,
-    ) -> Result<(Self, SamplesSender), Error> {
+    pub async fn new(worklet_path: &str) -> Result<(Self, SamplesSender), Error> {
         let ctx = AudioContext::new().map_err(Error::CreateContext)?;
         let volume = Volume::new();
         let sample_rate = ctx.sample_rate();
-        let buffer = (sample_rate as f64 / refresh_rate) * 2.1;
-        let (samples_tx, samples_rx) = samples_channel(sample_rate as usize, buffer as usize);
+        let (samples_tx, samples_rx) = samples_channel(sample_rate as usize, 256, 2);
 
         let worklet_processor = WorkletProcessor::new(samples_rx, volume.clone());
         Self::install(&ctx, &worklet_path, worklet_processor).await?;
@@ -177,10 +173,14 @@ impl WorkletProcessor {
     #[wasm_bindgen]
     pub fn process(&mut self, out: &mut [f32]) -> bool {
         let volume = self.volume.get();
+        self.samples.grow_buffer_len(out.len());
+
         for (out, sample) in out.iter_mut().zip(&mut self.samples) {
             let sample = (sample as f32) / (i16::MAX as f32);
             *out = sample * volume;
         }
+
+        self.samples.notify();
 
         true
     }

@@ -17,6 +17,7 @@ pub struct Runner {
     samples_tx: SamplesSender,
     blip: Blip,
     blip_delta: i32,
+    frame_samples: usize,
     save_states: Vec<Option<(usize, nes::SaveData)>>,
     save_store: SaveStore,
     frame: usize,
@@ -37,6 +38,7 @@ impl Runner {
             region.frame_ticks() * region.refresh_rate(),
             sample_rate as f64,
         );
+        let frame_samples = ((sample_rate as f64) / region.refresh_rate()).ceil() as usize;
 
         Self {
             machine,
@@ -45,6 +47,7 @@ impl Runner {
             samples_tx,
             blip,
             blip_delta: 0,
+            frame_samples,
             save_states: vec![None; 10],
             save_store: SaveStore::new(32000, 5),
             frame: 0,
@@ -80,7 +83,7 @@ impl Runner {
                 }
             }
 
-            if self.samples_tx.wants_samples() {
+            if self.samples_tx.wants_sample_count(self.frame_samples) {
                 self.step();
             }
 

@@ -2,7 +2,8 @@ use std::{collections::VecDeque, time::Duration};
 
 use blip_buf_rs::Blip;
 use nes::{
-    Cartridge, DebugEvent, FdsInput, Machine, MapperInput, Region, RunResult, SaveWram, UserInput,
+    Cartridge, DebugEvent, FdsInput, Machine, MapperInput, Region, RunResult, RunUntil, SaveWram,
+    UserInput,
 };
 use tracing::instrument;
 use ui::{audio::SamplesSender, movie::MovieFile, wram::CartridgeId};
@@ -118,6 +119,7 @@ pub struct Runner {
     save_states: Vec<Option<(usize, nes::SaveData)>>,
     save_store: SaveStore,
     frame: usize,
+    rewind_frame: usize,
     total_frames: u64,
     debug: DebugSwapState,
     debug_request: DebugRequest,
@@ -131,7 +133,7 @@ impl Runner {
         sample_rate: u32,
         debug: DebugSwapState,
     ) -> Self {
-        let blip = blip_buf_rs::Blip::new(sample_rate / 20);
+        let blip = blip_buf_rs::Blip::new(sample_rate);
 
         let save_store = SaveStore::builder()
             .add(1, 600)
@@ -154,6 +156,7 @@ impl Runner {
             save_states: vec![None; 10],
             save_store,
             frame: 0,
+            rewind_frame: 0,
             total_frames: 0,
             debug,
             debug_request: DebugRequest {
@@ -175,6 +178,9 @@ impl Runner {
 
     pub fn run(mut self) {
         let mut rewinding = false;
+        let mut max_step = nes::Region::Ntsc.frame_ticks().ceil() as u32;
+        let mut samples_per_frame =
+            (self.sample_rate as f64 / nes::Region::Ntsc.refresh_rate()).ceil() as usize;
         loop {
             let mut playback = Playback::Normal;
             while let Some(input) = self.commands.try_command() {
@@ -195,28 +201,29 @@ impl Runner {
                     }
                     EmulatorInput::RestoreState(slot) => {
                         if let Some(machine) = &mut self.machine {
-                            if let Some((frame, data)) = self.save_states[slot as usize].as_ref() {
-                                self.frame = *frame;
+                            if let Some((_frame, data)) = self.save_states[slot as usize].as_ref() {
                                 machine.restore_state(data);
+                                self.frame = machine.frame() as usize;
                             }
                         }
                     }
                     EmulatorInput::Rewind(toggle) => {
                         rewinding = toggle;
+                        self.rewind_frame = 0;
                     }
                     EmulatorInput::StepBack => {
                         if let Some(machine) = &mut self.machine {
-                            if let Some((frame, data)) = self.save_store.pop() {
-                                self.frame = frame;
+                            if let Some((_frame, data)) = self.save_store.pop() {
                                 machine.restore_state(&data);
+                                self.frame = machine.frame() as usize;
                                 playback = Playback::StepBackward;
-                                self.step(playback);
+                                self.step(playback, RunUntil::Frames(1));
                             }
                         }
                     }
                     EmulatorInput::StepForward => {
                         playback = Playback::StepForward;
-                        self.step(playback);
+                        self.step(playback, RunUntil::Frames(1));
                     }
                     EmulatorInput::LoadCartridge(cart_id, region, rom, file_name, wram, bios) => {
                         let mut rom = std::io::Cursor::new(rom);
@@ -243,6 +250,10 @@ impl Runner {
                                     region.frame_ticks() * region.refresh_rate(),
                                     self.sample_rate as f64,
                                 );
+                                max_step = region.frame_ticks().ceil() as u32;
+                                samples_per_frame =
+                                    (self.sample_rate as f64 / region.refresh_rate()).ceil()
+                                        as usize;
                                 self.commands.send_cartridge_info(cart_info);
                             }
                             Err(e) => tracing::error!("Unable to load cartridge: {e:?}"),
@@ -281,72 +292,106 @@ impl Runner {
                 }
             }
 
-            if !playback.skip_step()
-                && self.samples_tx.wants_samples()
-                && !self.debug.on_breakpoint()
-            {
-                if rewinding {
-                    if let Some((machine, (frame, data))) =
-                        self.machine.as_mut().zip(self.save_store.pop())
-                    {
-                        self.frame = frame;
-                        machine.restore_state(&data);
-                        playback = Playback::Rewind;
-                    }
+            let wants_samples = if playback.skip_sleep() {
+                self.samples_tx.wants_samples()
+            } else if rewinding {
+                if self.samples_tx.wants_sample_count(samples_per_frame) {
+                    Some(samples_per_frame)
+                } else {
+                    std::thread::sleep(Duration::from_millis(1));
+                    None
                 }
-                self.step(playback);
+            } else {
+                self.samples_tx
+                    .wait_for_wants_samples(Duration::from_millis(1))
+            };
+
+            let Some(samples) = wants_samples else {
+                continue;
+            };
+
+            if playback.skip_step() || self.debug.on_breakpoint() {
+                continue;
             }
 
-            if !playback.skip_sleep() {
-                std::thread::sleep(Duration::from_millis(1));
+            if rewinding {
+                if self.rewind_frame != self.frame {
+                    if let Some((machine, (_frame, data))) =
+                        self.machine.as_mut().zip(self.save_store.pop())
+                    {
+                        machine.restore_state(&data);
+                        self.frame = machine.frame() as usize;
+                        self.rewind_frame = self.frame;
+                    }
+                }
+
+                // Rewinding requires frame sized steps so the full frame of audio can be
+                // reversed at once
+                self.step(Playback::Rewind, RunUntil::Frames(1));
+            } else {
+                let mut clocks = self.blip.clocks_needed(samples as u32);
+                while clocks > max_step {
+                    self.step(playback, RunUntil::Samples(max_step));
+                    clocks -= max_step;
+                }
+
+                self.step(playback, RunUntil::Samples(clocks));
             }
         }
     }
 
     #[instrument(skip_all)]
-    fn step(&mut self, playback: Playback) {
+    fn step(&mut self, playback: Playback, until: RunUntil) {
         if let Some(machine) = self.machine.as_mut() {
-            if playback.save_state() {
-                self.save_store.push(self.frame, || machine.save_state());
-            }
             let frame_end = if self.movie_input.is_some() {
                 nes::FrameEnd::SetVblank
             } else {
                 nes::FrameEnd::ClearVblank
             };
-            match machine.run_with_breakpoints(frame_end, |debug: &nes::Debug| {
-                let event_notif = debug.take_interest_notification();
-                if event_notif & self.debug_request.interest_breakpoints != 0 {
-                    return true;
-                }
 
-                let s = debug.machine_state();
-                if let Some(addr) = s.cpu.instruction_addr {
-                    self.debug_request.breakpoints.is_set(addr)
-                } else {
-                    false
-                }
-            }) {
-                RunResult::Frame => {
-                    while let Some(input) = self.movie_input.as_mut().map(|fm2| fm2.next()) {
-                        match input {
-                            None => self.movie_input = None,
-                            Some(ui::movie::MovieInput::Frame) => break,
-                            Some(ui::movie::MovieInput::Input(input)) => {
-                                machine.handle_input(input)
+            let run_result =
+                machine.run_with_breakpoints(frame_end, until, |debug: &nes::Debug| {
+                    let event_notif = debug.take_interest_notification();
+                    if event_notif & self.debug_request.interest_breakpoints != 0 {
+                        return true;
+                    }
+
+                    let s = debug.machine_state();
+                    if let Some(addr) = s.cpu.instruction_addr {
+                        self.debug_request.breakpoints.is_set(addr)
+                    } else {
+                        false
+                    }
+                });
+
+            let frame = machine.frame() as usize;
+
+            match run_result {
+                RunResult::Done => {
+                    if self.frame != frame {
+                        while let Some(input) = self.movie_input.as_mut().map(|fm2| fm2.next()) {
+                            match input {
+                                None => self.movie_input = None,
+                                Some(ui::movie::MovieInput::Frame) => break,
+                                Some(ui::movie::MovieInput::Input(input)) => {
+                                    machine.handle_input(input)
+                                }
                             }
                         }
-                    }
-                    self.frame += 1;
-                    self.total_frames += 1;
 
-                    if playback.update_audio() {
-                        self.update_audio(playback);
+                        self.frame = frame;
+
+                        if playback.save_state() {
+                            self.save_store.push(self.frame, || machine.save_state());
+                        }
+
+                        self.total_frames += 1;
+                        if self.frame % playback.frame_freq() == 0 {
+                            self.update_frame();
+                        }
+                        self.update_debug(false);
                     }
-                    if self.frame % playback.frame_freq() == 0 || true {
-                        self.update_frame();
-                    }
-                    self.update_debug(false);
+                    self.update_audio(playback);
                 }
                 RunResult::Breakpoint => {
                     self.debug.set_breakpoint();
@@ -359,6 +404,10 @@ impl Runner {
 
     #[instrument(skip_all)]
     fn update_audio(&mut self, playback: Playback) {
+        if !playback.update_audio() {
+            return;
+        }
+
         if let Some(machine) = self.machine.as_mut() {
             let samples = machine.take_samples();
             let count = samples.len();

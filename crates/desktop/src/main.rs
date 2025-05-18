@@ -37,7 +37,7 @@ fn run(path: PathBuf, region: nes::Region) {
     //let filter = ui::filters::NscFilter::new(&setup);
     //let filter = ui::filters::PalettedFilter::new(setup.generate_palette());
 
-    let (audio, samples_tx) = init_audio(region);
+    let (audio, samples_tx) = init_audio();
     let sample_rate = audio.sample_rate();
     let mut app = App::new(filter, audio);
     let input = app.nes_io();
@@ -73,8 +73,8 @@ fn bench(path: PathBuf, region: nes::Region, mut frames: u32) {
     }
 }
 
-fn init_audio(region: nes::Region) -> (AudioDevices, SamplesSender) {
-    match CpalAudio::new(region.refresh_rate()) {
+fn init_audio() -> (AudioDevices, SamplesSender) {
+    match CpalAudio::new() {
         _ if std::env::var("MASS_NES_NO_AUDIO").is_ok() => {
             let (audio, tx) = Null::new();
             (audio.into(), tx)

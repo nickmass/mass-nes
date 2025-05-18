@@ -19,8 +19,11 @@ fn main() {
         ..Default::default()
     };
 
-    let (mut audio, samples_tx) =
-        ui::audio::CpalAudio::new(nes::Region::Ntsc.refresh_rate()).unwrap();
+    #[cfg(not(feature = "jack"))]
+    let (mut audio, samples_tx) = ui::audio::CpalAudio::new().unwrap();
+    #[cfg(feature = "jack")]
+    let (mut audio, samples_tx) = ui::audio::JackAudio::new().unwrap();
+
     audio.pause();
 
     eframe::run_native(
@@ -57,10 +60,9 @@ pub fn main() {
             .dyn_into::<web_sys::HtmlCanvasElement>()
             .expect("render_canvas was not a HtmlCanvasElement");
 
-        let (audio, samples_tx) =
-            ui::audio::BrowserAudio::new("worklet.js", nes::Region::Ntsc.refresh_rate())
-                .await
-                .expect("failed to init audio");
+        let (audio, samples_tx) = ui::audio::BrowserAudio::new("worklet.js")
+            .await
+            .expect("failed to init audio");
 
         let start_result = eframe::WebRunner::new()
             .start(

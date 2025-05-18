@@ -17,14 +17,14 @@ impl Null {
     pub fn new() -> (Self, SamplesSender) {
         let pause = Pause::new();
         let sample_rate = 48000;
+        let samples_per_ms = sample_rate as u64 / 1000;
 
-        let (tx, mut rx) = samples_channel(sample_rate as usize, 1024);
+        let (tx, mut rx) = samples_channel(sample_rate as usize, samples_per_ms as usize, 2);
 
         let inner_pause = pause.clone();
 
         std::thread::spawn(move || {
             let pause = inner_pause;
-            let samples_per_ms = sample_rate as u64 / 1000;
             let mut now = Instant::now();
             let mut dur = Duration::ZERO;
             loop {

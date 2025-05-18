@@ -36,8 +36,7 @@ impl Emulator {
         };
 
         #[cfg(target_arch = "wasm32")]
-        let (audio, samples_tx) =
-            ui::audio::BrowserAudio::new("worklet.js", region.refresh_rate()).await?;
+        let (audio, samples_tx) = ui::audio::BrowserAudio::new("worklet.js").await?;
         #[cfg(not(target_arch = "wasm32"))]
         let (audio, samples_tx) = ui::audio::Null::new();
 

@@ -1,9 +1,18 @@
+use std::sync::{
+    Arc, Condvar, Mutex,
+    atomic::{AtomicUsize, Ordering},
+};
+
 use direct_ring_buffer::{Consumer, Producer, create_ring_buffer};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod cpal;
 #[cfg(not(target_arch = "wasm32"))]
 pub use cpal::CpalAudio;
+#[cfg(all(not(target_arch = "wasm32"), feature = "jack"))]
+mod jack;
+#[cfg(all(not(target_arch = "wasm32"), feature = "jack"))]
+pub use jack::JackAudio;
 
 #[cfg(target_arch = "wasm32")]
 mod browser;
@@ -20,14 +29,29 @@ pub trait Audio {
     fn volume(&mut self, volume: f32);
 }
 
-fn samples_channel(capacity: usize, target_buffer: usize) -> (SamplesSender, SamplesReceiver<i16>) {
+fn samples_channel(
+    capacity: usize,
+    buffer_len: usize,
+    buffer_depth: usize,
+) -> (SamplesSender, SamplesReceiver<i16>) {
     let (tx, rx) = create_ring_buffer(capacity);
 
-    let rx = SamplesReceiver { rx, last_sample: 0 };
+    let buffer_len = Arc::new(AtomicUsize::new(buffer_len));
+    let notify = SamplesNotify::new();
+
+    let rx = SamplesReceiver {
+        rx,
+        buffer_len: buffer_len.clone(),
+        last_sample: 0,
+        notify: notify.clone(),
+    };
+
     let tx = SamplesSender {
         tx,
         capacity,
-        target_samples: target_buffer,
+        buffer_len,
+        notify,
+        buffer_depth,
     };
 
     (tx, rx)
@@ -35,7 +59,32 @@ fn samples_channel(capacity: usize, target_buffer: usize) -> (SamplesSender, Sam
 
 struct SamplesReceiver<T> {
     rx: Consumer<T>,
+    buffer_len: Arc<AtomicUsize>,
     last_sample: T,
+    notify: SamplesNotify,
+}
+
+impl<T> SamplesReceiver<T> {
+    fn grow_buffer_len(&self, new_len: usize) {
+        let old_len = self.buffer_len.load(Ordering::Relaxed);
+
+        if old_len < new_len {
+            self.set_buffer_len(new_len);
+        }
+    }
+
+    fn set_buffer_len(&self, new_len: usize) {
+        let old_len = self.buffer_len.load(Ordering::Relaxed);
+        if old_len != new_len {
+            #[cfg(not(target_arch = "wasm32"))]
+            tracing::debug!("audio buffer resized old size: {old_len}, new size: {new_len}");
+            self.buffer_len.store(new_len, Ordering::Relaxed);
+        }
+    }
+
+    fn notify(&self) {
+        self.notify.notify();
+    }
 }
 
 impl<T: Copy> Iterator for SamplesReceiver<T> {
@@ -54,7 +103,9 @@ impl<T: Copy> Iterator for SamplesReceiver<T> {
 pub struct SamplesSender {
     tx: Producer<i16>,
     capacity: usize,
-    target_samples: usize,
+    buffer_len: Arc<AtomicUsize>,
+    buffer_depth: usize,
+    notify: SamplesNotify,
 }
 
 impl SamplesSender {
@@ -84,80 +135,103 @@ impl SamplesSender {
         }
     }
 
-    pub fn wants_samples(&self) -> bool {
+    pub fn wants_samples(&self) -> Option<usize> {
         let used = self.capacity - self.tx.available();
-        used <= self.target_samples
+        let buffer_required = self.buffer_len.load(Ordering::Relaxed) * self.buffer_depth;
+
+        (used < buffer_required).then_some(buffer_required - used)
+    }
+
+    pub fn wants_sample_count(&self, samples: usize) -> bool {
+        let used = self.capacity - self.tx.available();
+        used < samples
+    }
+
+    pub fn wait_for_wants_samples(&self, duration: std::time::Duration) -> Option<usize> {
+        if let Some(samples) = self.wants_samples() {
+            return Some(samples);
+        }
+
+        self.notify.wait_timeout(duration);
+        self.wants_samples()
     }
 }
 
-pub enum AudioDevices {
-    #[cfg(not(target_arch = "wasm32"))]
-    Cpal(CpalAudio),
-    #[cfg(target_arch = "wasm32")]
-    Browser(BrowserAudio),
-    Null(Null),
+#[derive(Clone)]
+struct SamplesNotify {
+    pair: Arc<(Mutex<()>, Condvar)>,
 }
 
-impl Audio for AudioDevices {
-    fn sample_rate(&self) -> u32 {
-        match self {
-            #[cfg(not(target_arch = "wasm32"))]
-            AudioDevices::Cpal(a) => a.sample_rate(),
-            #[cfg(target_arch = "wasm32")]
-            AudioDevices::Browser(a) => a.sample_rate(),
-            AudioDevices::Null(a) => a.sample_rate(),
+impl SamplesNotify {
+    fn new() -> Self {
+        Self {
+            pair: Arc::new((Mutex::new(()), Condvar::new())),
         }
     }
 
-    fn play(&mut self) {
-        match self {
-            #[cfg(not(target_arch = "wasm32"))]
-            AudioDevices::Cpal(a) => a.play(),
-            #[cfg(target_arch = "wasm32")]
-            AudioDevices::Browser(a) => a.play(),
-            AudioDevices::Null(a) => a.play(),
-        }
+    fn notify(&self) {
+        let (_lock, cvar) = &*self.pair;
+        cvar.notify_all()
     }
 
-    fn pause(&mut self) {
-        match self {
-            #[cfg(not(target_arch = "wasm32"))]
-            AudioDevices::Cpal(a) => a.pause(),
-            #[cfg(target_arch = "wasm32")]
-            AudioDevices::Browser(a) => a.pause(),
-            AudioDevices::Null(a) => a.pause(),
-        }
-    }
-
-    fn volume(&mut self, volume: f32) {
-        match self {
-            #[cfg(not(target_arch = "wasm32"))]
-            AudioDevices::Cpal(a) => a.volume(volume),
-            #[cfg(target_arch = "wasm32")]
-            AudioDevices::Browser(a) => a.volume(volume),
-            AudioDevices::Null(a) => a.volume(volume),
-        }
+    fn wait_timeout(&self, duration: std::time::Duration) {
+        let (lock, cvar) = &*self.pair;
+        let guard = lock.lock().unwrap();
+        let _ = cvar.wait_timeout(guard, duration).unwrap();
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-impl From<CpalAudio> for AudioDevices {
-    fn from(value: CpalAudio) -> Self {
-        AudioDevices::Cpal(value)
-    }
+macro_rules! impl_audio_devices {
+    {$($(#[$attr:meta])? $variant:ident => $struct:ident;)*} => {
+        pub enum AudioDevices {
+            $(
+                $(#[$attr])?
+                $variant($struct)
+            ),*
+        }
+
+        impl Audio for AudioDevices {
+            fn sample_rate(&self) -> u32 {
+                match self {
+                    $($(#[$attr])? Self::$variant(a) => a.sample_rate()),*
+                }
+            }
+
+            fn play(&mut self) {
+                match self {
+                    $($(#[$attr])? Self::$variant(a) => a.play()),*
+                }
+            }
+
+            fn pause(&mut self) {
+                match self {
+                    $($(#[$attr])? Self::$variant(a) => a.pause()),*
+                }
+            }
+
+            fn volume(&mut self, volume: f32) {
+                match self {
+                    $($(#[$attr])? Self::$variant(a) => a.volume(volume)),*
+                }
+            }
+        }
+
+        $(
+            $(#[$attr])?
+            impl From<$struct> for AudioDevices {
+                fn from(value: $struct) -> Self {
+                    Self::$variant(value)
+                }
+            }
+        )*
+    };
 }
 
-#[cfg(target_arch = "wasm32")]
-impl From<BrowserAudio> for AudioDevices {
-    fn from(value: BrowserAudio) -> Self {
-        AudioDevices::Browser(value)
-    }
-}
-
-impl From<Null> for AudioDevices {
-    fn from(value: Null) -> Self {
-        AudioDevices::Null(value)
-    }
+impl_audio_devices! {
+    #[cfg(not(target_arch = "wasm32"))] Cpal => CpalAudio;
+    #[cfg(feature = "jack")] Jack => JackAudio;
+    #[cfg(target_arch = "wasm32")] Browser => BrowserAudio;
+    Null => Null;
 }
 
 pub fn worket_module_source(wasm_module_path: &str) -> String {

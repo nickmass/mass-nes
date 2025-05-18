@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::bus::{AddressBus, BusKind, DeviceKind, RangeAndMask};
 use crate::debug::{Debug, DebugEvent};
+use crate::machine::RunUntil;
 use crate::mapper::{Nametable, RcMapper};
 use crate::memory::{FixedMemoryBlock, Memory};
 use crate::ppu_step::*;
@@ -18,6 +19,7 @@ pub enum FrameEnd {
     SetVblank,
     ClearVblank,
     Dot(u32, u32),
+    Samples(usize),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -133,7 +135,7 @@ pub struct Ppu {
 
     ppu_mask: DelayReg<4, u8>,
 
-    #[cfg_attr(feature = "save-states", save(skip))]
+    #[cfg_attr(feature = "save-states", save(nested))]
     ppu_steps: PpuSteps,
     step: PpuStep,
 }
@@ -457,16 +459,18 @@ impl Ppu {
         self.vblank && self.is_nmi_enabled()
     }
 
-    pub fn tick(&mut self, frame_end: FrameEnd) {
+    pub fn tick(&mut self, frame_end: FrameEnd, until: &mut RunUntil) {
         if self.reset_delay != 0 {
             self.reset_delay -= 1;
         }
 
+        until.add_dot();
         self.ppu_mask.tick();
         self.open_bus.tick();
 
         let mut step = self.ppu_steps.step();
         if frame_end == FrameEnd::Dot(step.scanline, step.dot) {
+            until.add_frame();
             self.frame += 1;
         }
 
@@ -479,6 +483,7 @@ impl Ppu {
                     step.dot = 0;
                     if frame_end == FrameEnd::Dot(step.scanline, step.dot) {
                         self.frame += 1;
+                        until.add_frame();
                     }
                     self.debug.event(DebugEvent::Dot(step.scanline, step.dot));
 
@@ -490,6 +495,7 @@ impl Ppu {
                 self.vblank = self.last_status_read != self.current_tick;
                 if frame_end == FrameEnd::SetVblank {
                     self.frame += 1;
+                    until.add_frame();
                 }
             }
             Some(StateChange::ClearVblank) => {
@@ -498,9 +504,14 @@ impl Ppu {
                 self.vblank = false;
                 if frame_end == FrameEnd::ClearVblank {
                     self.frame += 1;
+                    until.add_frame();
                 }
             }
             None => (),
+        }
+
+        if step.dot == 0 {
+            until.add_scanline();
         }
 
         self.current_tick += 1;

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::bus::{Address, AddressBus, DeviceKind};
 use crate::channel::{Channel, Dmc, Noise, Pulse, PulseChannel, Triangle};
 use crate::cpu::dma::DmcDmaKind;
+use crate::machine::RunUntil;
 use crate::mapper::RcMapper;
 use crate::region::Region;
 
@@ -106,7 +107,7 @@ impl Apu {
         self.write(0x4017, 0);
 
         for _ in 0..4 {
-            self.tick();
+            self.tick(&mut RunUntil::Frames(1));
         }
     }
 
@@ -115,7 +116,7 @@ impl Apu {
         self.write(0x4017, 0);
 
         for _ in 0..4 {
-            self.tick();
+            self.tick(&mut RunUntil::Frames(1));
         }
     }
 
@@ -241,7 +242,7 @@ impl Apu {
         self.noise.forced_clock();
     }
 
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self, until: &mut RunUntil) {
         self.current_tick += 1;
         self.increment_frame_counter();
         if self.is_irq_frame() {
@@ -267,6 +268,7 @@ impl Apu {
         let ext_out = self.mapper.get_sample().unwrap_or(0);
         let sample = (pulse_out + tnd_out) - ext_out;
         self.samples.push(sample);
+        until.add_sample();
     }
 
     pub fn samples(&mut self) -> impl Iterator<Item = i16> + '_ {

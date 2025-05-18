@@ -7,11 +7,11 @@ use std::sync::{
 
 use super::{Audio, SamplesReceiver, SamplesSender, samples_channel};
 
-// Number of frames to store samples for across all buffers
-const BUFFER_FRAMES: f64 = 1.1;
+// Number of samples per audio frame
+const DEVICE_BUFFER: u32 = 128;
 
-// Number of samples stored directly in the audio device buffers
-const DEVICE_BUFFER: usize = 256;
+// Number of audio frames to buffer
+const DEVICE_BUFFER_DEPTH: usize = 2;
 
 #[derive(Debug)]
 pub enum Error {
@@ -63,8 +63,7 @@ pub struct CpalAudio {
 }
 
 impl CpalAudio {
-    pub fn new(refresh_rate: f64) -> Result<(CpalAudio, SamplesSender), Error> {
-        let device_buffer = DEVICE_BUFFER;
+    pub fn new() -> Result<(CpalAudio, SamplesSender), Error> {
         let allowed_sample_rates = [
             cpal::SampleRate(48000),
             cpal::SampleRate(44100),
@@ -80,6 +79,7 @@ impl CpalAudio {
             sample_rate_idx: usize,
             channels: u16,
             data_type: cpal::SampleFormat,
+            buffer_size: cpal::SupportedBufferSize,
         }
 
         let mut best_match: Option<Match> = None;
@@ -114,6 +114,7 @@ impl CpalAudio {
                 sample_rate_idx,
                 channels,
                 data_type,
+                buffer_size: *f.buffer_size(),
             };
 
             if let Some(current_match) = best_match.as_ref() {
@@ -140,21 +141,29 @@ impl CpalAudio {
         }
 
         let best_match = best_match.ok_or(Error::NoMatchingOutputConfig)?;
-        let samples_min_len = (((best_match.sample_rate.0 as f64 / refresh_rate) * BUFFER_FRAMES)
-            .ceil() as usize)
-            .saturating_sub(device_buffer);
+        let buffer_len = match best_match.buffer_size {
+            cpal::SupportedBufferSize::Range { min, max }
+                if min < DEVICE_BUFFER && max >= DEVICE_BUFFER =>
+            {
+                DEVICE_BUFFER
+            }
+            cpal::SupportedBufferSize::Range { max, .. } if max < DEVICE_BUFFER => max,
+            cpal::SupportedBufferSize::Range { min, .. } => min,
+            cpal::SupportedBufferSize::Unknown => DEVICE_BUFFER,
+        };
 
-        let samples_min_len = samples_min_len.max(device_buffer);
+        let total_buffer_len = buffer_len as usize * DEVICE_BUFFER_DEPTH;
 
         tracing::debug!(
-            "{:?}: {} channel(s), {} sample rate, {} format, {} buffer samples, {}ms buffer duration",
+            "{:?}: {} channel(s), {} sample rate, {} format, range: {:?}, {} buffer samples, {}ms buffer duration",
             host.id(),
             best_match.channels,
             best_match.sample_rate.0,
             best_match.data_type,
-            samples_min_len,
+            best_match.buffer_size,
+            total_buffer_len,
             std::time::Duration::from_secs_f64(
-                samples_min_len as f64 / best_match.sample_rate.0 as f64
+                total_buffer_len as f64 / best_match.sample_rate.0 as f64
             )
             .as_millis()
         );
@@ -162,14 +171,15 @@ impl CpalAudio {
         let format = cpal::StreamConfig {
             channels: best_match.channels,
             sample_rate: best_match.sample_rate,
-            buffer_size: cpal::BufferSize::Fixed(
-                device_buffer as u32 * best_match.data_type.sample_size() as u32,
-            ),
+            buffer_size: cpal::BufferSize::Fixed(buffer_len as u32),
         };
         let channels = format.channels as usize;
 
-        let (samples_tx, samples_rx) =
-            samples_channel(format.sample_rate.0 as usize, samples_min_len);
+        let (samples_tx, samples_rx) = samples_channel(
+            format.sample_rate.0 as usize,
+            buffer_len as usize,
+            DEVICE_BUFFER_DEPTH,
+        );
 
         let host_id = host.id();
         let volume = Arc::new(AtomicU32::new(u32::MAX));
@@ -217,6 +227,7 @@ fn output_callback<S: Sample + FromSample<i16>>(
 ) -> impl FnMut(&mut [S], &OutputCallbackInfo) + Send + 'static {
     move |buffer: &mut [S], _| {
         let volume = volume.load(Ordering::Relaxed) as f64 / u32::MAX as f64;
+        sample_source.grow_buffer_len(buffer.len());
 
         for (sample, value) in buffer.chunks_mut(channels).zip(&mut sample_source) {
             let value = (value as f64 * volume) as i16;
@@ -225,6 +236,8 @@ fn output_callback<S: Sample + FromSample<i16>>(
                 *out = s;
             }
         }
+
+        sample_source.notify();
     }
 }
 

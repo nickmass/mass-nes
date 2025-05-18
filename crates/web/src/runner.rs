@@ -56,6 +56,7 @@ impl WorkerSpawn for MachineSpawner {
 struct MachineRunner {
     machine: Option<nes::Machine>,
     region: nes::Region,
+    frame_samples: usize,
     blip_delta: i32,
     blip: blip_buf_rs::Blip,
     back_buffer: GfxBackBuffer,
@@ -79,9 +80,12 @@ impl MachineRunner {
             sample_rate as f64,
         );
 
+        let frame_samples = ((sample_rate as f64) / region.refresh_rate()).ceil() as usize;
+
         Self {
             machine: None,
             region,
+            frame_samples,
             nes_inputs: Some(nes_inputs),
             blip_delta: 0,
             blip,
@@ -100,7 +104,7 @@ impl MachineRunner {
                 self.handle_input(input);
             }
 
-            if self.samples_tx.wants_samples() {
+            if self.samples_tx.wants_sample_count(self.frame_samples) {
                 self.step();
             }
 
