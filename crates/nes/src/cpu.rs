@@ -13,7 +13,7 @@ use interrupts::Interrupts;
 use ops::*;
 use registers::CpuRegs;
 
-use crate::machine::RunUntil;
+use crate::run_until::RunUntil;
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Default, Debug, Copy, Clone)]
@@ -125,7 +125,7 @@ impl Cpu {
         CpuDebugState
     }
 
-    pub fn tick(&mut self, pin_in: CpuPinIn, until: &mut RunUntil) -> TickResult {
+    pub fn tick<U: RunUntil>(&mut self, pin_in: CpuPinIn, until: &mut U) -> TickResult {
         self.pin_in = pin_in;
         until.add_cycle();
 

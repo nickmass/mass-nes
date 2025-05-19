@@ -13,6 +13,7 @@ use crate::mapper::{RcMapper, SaveWram};
 use crate::memory::{FixedMemoryBlock, Memory};
 use crate::ppu::{FrameEnd, Ppu};
 use crate::region::Region;
+use crate::run_until::RunUntil;
 
 pub use crate::input::{Controller, InputDevice};
 
@@ -55,58 +56,6 @@ pub enum MapperInput {
 #[derive(Debug, Copy, Clone)]
 pub enum FdsInput {
     SetDisk(Option<usize>),
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum RunUntil {
-    Cycles(u32),
-    Samples(u32),
-    Dots(u32),
-    Scanlines(u32),
-    Frames(u32),
-}
-
-impl RunUntil {
-    pub(crate) fn add_cycle(&mut self) {
-        if let RunUntil::Cycles(cycles) = self {
-            *cycles = cycles.saturating_sub(1);
-        }
-    }
-
-    pub(crate) fn add_sample(&mut self) {
-        if let RunUntil::Samples(samples) = self {
-            *samples = samples.saturating_sub(1);
-        }
-    }
-
-    pub(crate) fn add_dot(&mut self) {
-        if let RunUntil::Dots(dots) = self {
-            *dots = dots.saturating_sub(1);
-        }
-    }
-
-    pub(crate) fn add_scanline(&mut self) {
-        if let RunUntil::Scanlines(scanlines) = self {
-            *scanlines = scanlines.saturating_sub(1);
-        }
-    }
-
-    pub(crate) fn add_frame(&mut self) {
-        if let RunUntil::Frames(frames) = self {
-            *frames = frames.saturating_sub(1);
-        }
-    }
-
-    fn done(&self) -> bool {
-        match self {
-            RunUntil::Cycles(0)
-            | RunUntil::Samples(0)
-            | RunUntil::Dots(0)
-            | RunUntil::Scanlines(0)
-            | RunUntil::Frames(0) => true,
-            _ => false,
-        }
-    }
 }
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
@@ -198,24 +147,24 @@ impl Machine {
         self.ppu.frame()
     }
 
-    pub fn run_with_breakpoints<H: BreakpointHandler>(
+    pub fn run_with_breakpoints<H: BreakpointHandler, U: RunUntil>(
         &mut self,
         frame_end: FrameEnd,
-        until: RunUntil,
+        until: U,
         break_handler: H,
     ) -> RunResult {
         self.do_run(frame_end, until, break_handler)
     }
 
     pub fn run(&mut self) {
-        self.do_run(FrameEnd::ClearVblank, RunUntil::Frames(1), ());
+        self.do_run(FrameEnd::ClearVblank, crate::run_until::Frames(1), ());
     }
 
     #[tracing::instrument(skip_all)]
-    fn do_run<H: BreakpointHandler>(
+    fn do_run<H: BreakpointHandler, U: RunUntil>(
         &mut self,
         frame_end: FrameEnd,
-        mut until: RunUntil,
+        mut until: U,
         mut break_handler: H,
     ) -> RunResult {
         #[cfg(feature = "debugger")]
@@ -290,7 +239,7 @@ impl Machine {
         RunResult::Done
     }
 
-    fn tick_ppu(&mut self, frame_end: FrameEnd, until: &mut RunUntil) {
+    fn tick_ppu<U: RunUntil>(&mut self, frame_end: FrameEnd, until: &mut U) {
         self.ppu.tick(frame_end, until);
         let ppu_state = self.ppu.debug_state();
         self.debug.trace_ppu(&self, ppu_state);

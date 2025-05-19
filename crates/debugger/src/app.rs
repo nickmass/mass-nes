@@ -313,8 +313,10 @@ impl<A: Audio> DebuggerApp<A> {
             self.emu_control.restore_state(slot);
             self.nes_screen.set_message(Message::RestoreState(slot));
         }
+        if input_state.fast_forward != self.last_input.fast_forward {
+            self.emu_control.fast_forward(input_state.fast_forward);
+        }
         if input_state.fast_forward {
-            self.emu_control.fast_forward();
             self.nes_screen.set_message(Message::FastForward);
         }
         if input_state.rewind != self.last_input.rewind {
@@ -919,8 +921,8 @@ impl EmulatorControl {
         let _ = self.tx.send(EmulatorInput::DebugRequest(debug));
     }
 
-    pub fn fast_forward(&self) {
-        let _ = self.tx.send(EmulatorInput::FastForward);
+    pub fn fast_forward(&self, toggle: bool) {
+        let _ = self.tx.send(EmulatorInput::FastForward(toggle));
     }
 
     pub fn restore_state(&self, slot: u8) {

@@ -7,11 +7,11 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::bus::{AddressBus, BusKind, DeviceKind, RangeAndMask};
 use crate::debug::{Debug, DebugEvent};
-use crate::machine::RunUntil;
 use crate::mapper::{Nametable, RcMapper};
 use crate::memory::{FixedMemoryBlock, Memory};
 use crate::ppu_step::*;
 use crate::region::{EmphMode, Region};
+use crate::run_until::RunUntil;
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -459,7 +459,7 @@ impl Ppu {
         self.vblank && self.is_nmi_enabled()
     }
 
-    pub fn tick(&mut self, frame_end: FrameEnd, until: &mut RunUntil) {
+    pub fn tick<U: RunUntil>(&mut self, frame_end: FrameEnd, until: &mut U) {
         if self.reset_delay != 0 {
             self.reset_delay -= 1;
         }

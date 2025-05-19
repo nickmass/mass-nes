@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use crate::bus::{Address, AddressBus, DeviceKind};
 use crate::channel::{Channel, Dmc, Noise, Pulse, PulseChannel, Triangle};
 use crate::cpu::dma::DmcDmaKind;
-use crate::machine::RunUntil;
 use crate::mapper::RcMapper;
 use crate::region::Region;
+use crate::run_until::{self, RunUntil};
 
 pub const LENGTH_TABLE: [u8; 0x20] = [
     10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14, 12, 16, 24, 18, 48, 20, 96, 22,
@@ -107,7 +107,7 @@ impl Apu {
         self.write(0x4017, 0);
 
         for _ in 0..4 {
-            self.tick(&mut RunUntil::Frames(1));
+            self.tick(&mut run_until::Frames(1));
         }
     }
 
@@ -116,7 +116,7 @@ impl Apu {
         self.write(0x4017, 0);
 
         for _ in 0..4 {
-            self.tick(&mut RunUntil::Frames(1));
+            self.tick(&mut run_until::Frames(1));
         }
     }
 
@@ -242,7 +242,7 @@ impl Apu {
         self.noise.forced_clock();
     }
 
-    pub fn tick(&mut self, until: &mut RunUntil) {
+    pub fn tick<U: RunUntil>(&mut self, until: &mut U) {
         self.current_tick += 1;
         self.increment_frame_counter();
         if self.is_irq_frame() {

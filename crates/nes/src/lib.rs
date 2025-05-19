@@ -11,10 +11,11 @@ mod memory;
 mod ppu;
 mod ppu_step;
 mod region;
+pub mod run_until;
 
 pub use cartridge::{Cartridge, CartridgeInfo};
 pub use debug::{Debug, DebugEvent, MachineState};
-pub use machine::{Controller, FdsInput, Machine, MapperInput, RunResult, RunUntil, UserInput};
+pub use machine::{Controller, FdsInput, Machine, MapperInput, RunResult, UserInput};
 pub use mapper::SaveWram;
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;

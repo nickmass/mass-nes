@@ -2,8 +2,8 @@ use std::{collections::VecDeque, time::Duration};
 
 use blip_buf_rs::Blip;
 use nes::{
-    Cartridge, DebugEvent, FdsInput, Machine, MapperInput, Region, RunResult, RunUntil, SaveWram,
-    UserInput,
+    Cartridge, DebugEvent, FdsInput, Machine, MapperInput, Region, RunResult, SaveWram, UserInput,
+    run_until::{self, RunUntil},
 };
 use tracing::instrument;
 use ui::{audio::SamplesSender, movie::MovieFile, wram::CartridgeId};
@@ -78,7 +78,7 @@ pub enum EmulatorInput {
     DebugRequest(DebugRequest),
     StepBack,
     StepForward,
-    FastForward,
+    FastForward(bool),
     SetFdsDisk(Option<usize>),
     SaveWram,
     PlayMovie(MovieFile),
@@ -119,7 +119,6 @@ pub struct Runner {
     save_states: Vec<Option<(usize, nes::SaveData)>>,
     save_store: SaveStore,
     frame: usize,
-    rewind_frame: usize,
     total_frames: u64,
     debug: DebugSwapState,
     debug_request: DebugRequest,
@@ -156,7 +155,6 @@ impl Runner {
             save_states: vec![None; 10],
             save_store,
             frame: 0,
-            rewind_frame: 0,
             total_frames: 0,
             debug,
             debug_request: DebugRequest {
@@ -178,6 +176,7 @@ impl Runner {
 
     pub fn run(mut self) {
         let mut rewinding = false;
+        let mut fast_forwarding = false;
         let mut max_step = nes::Region::Ntsc.frame_ticks().ceil() as u32;
         let mut samples_per_frame =
             (self.sample_rate as f64 / nes::Region::Ntsc.refresh_rate()).ceil() as usize;
@@ -207,23 +206,20 @@ impl Runner {
                             }
                         }
                     }
-                    EmulatorInput::Rewind(toggle) => {
-                        rewinding = toggle;
-                        self.rewind_frame = 0;
-                    }
+                    EmulatorInput::Rewind(toggle) => rewinding = toggle,
                     EmulatorInput::StepBack => {
                         if let Some(machine) = &mut self.machine {
                             if let Some((_frame, data)) = self.save_store.pop() {
                                 machine.restore_state(&data);
                                 self.frame = machine.frame() as usize;
                                 playback = Playback::StepBackward;
-                                self.step(playback, RunUntil::Frames(1));
+                                self.step(playback, run_until::Frames(1));
                             }
                         }
                     }
                     EmulatorInput::StepForward => {
                         playback = Playback::StepForward;
-                        self.step(playback, RunUntil::Frames(1));
+                        self.step(playback, run_until::Frames(1));
                     }
                     EmulatorInput::LoadCartridge(cart_id, region, rom, file_name, wram, bios) => {
                         let mut rom = std::io::Cursor::new(rom);
@@ -266,9 +262,7 @@ impl Runner {
                                 .set_debug_interest(self.debug_request.interests.iter().copied());
                         }
                     }
-                    EmulatorInput::FastForward => {
-                        playback = Playback::FastForward;
-                    }
+                    EmulatorInput::FastForward(toggle) => fast_forwarding = toggle,
                     EmulatorInput::SetFdsDisk(disk) => {
                         if let Some(machine) = self.machine.as_mut() {
                             machine.handle_input(UserInput::Mapper(MapperInput::Fds(
@@ -290,6 +284,10 @@ impl Runner {
                         self.movie_input = Some(movie);
                     }
                 }
+            }
+
+            if fast_forwarding {
+                playback = Playback::FastForward;
             }
 
             let wants_samples = if playback.skip_sleep() {
@@ -314,34 +312,33 @@ impl Runner {
                 continue;
             }
 
+            let next_frame = run_until::Frames(1);
+
             if rewinding {
-                if self.rewind_frame != self.frame {
-                    if let Some((machine, (_frame, data))) =
-                        self.machine.as_mut().zip(self.save_store.pop())
-                    {
-                        machine.restore_state(&data);
-                        self.frame = machine.frame() as usize;
-                        self.rewind_frame = self.frame;
-                    }
+                if let Some((machine, (_frame, data))) =
+                    self.machine.as_mut().zip(self.save_store.pop())
+                {
+                    machine.restore_state(&data);
+                    self.frame = machine.frame() as usize;
                 }
 
                 // Rewinding requires frame sized steps so the full frame of audio can be
                 // reversed at once
-                self.step(Playback::Rewind, RunUntil::Frames(1));
+                self.step(Playback::Rewind, next_frame);
             } else {
                 let mut clocks = self.blip.clocks_needed(samples as u32);
                 while clocks > max_step {
-                    self.step(playback, RunUntil::Samples(max_step));
+                    self.step(playback, run_until::Samples(max_step).or(next_frame));
                     clocks -= max_step;
                 }
 
-                self.step(playback, RunUntil::Samples(clocks));
+                self.step(playback, run_until::Samples(clocks).or(next_frame));
             }
         }
     }
 
     #[instrument(skip_all)]
-    fn step(&mut self, playback: Playback, until: RunUntil) {
+    fn step<U: RunUntil>(&mut self, playback: Playback, until: U) {
         if let Some(machine) = self.machine.as_mut() {
             let frame_end = if self.movie_input.is_some() {
                 nes::FrameEnd::SetVblank
