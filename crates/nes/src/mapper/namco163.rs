@@ -401,6 +401,7 @@ impl<'a> Channel<'a> {
         let sample = (self.mem[sample_idx as usize / 2] >> ((sample_idx & 1) * 4)) & 0xf;
         let sample = sample as i16;
 
-        (sample - 8) * self.volume()
+        // +120 here biases the output to always be positive
+        ((sample - 8) * self.volume()) + 120
     }
 }
