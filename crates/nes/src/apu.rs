@@ -8,6 +8,7 @@ use crate::channel::{Channel, Dmc, Noise, Pulse, PulseChannel, Triangle};
 use crate::cpu::dma::DmcDmaKind;
 use crate::mapper::RcMapper;
 use crate::region::Region;
+use crate::ring_buf::RingBuf;
 use crate::run_until::{self, RunUntil};
 
 pub const LENGTH_TABLE: [u8; 0x20] = [
@@ -49,7 +50,7 @@ pub struct Apu {
     #[cfg_attr(feature = "save-states", save(skip))]
     tnd_table: Vec<i16>,
     #[cfg_attr(feature = "save-states", save(skip))]
-    samples: Samples,
+    samples: RingBuf<i16>,
     current_tick: u32,
     reset_delay: u32,
     frame_counter: u32,
@@ -58,6 +59,9 @@ pub struct Apu {
     irq: bool,
     last_4017: u8,
     oam_req: Option<u8>,
+    #[cfg(feature = "debugger")]
+    #[cfg_attr(feature = "save-states", save(skip))]
+    debug_channels: DebugChannelSamples,
 }
 
 impl Apu {
@@ -84,7 +88,7 @@ impl Apu {
             dmc: Dmc::new(region),
             pulse_table,
             tnd_table,
-            samples: Samples::new(33248), //Max cycles for the longer pal frame
+            samples: RingBuf::new(33248), //Max cycles for the longer pal frame
             current_tick: 0,
             reset_delay: 0,
             frame_counter: 6,
@@ -93,6 +97,8 @@ impl Apu {
             irq: false,
             last_4017: 0,
             oam_req: None,
+            #[cfg(feature = "debugger")]
+            debug_channels: DebugChannelSamples::new(),
         }
     }
 
@@ -262,10 +268,14 @@ impl Apu {
         let triangle = self.triangle.tick(snapshot);
         let noise = self.noise.tick(snapshot);
         let dmc = self.dmc.tick(snapshot);
+        let ext_out = self.mapper.get_sample().unwrap_or(0);
+
+        #[cfg(feature = "debugger")]
+        self.debug_channels
+            .push_channels(pulse1, pulse2, triangle, noise, dmc, ext_out);
 
         let pulse_out = self.pulse_table[(pulse1 + pulse2) as usize];
         let tnd_out = self.tnd_table[((3 * triangle) + (2 * noise) + dmc) as usize];
-        let ext_out = self.mapper.get_sample().unwrap_or(0);
         let sample = (pulse_out + tnd_out) - ext_out;
         self.samples.push(sample);
         until.add_sample();
@@ -279,6 +289,13 @@ impl Apu {
         &mut self,
     ) -> impl DoubleEndedIterator<Item = i16> + ExactSizeIterator + '_ {
         self.samples.take_iter()
+    }
+
+    #[cfg(feature = "debugger")]
+    pub fn take_channel_samples(
+        &mut self,
+    ) -> impl DoubleEndedIterator<Item = ChannelSamples> + ExactSizeIterator + '_ {
+        self.debug_channels.samples.take_iter()
     }
 
     pub fn get_irq(&self) -> bool {
@@ -355,132 +372,105 @@ impl Apu {
     }
 }
 
-pub struct Samples {
-    samples: Vec<i16>,
-    capacity: usize,
-    reader_idx: usize,
-    writer_idx: usize,
+struct DebugChannelSamples {
+    window_size: usize,
+    sample_accum_count: usize,
+    sample_accum: ChannelSamples,
+    samples: RingBuf<ChannelSamples>,
 }
 
-impl Samples {
-    fn new(capacity: usize) -> Self {
-        Self {
-            samples: vec![0; capacity],
-            capacity,
-            reader_idx: 0,
-            writer_idx: 0,
+#[allow(unused)]
+impl DebugChannelSamples {
+    fn new() -> Self {
+        const WINDOW_SIZE: usize = 64;
+        DebugChannelSamples {
+            window_size: WINDOW_SIZE,
+            sample_accum_count: 0,
+            sample_accum: ChannelSamples::zero(),
+            samples: RingBuf::new((33248 / WINDOW_SIZE) + 1),
         }
     }
 
-    fn push(&mut self, sample: i16) {
-        self.samples[self.writer_idx] = sample;
-        self.advance_writer();
-        if self.reader_idx == self.writer_idx {
-            self.advance_reader();
-        }
-    }
-
-    fn pop(&mut self) -> Option<i16> {
-        if self.reader_idx == self.writer_idx {
-            None
-        } else {
-            let sample = self.samples[self.reader_idx];
-            self.advance_reader();
-            Some(sample)
-        }
-    }
-
-    fn iter(&mut self) -> impl Iterator<Item = i16> + '_ {
-        std::iter::from_fn(|| self.pop())
-    }
-
-    fn take_iter(&mut self) -> SamplesIter {
-        let iter = SamplesIter {
-            samples: &self.samples,
-            done: false,
-            capacity: self.capacity,
-            reader_idx: self.reader_idx,
-            writer_idx: self.writer_idx,
+    fn push_channels(
+        &mut self,
+        pulse_1: u8,
+        pulse_2: u8,
+        triangle: u8,
+        noise: u8,
+        dmc: u8,
+        external: i16,
+    ) {
+        let channels = ChannelSamples {
+            pulse_1: pulse_1 as f32 / 15.0,
+            pulse_2: pulse_2 as f32 / 15.0,
+            triangle: triangle as f32 / 15.0,
+            noise: noise as f32 / 15.0,
+            dmc: dmc as f32 / 127.0,
+            external: (external as f32).abs() / i16::MAX as f32,
         };
 
-        self.reader_idx = self.writer_idx;
-
-        iter
-    }
-
-    fn advance_reader(&mut self) {
-        self.reader_idx += 1;
-        self.reader_idx *= (self.reader_idx < self.capacity) as usize;
-    }
-
-    fn advance_writer(&mut self) {
-        self.writer_idx += 1;
-        self.writer_idx *= (self.writer_idx < self.capacity) as usize;
-    }
-}
-
-struct SamplesIter<'a> {
-    samples: &'a [i16],
-    done: bool,
-    capacity: usize,
-    reader_idx: usize,
-    writer_idx: usize,
-}
-
-impl<'a> SamplesIter<'a> {
-    fn advance_reader(&mut self) {
-        self.reader_idx += 1;
-        self.reader_idx *= (self.reader_idx < self.capacity) as usize;
-    }
-
-    fn retreat_writer(&mut self) {
-        if self.writer_idx == 0 {
-            self.writer_idx = self.capacity - 1;
-        } else {
-            self.writer_idx -= 1;
+        self.sample_accum += channels;
+        self.sample_accum_count += 1;
+        if self.sample_accum_count >= self.window_size {
+            let channels = self.sample_accum.clone() / self.sample_accum_count as f32;
+            self.samples.push(channels);
+            self.sample_accum_count = 0;
+            self.sample_accum = ChannelSamples::zero();
         }
     }
 }
 
-impl<'a> Iterator for SamplesIter<'a> {
-    type Item = i16;
+#[derive(Debug, Clone)]
+pub struct ChannelSamples {
+    pub pulse_1: f32,
+    pub pulse_2: f32,
+    pub triangle: f32,
+    pub noise: f32,
+    pub dmc: f32,
+    pub external: f32,
+}
 
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.reader_idx == self.writer_idx || self.done {
-            self.done = true;
-            None
-        } else {
-            let sample = self.samples[self.reader_idx];
-            self.advance_reader();
-            Some(sample)
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = if self.done {
-            0
-        } else if self.reader_idx < self.writer_idx {
-            self.writer_idx - self.reader_idx
-        } else {
-            self.capacity - (self.reader_idx - self.writer_idx)
-        };
-
-        (len, Some(len))
+impl Default for ChannelSamples {
+    fn default() -> Self {
+        Self::zero()
     }
 }
 
-impl<'a> DoubleEndedIterator for SamplesIter<'a> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        if self.done {
-            None
-        } else {
-            self.retreat_writer();
-            if self.reader_idx == self.writer_idx {
-                self.done = true;
-            }
-            Some(self.samples[self.writer_idx])
+impl ChannelSamples {
+    fn zero() -> Self {
+        ChannelSamples {
+            pulse_1: 0.0,
+            pulse_2: 0.0,
+            triangle: 0.0,
+            noise: 0.0,
+            dmc: 0.0,
+            external: 0.0,
         }
     }
 }
 
-impl<'a> ExactSizeIterator for SamplesIter<'a> {}
+impl std::ops::AddAssign for ChannelSamples {
+    fn add_assign(&mut self, rhs: Self) {
+        self.pulse_1 += rhs.pulse_1;
+        self.pulse_2 += rhs.pulse_2;
+        self.triangle += rhs.triangle;
+        self.noise += rhs.noise;
+        self.dmc += rhs.dmc;
+        self.external += rhs.external;
+    }
+}
+
+impl std::ops::Div<f32> for ChannelSamples {
+    type Output = Self;
+
+    fn div(self, rhs: f32) -> Self::Output {
+        ChannelSamples {
+            pulse_1: self.pulse_1 / rhs,
+            pulse_2: self.pulse_2 / rhs,
+            triangle: self.triangle / rhs,
+            noise: self.noise / rhs,
+            dmc: self.dmc / rhs,
+            external: self.external / rhs,
+        }
+    }
+}

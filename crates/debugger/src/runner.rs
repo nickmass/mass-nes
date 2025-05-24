@@ -97,6 +97,7 @@ pub struct DebugRequest {
     pub interests: Vec<DebugEvent>,
     pub interest_breakpoints: u16,
     pub frame: bool,
+    pub channels: bool,
 }
 
 use crate::{
@@ -169,6 +170,7 @@ impl Runner {
                 interests: Vec::new(),
                 interest_breakpoints: 0,
                 frame: false,
+                channels: false,
             },
             movie_input: None,
         }
@@ -487,6 +489,16 @@ impl Runner {
                 self.debug.frame.update(|data| {
                     data.copy_from_slice(machine.get_screen());
                 });
+            }
+
+            if self.debug_request.channels {
+                self.debug.channels.update(|data| {
+                    data.clear();
+                    data.extend(machine.take_channel_samples());
+                });
+            } else {
+                // reset buffer to ensure clean samples next time they are viewed
+                let _ = machine.take_channel_samples();
             }
 
             self.debug.update_at(self.total_frames);

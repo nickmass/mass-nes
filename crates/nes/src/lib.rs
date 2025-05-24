@@ -11,8 +11,10 @@ mod memory;
 mod ppu;
 mod ppu_step;
 mod region;
+mod ring_buf;
 pub mod run_until;
 
+pub use apu::ChannelSamples;
 pub use cartridge::{Cartridge, CartridgeInfo};
 pub use debug::{Debug, DebugEvent, MachineState};
 pub use machine::{Controller, FdsInput, Machine, MapperInput, RunResult, UserInput};

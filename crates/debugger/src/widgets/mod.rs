@@ -1,3 +1,4 @@
+mod channel_viewer;
 mod chr_tiles;
 mod code_viewer;
 mod event_viewer;
@@ -13,6 +14,7 @@ mod sprite_viewer;
 pub mod svg;
 mod volume;
 
+pub use channel_viewer::ChannelViewer;
 pub use chr_tiles::ChrTiles;
 pub use code_viewer::{BreakpointToggle, Breakpoints, CodeViewer};
 pub use event_viewer::{EventViewer, Interests};

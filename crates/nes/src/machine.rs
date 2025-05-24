@@ -331,6 +331,13 @@ impl Machine {
         self.apu.take_samples()
     }
 
+    #[cfg(feature = "debugger")]
+    pub fn take_channel_samples(
+        &mut self,
+    ) -> impl DoubleEndedIterator<Item = crate::ChannelSamples> + ExactSizeIterator + '_ {
+        self.apu.take_channel_samples()
+    }
+
     pub fn set_input<T: IntoIterator<Item = UserInput>>(&mut self, input: T) {
         let input = input.into_iter();
         for i in input {

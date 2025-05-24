@@ -14,7 +14,7 @@ fn main() {
     init_tracing(message_store.clone());
 
     let options = eframe::NativeOptions {
-        vsync: false,
+        vsync: true,
         multisampling: 2,
         ..Default::default()
     };

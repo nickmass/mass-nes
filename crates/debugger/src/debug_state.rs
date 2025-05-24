@@ -26,6 +26,23 @@ impl DerefMut for State {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct Channels(Vec<nes::ChannelSamples>);
+
+impl Deref for Channels {
+    type Target = Vec<nes::ChannelSamples>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Channels {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 #[derive(Clone)]
 pub struct SwapBuffer<T> {
     updated: Arc<AtomicBool>,
@@ -69,6 +86,7 @@ pub struct DebugSwapState {
     pub breakpoint: Arc<AtomicBool>,
     pub events: SwapBuffer<Vec<(u8, u16)>>,
     pub frame: SwapBuffer<Vec<u16>>,
+    pub channels: SwapBuffer<Channels>,
 }
 
 impl DebugSwapState {
@@ -83,6 +101,7 @@ impl DebugSwapState {
             breakpoint: Arc::new(false.into()),
             events: SwapBuffer::new(vec![(0, 0); 312 * 341]),
             frame: SwapBuffer::new(vec![0; 256 * 240]),
+            channels: SwapBuffer::new(Channels::default()),
         }
     }
 
@@ -109,6 +128,7 @@ pub struct DebugUiState {
     palette: Palette,
     events: Vec<(u8, u16)>,
     frame: Vec<u16>,
+    channels: Channels,
 }
 
 impl DebugUiState {
@@ -123,6 +143,7 @@ impl DebugUiState {
             palette,
             events: vec![(0, 0); 312 * 341],
             frame: vec![0; 256 * 240],
+            channels: Channels::default(),
         }
     }
 
@@ -174,6 +195,10 @@ impl DebugUiState {
         PpuView(self)
     }
 
+    pub fn channels(&self) -> &[nes::ChannelSamples] {
+        &self.channels.0
+    }
+
     pub fn swap(&mut self) {
         self.swap.cpu_mem.attempt_swap(&mut self.cpu_mem);
         self.swap.ppu_mem.attempt_swap(&mut self.ppu_mem);
@@ -182,6 +207,7 @@ impl DebugUiState {
         self.swap.state.attempt_swap(&mut self.state);
         self.swap.events.attempt_swap(&mut self.events);
         self.swap.frame.attempt_swap(&mut self.frame);
+        self.swap.channels.attempt_swap(&mut self.channels);
     }
 }
 

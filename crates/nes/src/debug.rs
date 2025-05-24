@@ -35,6 +35,7 @@ mod debugger {
     use crate::machine::BreakpointHandler;
     use crate::memory::{Memory, MemoryBlock};
     use crate::ppu::PpuDebugState;
+    use crate::ring_buf::RingBuf;
 
     use super::DebugEvent;
 
@@ -52,7 +53,7 @@ mod debugger {
         log_once: bool,
         log_range: Option<(u16, u16)>,
         logging_range: bool,
-        inst_ring: RingBuffer<(CpuDebugState, PpuDebugState)>,
+        inst_ring: RingBuf<(CpuDebugState, PpuDebugState)>,
         trace_fn: Option<Box<dyn FnMut(CpuDebugState, PpuDebugState)>>,
         machine_state: MachineState,
         mem: Option<MemoryBlock>,
@@ -71,7 +72,7 @@ mod debugger {
                 log_once: false,
                 log_range: None,
                 logging_range: false,
-                inst_ring: RingBuffer::new(INST_HISTORY_BUF_SIZE),
+                inst_ring: RingBuf::new(INST_HISTORY_BUF_SIZE),
                 trace_fn: None,
                 machine_state: MachineState::default(),
                 mem: None,
@@ -89,8 +90,8 @@ mod debugger {
             self.inst_ring.push(inst);
         }
 
-        fn log_iter(&self) -> RingIter<(CpuDebugState, PpuDebugState)> {
-            self.inst_ring.iter()
+        fn log_iter(&self) -> impl DoubleEndedIterator<Item = &(CpuDebugState, PpuDebugState)> {
+            self.inst_ring.iter_ref()
         }
 
         fn event(&mut self, event: DebugEvent, data: Option<u8>) {
@@ -123,92 +124,6 @@ mod debugger {
                 .chain(std::iter::repeat(None));
             for (a, b) in self.interest.iter_mut().zip(new_interests) {
                 *a = b;
-            }
-        }
-    }
-
-    struct RingBuffer<T> {
-        ring: Box<[Option<T>]>,
-        ring_index: usize,
-    }
-
-    impl<T> RingBuffer<T> {
-        fn new(capacity: usize) -> RingBuffer<T> {
-            let mut ring = Vec::with_capacity(capacity);
-            for _ in 0..capacity {
-                ring.push(None);
-            }
-
-            RingBuffer {
-                ring: ring.into_boxed_slice(),
-                ring_index: 0,
-            }
-        }
-
-        fn push(&mut self, item: T) {
-            self.ring_index += 1;
-            if self.ring_index >= self.ring.len() {
-                self.ring_index = 0;
-            }
-
-            self.ring[self.ring_index] = Some(item);
-        }
-
-        fn iter(&self) -> RingIter<T> {
-            RingIter {
-                ring: &self.ring[..],
-                ring_end_index: self.ring_index,
-                ring_index: self.ring_index,
-                first: true,
-            }
-        }
-    }
-
-    struct RingIter<'a, T> {
-        ring: &'a [Option<T>],
-        ring_end_index: usize,
-        ring_index: usize,
-        first: bool,
-    }
-
-    impl<'a, T> Iterator for RingIter<'a, T> {
-        type Item = &'a T;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            if !self.first && self.ring_index == self.ring_end_index {
-                None
-            } else {
-                let res = self.ring[self.ring_index].as_ref();
-                if self.ring_index == 0 {
-                    self.ring_index = self.ring.len() - 1;
-                } else {
-                    self.ring_index -= 1;
-                }
-
-                self.first = false;
-                res
-            }
-        }
-    }
-
-    impl<'a, T> DoubleEndedIterator for RingIter<'a, T> {
-        fn next_back(&mut self) -> Option<Self::Item> {
-            loop {
-                if !self.first && self.ring_end_index == self.ring_index {
-                    return None;
-                } else {
-                    self.ring_end_index += 1;
-                    if self.ring_end_index >= self.ring.len() {
-                        self.ring_end_index = 0;
-                    }
-
-                    let res = self.ring[self.ring_end_index].as_ref();
-
-                    if res.is_some() {
-                        self.first = false;
-                        return res;
-                    }
-                }
             }
         }
     }
