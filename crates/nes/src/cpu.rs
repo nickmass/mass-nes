@@ -13,7 +13,7 @@ use interrupts::Interrupts;
 use ops::*;
 use registers::CpuRegs;
 
-use crate::run_until::RunUntil;
+use crate::{Region, run_until::RunUntil};
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Default, Debug, Copy, Clone)]
@@ -83,19 +83,20 @@ pub struct Cpu {
     pin_in: CpuPinIn,
     regs: CpuRegs,
     stage: Stage,
+    #[cfg_attr(feature = "save-states", save(nested))]
     pub dma: Dma,
     interrupts: Interrupts,
     halt: bool,
 }
 
 impl Cpu {
-    pub fn new() -> Cpu {
+    pub fn new(region: Region) -> Cpu {
         Cpu {
             current_tick: 0,
             pin_in: Default::default(),
             regs: CpuRegs::new(),
             stage: Stage::Fetch,
-            dma: Dma::new(),
+            dma: Dma::new(region),
             interrupts: Interrupts::new(),
             halt: false,
         }

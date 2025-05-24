@@ -84,7 +84,7 @@ pub struct Machine {
 
 impl Machine {
     pub fn new(region: Region, cartridge: Cartridge) -> Machine {
-        let cpu = Cpu::new();
+        let cpu = Cpu::new(region);
         let debug = Rc::new(Debug::new());
         let mut cpu_bus = AddressBus::new(0, 0xffff);
         let cpu_mem = FixedMemoryBlock::new();

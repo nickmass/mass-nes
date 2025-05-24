@@ -87,6 +87,13 @@ impl Region {
             Region::Pal => DMC_RATES_PAL,
         }
     }
+
+    pub const fn dma_halt_on_read(&self) -> bool {
+        match self {
+            Region::Ntsc => true,
+            Region::Pal => false,
+        }
+    }
 }
 
 const FIVE_STEP_SEQ_NTSC: &[u32] = &[7457, 14913, 22371, 37281, 37282];

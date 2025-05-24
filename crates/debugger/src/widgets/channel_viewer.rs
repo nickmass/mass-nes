@@ -34,8 +34,7 @@ impl ChannelViewer {
             for _ in 0..h as u32 {
                 if let Some(n) = channel_iter.next() {
                     for (idx, sum) in sum.iter_mut().enumerate() {
-                        let n = channel_to_value(idx, n);
-                        *sum += n;
+                        *sum += Channel::from_idx(idx).value(n);
                     }
                 }
             }
@@ -51,8 +50,8 @@ impl ChannelViewer {
             }
         }
 
-        for idx in 0..6 {
-            self.images[idx].update(channel_to_name(idx), ctx);
+        for (idx, channel) in Channel::all().into_iter().enumerate() {
+            self.images[idx].update(channel.name(), ctx);
         }
     }
 
@@ -67,51 +66,71 @@ impl ChannelViewer {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     for idx in 0..3 {
-                        self.images[idx].show(ui, channel_to_label(idx));
+                        let channel = Channel::from_idx(idx);
+                        self.images[idx].show(ui, channel.label());
                     }
                 });
                 ui.horizontal(|ui| {
                     for idx in 3..6 {
-                        self.images[idx].show(ui, channel_to_label(idx));
+                        let channel = Channel::from_idx(idx);
+                        self.images[idx].show(ui, channel.label());
                     }
                 });
             });
     }
 }
 
-fn channel_to_value(idx: usize, channels: &ChannelSamples) -> f32 {
-    match idx {
-        0 => channels.pulse_1,
-        1 => channels.pulse_2,
-        2 => channels.triangle,
-        3 => channels.noise,
-        4 => channels.dmc,
-        5 => channels.external,
-        _ => unreachable!(),
-    }
+#[derive(Debug, Copy, Clone)]
+enum Channel {
+    Pulse1,
+    Pulse2,
+    Triangle,
+    Noise,
+    Dmc,
+    External,
 }
 
-fn channel_to_name(idx: usize) -> &'static str {
-    match idx {
-        0 => "pulse_1",
-        1 => "pulse_2",
-        2 => "triangle",
-        3 => "noise",
-        4 => "dmc",
-        5 => "external",
-        _ => unreachable!(),
+impl Channel {
+    const fn all() -> [Self; 6] {
+        use Channel::*;
+        [Pulse1, Pulse2, Triangle, Noise, Dmc, External]
     }
-}
 
-fn channel_to_label(idx: usize) -> &'static str {
-    match idx {
-        0 => "Pulse",
-        1 => "Pulse",
-        2 => "Triangle",
-        3 => "Noise",
-        4 => "DMC",
-        5 => "External",
-        _ => unreachable!(),
+    fn from_idx(idx: usize) -> Self {
+        Self::all()[idx]
+    }
+
+    fn label(&self) -> &'static str {
+        match self {
+            Channel::Pulse1 => "Pulse",
+            Channel::Pulse2 => "Pulse",
+            Channel::Triangle => "Triangle",
+            Channel::Noise => "Noise",
+            Channel::Dmc => "DMC",
+            Channel::External => "External",
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        match self {
+            Channel::Pulse1 => "pulse_1",
+            Channel::Pulse2 => "pulse_2",
+            Channel::Triangle => "triangle",
+            Channel::Noise => "noise",
+            Channel::Dmc => "dmc",
+            Channel::External => "external",
+        }
+    }
+
+    fn value(&self, channel: &ChannelSamples) -> f32 {
+        match self {
+            Channel::Pulse1 => channel.pulse_1,
+            Channel::Pulse2 => channel.pulse_2,
+            Channel::Triangle => channel.triangle,
+            Channel::Noise => channel.noise,
+            Channel::Dmc => channel.dmc,
+            Channel::External => channel.external,
+        }
     }
 }
 

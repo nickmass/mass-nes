@@ -1,5 +1,9 @@
 #[cfg(feature = "save-states")]
+use nes_traits::SaveState;
+#[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
+
+use crate::Region;
 
 use super::{CpuPinIn, TickResult};
 
@@ -32,9 +36,11 @@ enum Alignment {
     Put,
 }
 
-#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "save-states", derive(SaveState))]
 #[derive(Debug, Clone)]
 pub struct Dma {
+    #[cfg_attr(feature = "save-states", save(skip))]
+    region: Region,
     cycle: u64,
     dmc_timer: Option<(u64, u16)>,
     want_dmc: Option<u16>,
@@ -49,8 +55,9 @@ pub struct Dma {
 }
 
 impl Dma {
-    pub fn new() -> Self {
+    pub fn new(region: Region) -> Self {
         Dma {
+            region,
             cycle: 0,
             dmc_timer: None,
             want_dmc: None,
@@ -99,11 +106,15 @@ impl Dma {
     pub fn try_halt(&mut self, tick: TickResult) -> Option<TickResult> {
         match (self.halt_addr, self.want_dmc.or(self.want_oam)) {
             (None, Some(_)) => match tick {
-                tick @ (TickResult::Fetch(addr) | TickResult::Read(addr)) => {
+                tick @ TickResult::Fetch(addr) => {
                     self.halt_addr = Some(addr);
                     Some(tick)
                 }
-                TickResult::Write(_, _) | TickResult::Idle(_) => None,
+                tick @ TickResult::Read(addr) if self.region.dma_halt_on_read() => {
+                    self.halt_addr = Some(addr);
+                    Some(tick)
+                }
+                TickResult::Read(_) | TickResult::Write(_, _) | TickResult::Idle(_) => None,
             },
             (Some(_), Some(_)) => self.halt_addr.map(TickResult::Idle),
             (Some(_), None) => self.halt_addr.take().map(TickResult::Read),
