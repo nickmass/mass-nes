@@ -247,7 +247,7 @@ impl Channel for Pulse {
         self.halt = self.halt_delay;
         self.forced_clock = false;
 
-        if !self.duty() || self.length_counter == 0 || self.timer_counter < 8 {
+        if !self.duty() || self.length_counter == 0 || self.period < 8 {
             0
         } else {
             self.sweep_output()
