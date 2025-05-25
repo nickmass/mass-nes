@@ -382,7 +382,7 @@ struct DebugChannelSamples {
 #[allow(unused)]
 impl DebugChannelSamples {
     fn new() -> Self {
-        const WINDOW_SIZE: usize = 64;
+        const WINDOW_SIZE: usize = 32;
         DebugChannelSamples {
             window_size: WINDOW_SIZE,
             sample_accum_count: 0,

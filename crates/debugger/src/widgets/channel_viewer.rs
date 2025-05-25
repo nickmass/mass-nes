@@ -64,18 +64,10 @@ impl ChannelViewer {
         egui::Window::new("Audio Channels")
             .auto_sized()
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    for idx in 0..3 {
-                        let channel = Channel::from_idx(idx);
-                        self.images[idx].show(ui, channel.label());
-                    }
-                });
-                ui.horizontal(|ui| {
-                    for idx in 3..6 {
-                        let channel = Channel::from_idx(idx);
-                        self.images[idx].show(ui, channel.label());
-                    }
-                });
+                for idx in 0..6 {
+                    let channel = Channel::from_idx(idx);
+                    self.images[idx].show(ui, channel.label());
+                }
             });
     }
 }
@@ -134,8 +126,8 @@ impl Channel {
     }
 }
 
-const WIDTH: usize = 256;
-const HEIGHT: usize = 256;
+const WIDTH: usize = 512;
+const HEIGHT: usize = 64;
 
 struct ChannelImage {
     pixels: Vec<u8>,
