@@ -154,13 +154,18 @@ impl CpalAudio {
 
         let total_buffer_len = buffer_len as usize * DEVICE_BUFFER_DEPTH;
 
+        let range_desc = match best_match.buffer_size {
+            cpal::SupportedBufferSize::Range { min, max } => &format!("[{min}, {max}]"),
+            cpal::SupportedBufferSize::Unknown => "unknown",
+        };
+
         tracing::debug!(
-            "{:?}: {} channel(s), {} sample rate, {} format, range: {:?}, {} buffer samples, {}ms buffer duration",
+            "{:?}: {} channel(s), {} sample rate, {} format, range: {}, {} buffer samples, {}ms buffer duration",
             host.id(),
             best_match.channels,
             best_match.sample_rate.0,
             best_match.data_type,
-            best_match.buffer_size,
+            range_desc,
             total_buffer_len,
             std::time::Duration::from_secs_f64(
                 total_buffer_len as f64 / best_match.sample_rate.0 as f64

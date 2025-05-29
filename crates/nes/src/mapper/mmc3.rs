@@ -49,7 +49,7 @@ pub struct Mmc3 {
     variant: Mmc3Variant,
     mirroring: SimpleMirroring,
     prg_ram: MemoryBlock,
-    chr_ram: Option<FixedMemoryBlock<8>>,
+    chr_ram: Option<MemoryBlock>,
     bank_data: [u8; 8],
     bank_select: u8,
     ram_enabled: bool,
@@ -78,10 +78,10 @@ impl Mmc3 {
             prg_ram.restore_wram(wram);
         }
 
-        let chr_ram = cartridge
-            .chr_rom
-            .is_empty()
-            .then(|| FixedMemoryBlock::new());
+        let chr_ram = cartridge.chr_rom.is_empty().then(|| {
+            let kb = (cartridge.chr_ram_bytes / 1024).max(8);
+            MemoryBlock::new(kb)
+        });
 
         let (mirroring, ext_nt) = if cartridge.alternative_mirroring {
             let mirroring = SimpleMirroring::new(super::Mirroring::FourScreen);
@@ -214,18 +214,18 @@ impl Mmc3 {
     }
 
     fn map_chr(&self, addr: u16) -> (usize, usize) {
-        let (bank, size) = match &self.chr_ram {
-            Some(_) => (0, 8),
-            None if self.bank_select & 0x80 == 0 => match addr >> 10 & 7 {
+        let (bank, size) = if self.bank_select & 0x80 == 0 {
+            match addr >> 10 & 7 {
                 0 | 1 => (self.bank_data[0] >> 1, 2),
                 2 | 3 => (self.bank_data[1] >> 1, 2),
                 n => (self.bank_data[n as usize - 2], 1),
-            },
-            None => match addr >> 10 & 7 {
+            }
+        } else {
+            match addr >> 10 & 7 {
                 4 | 5 => (self.bank_data[0] >> 1, 2),
                 6 | 7 => (self.bank_data[1] >> 1, 2),
                 n => (self.bank_data[n as usize + 2], 1),
-            },
+            }
         };
 
         (bank as usize, size * 1024)
