@@ -39,7 +39,7 @@ impl BrowserAudio {
         let ctx = AudioContext::new().map_err(Error::CreateContext)?;
         let volume = Volume::new();
         let sample_rate = ctx.sample_rate();
-        let (samples_tx, samples_rx) = samples_channel(sample_rate as usize, 256, 2);
+        let (samples_tx, samples_rx) = samples_channel(sample_rate as usize, 512, 2);
 
         let worklet_processor = WorkletProcessor::new(samples_rx, volume.clone());
         Self::install(&ctx, &worklet_path, worklet_processor).await?;

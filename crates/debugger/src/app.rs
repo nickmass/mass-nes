@@ -145,6 +145,9 @@ impl<A: Audio> DebuggerApp<A> {
         audio: A,
         samples_tx: SamplesSender,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
+        // Force dark mode as it is currently the only version I ever test
+        cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
+
         let ntsc_setup = NesNtscSetup::composite();
         let palette = ntsc_setup.generate_palette();
 
