@@ -194,8 +194,7 @@ impl Mapper for Vrc7 {
     }
 
     fn get_sample(&self) -> Option<i16> {
-        let output = self.audio.output();
-        Some(output / 2)
+        Some(self.audio.output())
     }
 
     fn get_irq(&mut self) -> bool {
@@ -315,7 +314,7 @@ impl Audio {
 
     fn output(&self) -> i16 {
         if self.silence {
-            return 0;
+            return i16::MAX / 2;
         }
 
         let mut output = 0.0;
@@ -323,8 +322,8 @@ impl Audio {
             output += *out as f32;
         }
 
-        let out = (output / 6.0) as i32 >> 5;
-        out.min(i16::MAX as i32).max(i16::MIN as i32) as i16
+        let out = ((output / 6.0) as i32 >> 5) + (i16::MAX as i32 / 2);
+        out.min(i16::MAX as i32).max(0) as i16
     }
 }
 
