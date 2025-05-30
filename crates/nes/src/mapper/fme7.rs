@@ -112,7 +112,7 @@ impl Fme7 {
 
         let mirroring = SimpleMirroring::new(cartridge.mirroring);
 
-        let inc = 10.0f32.powf(1.0 / 10.0);
+        let inc = 10.0f32.powf(1.0 / 20.0);
         let max = inc.powf(29.0);
         let sample_max = i16::MAX as f32;
         let channel_count = 3.0;
