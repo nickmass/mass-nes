@@ -197,6 +197,44 @@ impl PpuState {
     }
 }
 
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone)]
+enum PrgRamChips {
+    _8k,
+    _16k,
+    _32k,
+    _64k,
+    _128k,
+}
+
+impl PrgRamChips {
+    fn new(kb: usize) -> Self {
+        match kb {
+            8 => Self::_8k,
+            16 => Self::_16k,
+            32 => Self::_32k,
+            128 => Self::_128k,
+            _ => Self::_64k,
+        }
+    }
+
+    fn map_bank(&self, bank: usize) -> usize {
+        match self {
+            PrgRamChips::_8k => 0,
+            PrgRamChips::_16k => {
+                if bank & 0x4 == 0 {
+                    0
+                } else {
+                    1
+                }
+            }
+            PrgRamChips::_32k => bank & 0x3,
+            PrgRamChips::_64k => bank & 0x7,
+            PrgRamChips::_128k => bank & 0xf,
+        }
+    }
+}
+
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Mmc5 {
     #[cfg_attr(feature = "save-states", save(skip))]
@@ -204,6 +242,7 @@ pub struct Mmc5 {
     #[cfg_attr(feature = "save-states", save(skip))]
     debug: Rc<Debug>,
     prg_ram: MemoryBlock,
+    prg_ram_chips: PrgRamChips,
     chr_ram: Option<FixedMemoryBlock<8>>,
     exram: FixedMemoryBlock<1>,
     tall_sprites: bool,
@@ -243,12 +282,13 @@ pub struct Mmc5 {
 impl Mmc5 {
     pub fn new(mut cartridge: INes, debug: Rc<Debug>) -> Self {
         let prg_ram_count = if cartridge.prg_ram_bytes == 0 {
-            4
+            64
         } else {
-            cartridge.prg_ram_bytes / (1024 * 8)
+            cartridge.prg_ram_bytes / 1024
         };
 
-        let mut prg_ram = MemoryBlock::new(prg_ram_count * 8);
+        let prg_ram_chips = PrgRamChips::new(prg_ram_count);
+        let mut prg_ram = MemoryBlock::new(prg_ram_count);
         if let Some(wram) = cartridge.wram.take() {
             prg_ram.restore_wram(wram);
         }
@@ -280,6 +320,7 @@ impl Mmc5 {
             cartridge,
             debug,
             prg_ram,
+            prg_ram_chips,
             chr_ram,
             exram,
             tall_sprites: false,
@@ -559,8 +600,9 @@ impl Mmc5 {
 
     fn map_prg(&self, addr: u16) -> Prg {
         if addr & 0x8000 == 0 {
+            let bank = self.prg_regs[0] as usize & 0xf;
             Prg::Ram {
-                bank: self.prg_regs[0] as usize & 0xf,
+                bank: self.prg_ram_chips.map_bank(bank),
                 size: 8 * 1024,
             }
         } else {
@@ -578,9 +620,13 @@ impl Mmc5 {
                 _ => unreachable!(),
             };
 
-            let bank = self.prg_regs[bank_idx];
+            let bank = self.prg_regs[bank_idx] as usize;
             let ram = bank & 0x80 == 0 && bank_idx != 4;
-            let bank = if ram { bank & 0xf } else { bank & 0x7f };
+            let bank = if ram {
+                self.prg_ram_chips.map_bank(bank & 0xf)
+            } else {
+                bank & 0x7f
+            };
 
             let bank = match size {
                 32 => bank >> 2,
@@ -588,7 +634,6 @@ impl Mmc5 {
                 _ => bank,
             };
 
-            let bank = bank as usize;
             let size = size * 1024;
 
             if ram {

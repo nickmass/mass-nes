@@ -183,9 +183,9 @@ impl Cartridge {
         if header[6] & 0x02 != 0 {
             battery = true;
             if mapper == 5 {
-                prg_ram_bytes = 0x8000;
+                prg_ram_bytes = 64 * 1024;
             } else {
-                prg_ram_bytes = 0x2000;
+                prg_ram_bytes = 8 * 1024;
             }
         } else {
             wram = None;
