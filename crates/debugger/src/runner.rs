@@ -82,6 +82,7 @@ pub enum EmulatorInput {
     SetFdsDisk(Option<usize>),
     SaveWram,
     PlayMovie(MovieFile),
+    ChannelPlayback(nes::ChannelPlayback),
 }
 
 #[derive(Debug)]
@@ -284,6 +285,11 @@ impl Runner {
                     }
                     EmulatorInput::PlayMovie(movie) => {
                         self.movie_input = Some(movie);
+                    }
+                    EmulatorInput::ChannelPlayback(playback) => {
+                        if let Some(machine) = self.machine.as_mut() {
+                            machine.set_channel_playback(playback);
+                        }
                     }
                 }
             }

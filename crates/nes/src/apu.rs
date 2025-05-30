@@ -62,6 +62,8 @@ pub struct Apu {
     #[cfg(feature = "debugger")]
     #[cfg_attr(feature = "save-states", save(skip))]
     debug_channels: DebugChannelSamples,
+    #[cfg_attr(feature = "save-states", save(skip))]
+    playback: ChannelPlayback,
 }
 
 impl Apu {
@@ -99,6 +101,7 @@ impl Apu {
             oam_req: None,
             #[cfg(feature = "debugger")]
             debug_channels: DebugChannelSamples::new(),
+            playback: ChannelPlayback::default(),
         }
     }
 
@@ -263,20 +266,27 @@ impl Apu {
         }
 
         let snapshot = self.snapshot();
-        let pulse1 = self.pulse_one.tick(snapshot);
-        let pulse2 = self.pulse_two.tick(snapshot);
+        let pulse_1 = self.pulse_one.tick(snapshot);
+        let pulse_2 = self.pulse_two.tick(snapshot);
         let triangle = self.triangle.tick(snapshot);
         let noise = self.noise.tick(snapshot);
         let dmc = self.dmc.tick(snapshot);
-        let ext_out = self.mapper.get_sample().unwrap_or(0);
+        let ext = self.mapper.get_sample().unwrap_or(0);
 
         #[cfg(feature = "debugger")]
         self.debug_channels
-            .push_channels(pulse1, pulse2, triangle, noise, dmc, ext_out);
+            .push_channels(pulse_1, pulse_2, triangle, noise, dmc, ext);
 
-        let pulse_out = self.pulse_table[(pulse1 + pulse2) as usize];
+        let pulse_1 = self.playback.pulse_1(pulse_1);
+        let pulse_2 = self.playback.pulse_2(pulse_2);
+        let triangle = self.playback.triangle(triangle);
+        let noise = self.playback.noise(noise);
+        let dmc = self.playback.dmc(dmc);
+        let ext = self.playback.ext(ext);
+
+        let pulse_out = self.pulse_table[(pulse_1 + pulse_2) as usize];
         let tnd_out = self.tnd_table[((3 * triangle) + (2 * noise) + dmc) as usize];
-        let sample = (pulse_out + tnd_out) - ext_out;
+        let sample = (pulse_out + tnd_out) - ext;
         self.samples.push(sample);
         until.add_sample();
     }
@@ -308,6 +318,10 @@ impl Apu {
 
     pub fn get_oam_req(&mut self) -> Option<u8> {
         self.oam_req.take()
+    }
+
+    pub fn set_channel_playback(&mut self, playback: ChannelPlayback) {
+        self.playback = playback;
     }
 
     pub fn register(&self, cpu: &mut AddressBus) {
@@ -471,6 +485,81 @@ impl std::ops::Div<f32> for ChannelSamples {
             noise: self.noise / rhs,
             dmc: self.dmc / rhs,
             external: self.external / rhs,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+pub struct ChannelPlayback {
+    pub pulse_1_solo: bool,
+    pub pulse_2_solo: bool,
+    pub triangle_solo: bool,
+    pub noise_solo: bool,
+    pub dmc_solo: bool,
+    pub ext_solo: bool,
+    pub pulse_1_mute: bool,
+    pub pulse_2_mute: bool,
+    pub triangle_mute: bool,
+    pub noise_mute: bool,
+    pub dmc_mute: bool,
+    pub ext_mute: bool,
+}
+
+impl ChannelPlayback {
+    fn any_solo(&self) -> bool {
+        self.pulse_1_solo
+            || self.pulse_2_solo
+            || self.triangle_solo
+            || self.noise_solo
+            || self.dmc_solo
+            || self.ext_solo
+    }
+
+    fn pulse_1(&self, v: u8) -> u8 {
+        if self.pulse_1_mute || (!self.pulse_1_solo && self.any_solo()) {
+            0
+        } else {
+            v
+        }
+    }
+
+    fn pulse_2(&self, v: u8) -> u8 {
+        if self.pulse_2_mute || (!self.pulse_2_solo && self.any_solo()) {
+            0
+        } else {
+            v
+        }
+    }
+
+    fn triangle(&self, v: u8) -> u8 {
+        if self.triangle_mute || (!self.triangle_solo && self.any_solo()) {
+            0
+        } else {
+            v
+        }
+    }
+
+    fn noise(&self, v: u8) -> u8 {
+        if self.noise_mute || (!self.noise_solo && self.any_solo()) {
+            0
+        } else {
+            v
+        }
+    }
+
+    fn dmc(&self, v: u8) -> u8 {
+        if self.dmc_mute || (!self.dmc_solo && self.any_solo()) {
+            0
+        } else {
+            v
+        }
+    }
+
+    fn ext(&self, v: i16) -> i16 {
+        if self.ext_mute || (!self.ext_solo && self.any_solo()) {
+            0
+        } else {
+            v
         }
     }
 }

@@ -3,7 +3,7 @@ use std::rc::Rc;
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 
-use crate::apu::Apu;
+use crate::apu::{Apu, ChannelPlayback};
 use crate::bus::{AddressBus, BusKind, DeviceKind, RangeAndMask};
 use crate::cartridge::Cartridge;
 use crate::cpu::{Cpu, CpuPinIn, TickResult};
@@ -336,6 +336,10 @@ impl Machine {
         &mut self,
     ) -> impl DoubleEndedIterator<Item = crate::ChannelSamples> + ExactSizeIterator + '_ {
         self.apu.take_channel_samples()
+    }
+
+    pub fn set_channel_playback(&mut self, playback: ChannelPlayback) {
+        self.apu.set_channel_playback(playback);
     }
 
     pub fn set_input<T: IntoIterator<Item = UserInput>>(&mut self, input: T) {

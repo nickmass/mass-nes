@@ -1,4 +1,5 @@
-use nes::ChannelSamples;
+use eframe::egui::{Color32, PointerButton};
+use nes::{ChannelPlayback, ChannelSamples};
 
 use crate::debug_state::DebugUiState;
 use crate::egui;
@@ -55,20 +56,46 @@ impl ChannelViewer {
         }
     }
 
-    pub fn show(&mut self, ctx: &egui::Context, debug: &DebugUiState, debug_interval: u64) {
+    pub fn show(
+        &mut self,
+        ctx: &egui::Context,
+        debug: &DebugUiState,
+        debug_interval: u64,
+    ) -> Option<ChannelPlayback> {
         if self.age.abs_diff(debug.now()) >= debug_interval {
             self.update(ctx, debug.channels());
             self.age = debug.now();
         }
+
+        let mut clicked = false;
 
         egui::Window::new("Audio Channels")
             .auto_sized()
             .show(ctx, |ui| {
                 for idx in 0..6 {
                     let channel = Channel::from_idx(idx);
-                    self.images[idx].show(ui, channel.label());
+                    clicked = clicked || self.images[idx].show(ui, channel.label());
                 }
             });
+
+        if clicked { Some(self.playback()) } else { None }
+    }
+
+    pub fn playback(&self) -> ChannelPlayback {
+        ChannelPlayback {
+            pulse_1_solo: self.images[0].solo,
+            pulse_2_solo: self.images[1].solo,
+            triangle_solo: self.images[2].solo,
+            noise_solo: self.images[3].solo,
+            dmc_solo: self.images[4].solo,
+            ext_solo: self.images[5].solo,
+            pulse_1_mute: self.images[0].mute,
+            pulse_2_mute: self.images[1].mute,
+            triangle_mute: self.images[2].mute,
+            noise_mute: self.images[3].mute,
+            dmc_mute: self.images[4].mute,
+            ext_mute: self.images[5].mute,
+        }
     }
 }
 
@@ -132,6 +159,8 @@ const HEIGHT: usize = 64;
 struct ChannelImage {
     pixels: Vec<u8>,
     texture: Option<egui::TextureHandle>,
+    solo: bool,
+    mute: bool,
 }
 
 impl ChannelImage {
@@ -139,6 +168,8 @@ impl ChannelImage {
         Self {
             pixels: vec![0x00; (WIDTH * HEIGHT * 3) as usize],
             texture: None,
+            solo: false,
+            mute: false,
         }
     }
 
@@ -150,7 +181,7 @@ impl ChannelImage {
             let idx = ((HEIGHT - 1 - y) * WIDTH + x) * 3;
 
             let color = if y >= min && y <= max {
-                visuals.hyperlink_color
+                self.color(visuals)
             } else {
                 visuals.panel_fill
             };
@@ -161,18 +192,39 @@ impl ChannelImage {
         }
     }
 
+    fn color(&self, visuals: &egui::Visuals) -> Color32 {
+        if self.mute {
+            Color32::RED
+        } else if self.solo {
+            Color32::YELLOW
+        } else {
+            visuals.hyperlink_color
+        }
+    }
+
     fn update(&mut self, name: &'static str, ctx: &egui::Context) {
         let image = egui::ColorImage::from_rgb([WIDTH, HEIGHT], &self.pixels);
         let texture = ctx.load_texture(name, image, egui::TextureOptions::NEAREST);
         self.texture = Some(texture);
     }
 
-    fn show(&self, ui: &mut egui::Ui, label: &'static str) {
+    fn show(&mut self, ui: &mut egui::Ui, label: &'static str) -> bool {
+        let mut clicked = false;
         if let Some(tex) = self.texture.as_ref() {
             ui.vertical(|ui| {
                 ui.label(label);
-                ui.image(tex);
+                let res = ui.image(tex).interact(egui::Sense::click());
+                if res.clicked_by(PointerButton::Primary) {
+                    self.solo = !self.solo;
+                    clicked = true;
+                }
+                if res.clicked_by(PointerButton::Secondary) {
+                    self.mute = !self.mute;
+                    clicked = true;
+                }
             });
         }
+
+        clicked
     }
 }

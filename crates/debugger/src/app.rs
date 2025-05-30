@@ -1,5 +1,5 @@
 use eframe::CreationContext;
-use nes::{SaveWram, UserInput};
+use nes::{ChannelPlayback, SaveWram, UserInput};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use ui::{
@@ -369,6 +369,8 @@ impl<A: Audio> DebuggerApp<A> {
                 self.state.bios = Some(bios);
             }
             AppEvent::RomLoaded(path) => {
+                self.emu_control
+                    .channel_playback(self.channel_viewer.playback());
                 self.recents.add(path);
                 self.state.recent_files = self.recents.iter().map(|p| p.to_path_buf()).collect();
                 self.pause = false;
@@ -723,8 +725,12 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
         }
 
         if self.state.show_audio_channels {
-            self.channel_viewer
-                .show(ctx, &self.debug, self.state.debug_interval);
+            if let Some(playback) =
+                self.channel_viewer
+                    .show(ctx, &self.debug, self.state.debug_interval)
+            {
+                self.emu_control.channel_playback(playback);
+            }
         }
 
         if self.state.show_events {
@@ -959,6 +965,10 @@ impl EmulatorControl {
 
     fn save_wram(&self) {
         let _ = self.tx.send(EmulatorInput::SaveWram);
+    }
+
+    fn channel_playback(&self, playback: ChannelPlayback) {
+        let _ = self.tx.send(EmulatorInput::ChannelPlayback(playback));
     }
 
     fn play_movie(&self, movie: ui::movie::MovieFile) {
