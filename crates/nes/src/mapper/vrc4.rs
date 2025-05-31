@@ -284,7 +284,7 @@ impl Mapper for Vrc4 {
         }
     }
 
-    fn get_irq(&mut self) -> bool {
+    fn get_irq(&self) -> bool {
         if self.variant.has_irq() {
             self.irq.irq()
         } else {

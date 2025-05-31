@@ -173,4 +173,15 @@ impl Channel for Dmc {
     fn get_state(&self) -> bool {
         self.bytes_remaining > 0
     }
+
+    #[cfg(feature = "debugger")]
+    fn watch(&self, visitor: &mut crate::debug::WatchVisitor) {
+        let mut dmc = visitor.group("DMC");
+        dmc.value("Enabled", self.get_state());
+        dmc.value("IRQ", self.irq);
+        dmc.value("Sample Address", self.sample_address());
+        dmc.value("Sample Length", self.sample_length());
+        dmc.value("Sample Buffer", self.sample_buffer);
+        dmc.value("Address Counter", self.address_counter);
+    }
 }

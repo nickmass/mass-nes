@@ -771,7 +771,7 @@ impl Mapper for Mmc5 {
         }
     }
 
-    fn get_irq(&mut self) -> bool {
+    fn get_irq(&self) -> bool {
         (self.ppu_state.irq_pending && self.irq_enabled)
             || (self.pcm.irq_pending && self.pcm.irq_enabled)
     }

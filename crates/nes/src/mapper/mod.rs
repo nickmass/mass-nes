@@ -89,7 +89,7 @@ pub trait Mapper {
 
     fn write(&mut self, bus: BusKind, addr: u16, value: u8);
 
-    fn get_irq(&mut self) -> bool {
+    fn get_irq(&self) -> bool {
         false
     }
 
@@ -109,6 +109,12 @@ pub trait Mapper {
 
     fn save_wram(&self) -> Option<SaveWram> {
         None
+    }
+
+    #[cfg(feature = "debugger")]
+    fn watch(&self, visitor: &mut crate::debug::WatchVisitor) {
+        let mut mapper = visitor.group("Mapper");
+        mapper.value("IRQ", self.get_irq());
     }
 }
 
@@ -145,7 +151,7 @@ impl RcMapper {
     }
 
     pub fn get_irq(&self) -> bool {
-        self.0.borrow_mut().get_irq()
+        self.0.borrow().get_irq()
     }
 
     pub fn tick(&self) {
@@ -162,6 +168,11 @@ impl RcMapper {
 
     pub fn save_wram(&self) -> Option<SaveWram> {
         self.0.borrow().save_wram()
+    }
+
+    #[cfg(feature = "debugger")]
+    pub fn watch(&self, visitor: &mut crate::debug::WatchVisitor) {
+        self.0.borrow().watch(visitor);
     }
 }
 

@@ -224,13 +224,6 @@ impl Machine {
             let apu_irq = self.apu.get_irq();
             let mapper_irq = self.mapper.get_irq();
 
-            #[cfg(feature = "debugger")]
-            {
-                let mut visitor = self.debug.watch_visitor();
-                self.cpu.watch(&mut visitor);
-                self.ppu.watch(&mut visitor);
-            }
-
             self.cpu_pin_in.irq = apu_irq | mapper_irq;
             self.cpu_pin_in.nmi = self.ppu.nmi();
 
@@ -239,9 +232,14 @@ impl Machine {
             self.cycle += 1;
 
             if self.debug.breakpoint(&mut break_handler) {
+                #[cfg(feature = "debugger")]
+                self.watch();
                 return RunResult::Breakpoint;
             }
         }
+
+        #[cfg(feature = "debugger")]
+        self.watch();
 
         RunResult::Done
     }
@@ -250,6 +248,15 @@ impl Machine {
         self.ppu.tick(frame_end, until);
         let ppu_state = self.ppu.debug_state();
         self.debug.trace_ppu(&self, ppu_state);
+    }
+
+    #[cfg(feature = "debugger")]
+    fn watch(&self) {
+        let mut visitor = self.debug.watch_visitor();
+        self.cpu.watch(&mut visitor);
+        self.ppu.watch(&mut visitor);
+        self.apu.watch(&mut visitor);
+        self.mapper.watch(&mut visitor);
     }
 
     fn read(&mut self, addr: u16) -> u8 {

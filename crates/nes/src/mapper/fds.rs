@@ -403,7 +403,7 @@ impl Mapper for Fds {
         }
     }
 
-    fn get_irq(&mut self) -> bool {
+    fn get_irq(&self) -> bool {
         self.timer_irq | self.disk_irq
     }
 

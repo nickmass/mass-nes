@@ -480,7 +480,7 @@ mod debugger {
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum WatchValue {
-        Number(i64),
+        Number(u32),
         Bool(bool),
     }
 
@@ -513,19 +513,19 @@ mod debugger {
 
     impl Into<WatchValue> for u8 {
         fn into(self) -> WatchValue {
-            WatchValue::Number(self as i64)
+            WatchValue::Number(self as u32)
         }
     }
 
     impl Into<WatchValue> for u16 {
         fn into(self) -> WatchValue {
-            WatchValue::Number(self as i64)
+            WatchValue::Number(self as u32)
         }
     }
 
     impl Into<WatchValue> for u32 {
         fn into(self) -> WatchValue {
-            WatchValue::Number(self as i64)
+            WatchValue::Number(self)
         }
     }
 

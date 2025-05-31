@@ -130,6 +130,21 @@ impl Apu {
     }
 
     #[cfg(feature = "debugger")]
+    pub fn watch(&self, visitor: &mut crate::debug::WatchVisitor) {
+        let mut apu = visitor.group("APU");
+        apu.value("IRQ", self.irq);
+        apu.value("Quater Frame", self.is_quarter_frame());
+        apu.value("Half Frame", self.is_half_frame());
+        let four_step = matches!(self.sequence_mode, SequenceMode::FourStep);
+        apu.value("Four Step", four_step);
+        self.pulse_one.watch(&mut apu);
+        self.pulse_two.watch(&mut apu);
+        self.triangle.watch(&mut apu);
+        self.noise.watch(&mut apu);
+        self.dmc.watch(&mut apu);
+    }
+
+    #[cfg(feature = "debugger")]
     pub fn peek(&self, addr: u16) -> u8 {
         match addr {
             0x4015 => {

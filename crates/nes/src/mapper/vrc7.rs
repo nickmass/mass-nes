@@ -197,7 +197,7 @@ impl Mapper for Vrc7 {
         Some(self.audio.output())
     }
 
-    fn get_irq(&mut self) -> bool {
+    fn get_irq(&self) -> bool {
         self.irq.irq()
     }
 

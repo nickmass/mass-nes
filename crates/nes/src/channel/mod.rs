@@ -18,4 +18,6 @@ pub trait Channel {
     fn enable(&mut self);
     fn disable(&mut self);
     fn get_state(&self) -> bool;
+    #[cfg(feature = "debugger")]
+    fn watch(&self, visitor: &mut crate::debug::WatchVisitor);
 }

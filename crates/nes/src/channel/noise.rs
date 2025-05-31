@@ -171,4 +171,13 @@ impl Channel for Noise {
     fn get_state(&self) -> bool {
         self.length_counter > 0
     }
+
+    #[cfg(feature = "debugger")]
+    fn watch(&self, visitor: &mut crate::debug::WatchVisitor) {
+        let mut noise = visitor.group("Noise");
+        noise.value("Enabled", self.get_state());
+        noise.value("Length Counter", self.length_counter);
+        noise.value("Timer Counter", self.timer_counter);
+        noise.value("Mode", self.noise_mode());
+    }
 }

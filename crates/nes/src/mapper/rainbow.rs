@@ -743,7 +743,7 @@ impl Mapper for Rainbow {
         self.sawtooth.tick(FreqMode::X1);
     }
 
-    fn get_irq(&mut self) -> bool {
+    fn get_irq(&self) -> bool {
         (self.ppu_irq_enabled && self.ppu_state.irq_pending)
             || (self.cpu_irq_enable && self.cpu_irq_pending)
     }

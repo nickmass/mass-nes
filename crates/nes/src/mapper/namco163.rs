@@ -229,7 +229,7 @@ impl Mapper for Namco163 {
         self.sound.tick();
     }
 
-    fn get_irq(&mut self) -> bool {
+    fn get_irq(&self) -> bool {
         self.irq_enabled && self.irq
     }
 

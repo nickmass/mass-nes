@@ -265,7 +265,7 @@ impl Mapper for Vrc6 {
         }
     }
 
-    fn get_irq(&mut self) -> bool {
+    fn get_irq(&self) -> bool {
         self.irq.irq()
     }
 

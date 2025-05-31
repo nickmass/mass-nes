@@ -134,4 +134,12 @@ impl Channel for Triangle {
     fn get_state(&self) -> bool {
         self.length_counter > 0
     }
+
+    #[cfg(feature = "debugger")]
+    fn watch(&self, visitor: &mut crate::debug::WatchVisitor) {
+        let mut triangle = visitor.group("Triangle");
+        triangle.value("Enabled", self.get_state());
+        triangle.value("Length Counter", self.length_counter);
+        triangle.value("Timer Counter", self.timer_counter);
+    }
 }
