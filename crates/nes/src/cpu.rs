@@ -126,6 +126,26 @@ impl Cpu {
         CpuDebugState
     }
 
+    #[cfg(feature = "debugger")]
+    pub fn watch(&self, visitor: &mut crate::debug::WatchVisitor) {
+        let mut cpu = visitor.group("CPU");
+        cpu.value("A", self.regs.reg_a);
+        cpu.value("X", self.regs.reg_x);
+        cpu.value("Y", self.regs.reg_y);
+        cpu.value("SP", self.regs.reg_sp);
+        cpu.value("P", self.regs.reg_p());
+        {
+            let mut flags = cpu.group("Status Flags");
+            flags.value("Carry", self.regs.flag_c);
+            flags.value("Zero", self.regs.flag_z);
+            flags.value("Interrupt Disable", self.regs.flag_i);
+            flags.value("Decimal", self.regs.flag_d);
+            flags.value("Overflow", self.regs.flag_v);
+            flags.value("Negative", self.regs.flag_s);
+        }
+        cpu.value("PC", self.regs.reg_pc);
+    }
+
     pub fn tick<U: RunUntil>(&mut self, pin_in: CpuPinIn, until: &mut U) -> TickResult {
         self.pin_in = pin_in;
         until.add_cycle();

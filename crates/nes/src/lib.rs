@@ -16,6 +16,8 @@ pub mod run_until;
 
 pub use apu::{ChannelPlayback, ChannelSamples};
 pub use cartridge::{Cartridge, CartridgeInfo};
+#[cfg(feature = "debugger")]
+pub use debug::WatchItem;
 pub use debug::{Debug, DebugEvent, MachineState};
 pub use machine::{Controller, FdsInput, Machine, MapperInput, RunResult, UserInput};
 pub use mapper::SaveWram;

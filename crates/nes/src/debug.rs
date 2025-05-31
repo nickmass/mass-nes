@@ -27,7 +27,7 @@ pub enum DebugEvent {
 
 #[cfg(feature = "debugger")]
 mod debugger {
-    use std::cell::RefCell;
+    use std::{cell::RefCell, rc::Rc};
 
     use crate::Machine;
     use crate::bus::{AddressBus, DeviceKind, RangeAndMask};
@@ -130,12 +130,14 @@ mod debugger {
 
     pub struct Debug {
         state: RefCell<DebugState>,
+        watch_items: Rc<RefCell<Vec<WatchItem>>>,
     }
 
     impl Debug {
         pub fn new() -> Self {
             Self {
                 state: RefCell::new(DebugState::default()),
+                watch_items: Rc::new(RefCell::new(Vec::with_capacity(128))),
             }
         }
 
@@ -455,6 +457,145 @@ mod debugger {
         pub fn take_interest_notification(&self) -> u16 {
             let mut state = self.state.borrow_mut();
             state.take_interest_notification()
+        }
+
+        pub fn watch_visitor(&self) -> WatchVisitor {
+            WatchVisitor::new(self.watch_items.clone())
+        }
+
+        pub fn watch_items(&self) -> impl Iterator<Item = WatchItem> {
+            WatchIter {
+                index: 0,
+                buf: self.watch_items.clone(),
+            }
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum WatchItem {
+        Group(&'static str),
+        Field(&'static str, WatchValue),
+        EndGroup,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum WatchValue {
+        Number(i64),
+        Bool(bool),
+    }
+
+    impl std::fmt::Display for WatchValue {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                WatchValue::Number(n) => n.fmt(f),
+                WatchValue::Bool(b) => b.fmt(f),
+            }
+        }
+    }
+
+    impl std::fmt::LowerHex for WatchValue {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                WatchValue::Number(n) => n.fmt(f),
+                _ => write!(f, "{}", self),
+            }
+        }
+    }
+
+    impl std::fmt::UpperHex for WatchValue {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                WatchValue::Number(n) => n.fmt(f),
+                _ => write!(f, "{}", self),
+            }
+        }
+    }
+
+    impl Into<WatchValue> for u8 {
+        fn into(self) -> WatchValue {
+            WatchValue::Number(self as i64)
+        }
+    }
+
+    impl Into<WatchValue> for u16 {
+        fn into(self) -> WatchValue {
+            WatchValue::Number(self as i64)
+        }
+    }
+
+    impl Into<WatchValue> for u32 {
+        fn into(self) -> WatchValue {
+            WatchValue::Number(self as i64)
+        }
+    }
+
+    impl Into<WatchValue> for bool {
+        fn into(self) -> WatchValue {
+            WatchValue::Bool(self)
+        }
+    }
+
+    pub struct WatchVisitor {
+        buf: Rc<RefCell<Vec<WatchItem>>>,
+    }
+
+    impl WatchVisitor {
+        fn new(buf: Rc<RefCell<Vec<WatchItem>>>) -> Self {
+            buf.borrow_mut().clear();
+            Self { buf }
+        }
+
+        pub fn group<'a>(&'a mut self, name: &'static str) -> WatchGroup<'a> {
+            {
+                let mut buf = self.buf.borrow_mut();
+                buf.push(WatchItem::Group(name));
+            }
+            WatchGroup { visitor: self }
+        }
+
+        pub fn value<V: Into<WatchValue>>(&mut self, name: &'static str, value: V) {
+            let mut buf = self.buf.borrow_mut();
+            buf.push(WatchItem::Field(name, value.into()))
+        }
+    }
+
+    pub struct WatchGroup<'a> {
+        visitor: &'a mut WatchVisitor,
+    }
+
+    impl<'a> std::ops::Deref for WatchGroup<'a> {
+        type Target = WatchVisitor;
+
+        fn deref(&self) -> &Self::Target {
+            &self.visitor
+        }
+    }
+
+    impl<'a> std::ops::DerefMut for WatchGroup<'a> {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.visitor
+        }
+    }
+
+    impl<'a> std::ops::Drop for WatchGroup<'a> {
+        fn drop(&mut self) {
+            let mut buf = self.visitor.buf.borrow_mut();
+            buf.push(WatchItem::EndGroup)
+        }
+    }
+
+    struct WatchIter {
+        index: usize,
+        buf: Rc<RefCell<Vec<WatchItem>>>,
+    }
+
+    impl Iterator for WatchIter {
+        type Item = WatchItem;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let item = self.buf.borrow().get(self.index).cloned();
+            self.index += 1;
+            item
         }
     }
 }

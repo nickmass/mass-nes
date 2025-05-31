@@ -224,6 +224,13 @@ impl Machine {
             let apu_irq = self.apu.get_irq();
             let mapper_irq = self.mapper.get_irq();
 
+            #[cfg(feature = "debugger")]
+            {
+                let mut visitor = self.debug.watch_visitor();
+                self.cpu.watch(&mut visitor);
+                self.ppu.watch(&mut visitor);
+            }
+
             self.cpu_pin_in.irq = apu_irq | mapper_irq;
             self.cpu_pin_in.nmi = self.ppu.nmi();
 

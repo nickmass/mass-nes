@@ -12,6 +12,7 @@ mod recents;
 mod screen;
 mod sprite_viewer;
 pub mod svg;
+mod variable_viewer;
 mod volume;
 
 pub use channel_viewer::ChannelViewer;
@@ -27,4 +28,5 @@ pub use popup_message::{Message, PopupMessage};
 pub use recents::Recents;
 pub use screen::NesScreen;
 pub use sprite_viewer::SpriteViewer;
+pub use variable_viewer::{VariableViewer, VariableViewerState};
 pub use volume::{VolumeChanged, VolumePicker};

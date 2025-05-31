@@ -43,6 +43,23 @@ impl DerefMut for Channels {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct WatchItems(Vec<nes::WatchItem>);
+
+impl Deref for WatchItems {
+    type Target = Vec<nes::WatchItem>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for WatchItems {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 #[derive(Clone)]
 pub struct SwapBuffer<T> {
     updated: Arc<AtomicBool>,
@@ -87,6 +104,7 @@ pub struct DebugSwapState {
     pub events: SwapBuffer<Vec<(u8, u16)>>,
     pub frame: SwapBuffer<Vec<u16>>,
     pub channels: SwapBuffer<Channels>,
+    pub watch_items: SwapBuffer<WatchItems>,
 }
 
 impl DebugSwapState {
@@ -102,6 +120,7 @@ impl DebugSwapState {
             events: SwapBuffer::new(vec![(0, 0); 312 * 341]),
             frame: SwapBuffer::new(vec![0; 256 * 240]),
             channels: SwapBuffer::new(Channels::default()),
+            watch_items: SwapBuffer::new(WatchItems::default()),
         }
     }
 
@@ -129,6 +148,7 @@ pub struct DebugUiState {
     events: Vec<(u8, u16)>,
     frame: Vec<u16>,
     channels: Channels,
+    watch_items: WatchItems,
 }
 
 impl DebugUiState {
@@ -144,6 +164,7 @@ impl DebugUiState {
             events: vec![(0, 0); 312 * 341],
             frame: vec![0; 256 * 240],
             channels: Channels::default(),
+            watch_items: WatchItems::default(),
         }
     }
 
@@ -199,6 +220,10 @@ impl DebugUiState {
         &self.channels.0
     }
 
+    pub fn watch_items(&self) -> &[nes::WatchItem] {
+        &self.watch_items.0
+    }
+
     pub fn swap(&mut self) {
         self.swap.cpu_mem.attempt_swap(&mut self.cpu_mem);
         self.swap.ppu_mem.attempt_swap(&mut self.ppu_mem);
@@ -208,6 +233,7 @@ impl DebugUiState {
         self.swap.events.attempt_swap(&mut self.events);
         self.swap.frame.attempt_swap(&mut self.frame);
         self.swap.channels.attempt_swap(&mut self.channels);
+        self.swap.watch_items.attempt_swap(&mut self.watch_items);
     }
 }
 

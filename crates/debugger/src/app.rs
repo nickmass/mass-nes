@@ -71,6 +71,7 @@ struct UiState {
     show_filter_config: bool,
     show_input_viewer: bool,
     show_audio_channels: bool,
+    show_variables: bool,
     auto_open_most_recent: bool,
     interests: Interests,
     recent_files: Vec<PathBuf>,
@@ -78,6 +79,7 @@ struct UiState {
     selected_palette: u8,
     filter: Filter,
     bios: Option<Vec<u8>>,
+    variable_viewer: VariableViewerState,
 }
 
 impl Default for UiState {
@@ -99,6 +101,7 @@ impl Default for UiState {
             show_filter_config: false,
             show_input_viewer: false,
             show_audio_channels: false,
+            show_variables: false,
             auto_open_most_recent: true,
             interests: Interests::new(),
             recent_files: Vec::new(),
@@ -106,6 +109,7 @@ impl Default for UiState {
             selected_palette: 0,
             filter: Filter::Crt,
             bios: None,
+            variable_viewer: VariableViewerState::default(),
         }
     }
 }
@@ -136,6 +140,7 @@ pub struct DebuggerApp<A> {
     svg_renderer: svg::SvgRenderer,
     controller_svg: svg::SvgGlView,
     channel_viewer: ChannelViewer,
+    variable_viewer: VariableViewer,
 }
 
 impl<A: Audio> DebuggerApp<A> {
@@ -237,6 +242,7 @@ impl<A: Audio> DebuggerApp<A> {
             controller_svg: svg::nes_controller().with_scale(1.0),
             svg_renderer,
             channel_viewer: ChannelViewer::new(),
+            variable_viewer: VariableViewer::new(),
         };
 
         app.hydrate();
@@ -491,6 +497,7 @@ impl<A: Audio> DebuggerApp<A> {
             && !debug.events
             && !debug.frame
             && !debug.channels
+            && !self.state.show_variables
         {
             debug.interval = 0;
         }
@@ -618,6 +625,12 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
                     {
                         self.update_debug_req();
                     }
+                    if ui
+                        .checkbox(&mut self.state.show_variables, "Variables")
+                        .changed()
+                    {
+                        self.update_debug_req();
+                    }
                     ui.checkbox(&mut self.state.show_input_viewer, "Input Viewer");
                     ui.checkbox(&mut self.state.show_messages, "Messages");
                 });
@@ -731,6 +744,11 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
             {
                 self.emu_control.channel_playback(playback);
             }
+        }
+
+        if self.state.show_variables {
+            self.variable_viewer
+                .show(ctx, &mut self.state.variable_viewer, &self.debug);
         }
 
         if self.state.show_events {

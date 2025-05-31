@@ -507,6 +507,11 @@ impl Runner {
                 let _ = machine.take_channel_samples();
             }
 
+            self.debug.watch_items.update(|data| {
+                data.clear();
+                data.extend(machine.get_debug().watch_items());
+            });
+
             self.debug.update_at(self.total_frames);
         }
     }

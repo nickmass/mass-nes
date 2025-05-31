@@ -260,6 +260,18 @@ impl Ppu {
     }
 
     #[cfg(feature = "debugger")]
+    pub fn watch(&self, visitor: &mut crate::debug::WatchVisitor) {
+        let mut ppu = visitor.group("PPU");
+        ppu.value("Scanline", self.step.scanline);
+        ppu.value("Dot", self.step.dot);
+        ppu.value("VRAM Addr.", self.vram_addr);
+        ppu.value("Vblank", self.vblank);
+        ppu.value("NMI", self.nmi());
+        ppu.value("Sprite Zero Hit", self.sprite_zero_hit);
+        ppu.value("Sprite Overflow", self.sprite_overflow);
+    }
+
+    #[cfg(feature = "debugger")]
     pub fn peek(&self, address: u16) -> u8 {
         match address {
             0x2000 => self.open_bus.value(0x00),
