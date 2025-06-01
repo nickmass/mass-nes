@@ -20,7 +20,7 @@ use std::{
 
 use crate::egui::{self, Event};
 use crate::gfx::{Filter, Gfx, GfxBackBuffer};
-use crate::runner::{DebugRequest, EmulatorInput};
+use crate::runner::{DebugRequest, EmulatorInput, StepKind};
 use crate::widgets::*;
 use crate::{
     debug_state::{DebugSwapState, DebugUiState, Palette},
@@ -312,7 +312,7 @@ impl<A: Audio> DebuggerApp<A> {
         if !self.last_input.step_forward && input_state.step_forward {
             self.pause = true;
             self.handle_pause();
-            self.emu_control.step_forward();
+            self.emu_control.step_forward(StepKind::Frame);
             self.nes_screen.set_message(Message::StepForward);
         }
 
@@ -693,11 +693,14 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
 
         if self.state.show_code {
             let mut paused = self.pause;
-            if self
-                .code_viewer
-                .show(&mut paused, &self.debug, &mut self.breakpoints, ctx)
+            if let Some(action) =
+                self.code_viewer
+                    .show(&mut paused, &self.debug, &mut self.breakpoints, ctx)
             {
-                self.update_debug_req();
+                match action {
+                    CodeViewerAction::UpdateBreakpoint => self.update_debug_req(),
+                    CodeViewerAction::Step(step) => self.emu_control.step_forward(step),
+                }
             }
 
             if paused != self.pause {
@@ -945,8 +948,8 @@ impl EmulatorControl {
         let _ = self.tx.send(EmulatorInput::StepBack);
     }
 
-    pub fn step_forward(&self) {
-        let _ = self.tx.send(EmulatorInput::StepForward);
+    pub fn step_forward(&self, kind: StepKind) {
+        let _ = self.tx.send(EmulatorInput::StepForward(kind));
     }
 
     pub fn rewind(&self, toggle: bool) {

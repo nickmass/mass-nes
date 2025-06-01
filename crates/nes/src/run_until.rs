@@ -1,6 +1,8 @@
 pub trait RunUntil {
     fn add_cycle(&mut self) {}
 
+    fn add_instruction(&mut self) {}
+
     fn add_sample(&mut self) {}
 
     fn add_dot(&mut self) {}
@@ -23,6 +25,18 @@ pub trait RunUntil {
 pub struct Cycles(pub u32);
 impl RunUntil for Cycles {
     fn add_cycle(&mut self) {
+        self.0 = self.0.saturating_sub(1);
+    }
+
+    fn done(&self) -> bool {
+        self.0 == 0
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Instructions(pub u32);
+impl RunUntil for Instructions {
+    fn add_instruction(&mut self) {
         self.0 = self.0.saturating_sub(1);
     }
 

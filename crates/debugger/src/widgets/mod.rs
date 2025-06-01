@@ -17,7 +17,7 @@ mod volume;
 
 pub use channel_viewer::ChannelViewer;
 pub use chr_tiles::ChrTiles;
-pub use code_viewer::{BreakpointToggle, Breakpoints, CodeViewer};
+pub use code_viewer::{BreakpointToggle, Breakpoints, CodeViewer, CodeViewerAction};
 pub use event_viewer::{EventViewer, Interests};
 pub use help::Help;
 pub use memory::MemoryViewer;

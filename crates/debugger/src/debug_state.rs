@@ -124,8 +124,8 @@ impl DebugSwapState {
         }
     }
 
-    pub fn update_at(&self, time: u64) {
-        self.now.store(time, Ordering::Relaxed);
+    pub fn update(&self) {
+        self.now.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn set_breakpoint(&self) {

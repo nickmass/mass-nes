@@ -1,4 +1,5 @@
-use crate::egui;
+use crate::{egui, runner::StepKind};
+use eframe::egui::Vec2;
 use tracing::instrument;
 
 use crate::{
@@ -135,6 +136,13 @@ impl BreakpointToggle {
 pub struct CodeViewer {
     offset: f32,
     jump_addr: String,
+    step_kind: StepKind,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum CodeViewerAction {
+    UpdateBreakpoint,
+    Step(StepKind),
 }
 
 impl CodeViewer {
@@ -142,6 +150,7 @@ impl CodeViewer {
         Self {
             offset: 0.0,
             jump_addr: String::new(),
+            step_kind: StepKind::Instruction,
         }
     }
 
@@ -152,8 +161,9 @@ impl CodeViewer {
         debug: &DebugUiState,
         breakpoints: &mut Breakpoints,
         ctx: &egui::Context,
-    ) -> bool {
-        let mut changed = false;
+    ) -> Option<CodeViewerAction> {
+        let mut breakpoint_changed = false;
+        let mut step_requested = false;
         let mem = debug.cpu_mem();
         let state = debug.state();
         let reg_pc = state.cpu.instruction_addr.unwrap_or(state.cpu.reg_pc);
@@ -178,12 +188,25 @@ impl CodeViewer {
                 egui::TextEdit::singleline(&mut self.jump_addr)
                     .hint_text("0000")
                     .char_limit(4)
+                    .desired_width(120.0)
                     .show(ui);
 
                 if let Some(jump_addr) = jump_addr {
                     let offset = jump_addr as f32 * (line_height + ui.spacing().item_spacing.y);
                     v_offset = Some(offset)
                 }
+
+                if ui.button("Step").clicked() {
+                    *pause = true;
+                    step_requested = true;
+                }
+                egui::ComboBox::from_id_salt("step_combo")
+                    .selected_text(self.step_kind.to_string())
+                    .show_ui(ui, |ui| {
+                        for &kind in StepKind::all() {
+                            ui.selectable_value(&mut self.step_kind, kind, kind.to_string());
+                        }
+                    });
             });
             ui.separator();
             ui.style_mut().override_text_style = Some(style);
@@ -196,13 +219,21 @@ impl CodeViewer {
                     for (_, inst) in range.zip(InstructionIter::new(|addr| mem[addr as usize], pc))
                     {
                         if inst.pc() >= pc {
-                            changed |= InstructionUi(inst).ui(reg_pc, breakpoints, ui);
+                            breakpoint_changed |= InstructionUi(inst).ui(reg_pc, breakpoints, ui);
                         }
                     }
+                    ui.allocate_space(Vec2::new(ui.available_width(), 0.0));
                 });
 
             self.offset = scroll.state.offset.y;
         });
-        changed
+
+        if breakpoint_changed {
+            Some(CodeViewerAction::UpdateBreakpoint)
+        } else if step_requested {
+            Some(CodeViewerAction::Step(self.step_kind))
+        } else {
+            None
+        }
     }
 }

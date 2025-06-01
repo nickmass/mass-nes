@@ -63,6 +63,7 @@ pub struct Machine {
     #[cfg_attr(feature = "save-states", save(skip))]
     region: Region,
     cycle: u64,
+    step_start_cycle: u64,
 
     #[cfg_attr(feature = "save-states", save(nested))]
     pub(crate) ppu: Ppu,
@@ -104,6 +105,7 @@ impl Machine {
         let mut machine = Machine {
             region,
             cycle: 0,
+            step_start_cycle: 0,
             ppu,
             cpu,
             cpu_bus,
@@ -169,6 +171,7 @@ impl Machine {
     ) -> RunResult {
         #[cfg(feature = "debugger")]
         let _ = self.debug.take_interest_notification();
+        self.step_start_cycle = self.cycle;
         while !until.done() {
             let tick_result = self.cpu.tick(self.cpu_pin_in, &mut until);
 
@@ -191,6 +194,7 @@ impl Machine {
                     self.debug.event_with_data(DebugEvent::CpuExec(addr), value);
                     self.debug.fetch(addr);
                     self.cpu_pin_in.data = value;
+                    until.add_instruction();
                 }
                 TickResult::Read(addr) => {
                     let value = self.read(addr);
@@ -257,6 +261,8 @@ impl Machine {
         self.ppu.watch(&mut visitor);
         self.apu.watch(&mut visitor);
         self.mapper.watch(&mut visitor);
+        let mut emu = visitor.group("Emulator");
+        emu.value("Step Cycles", (self.cycle - self.step_start_cycle) as u32);
     }
 
     fn read(&mut self, addr: u16) -> u8 {

@@ -132,7 +132,6 @@ impl Cpu {
         cpu.value("A", self.regs.reg_a);
         cpu.value("X", self.regs.reg_x);
         cpu.value("Y", self.regs.reg_y);
-        cpu.value("SP", self.regs.reg_sp);
         cpu.value("P", self.regs.reg_p());
         {
             let mut flags = cpu.group("Status Flags");
@@ -143,7 +142,8 @@ impl Cpu {
             flags.value("Overflow", self.regs.flag_v);
             flags.value("Negative", self.regs.flag_s);
         }
-        cpu.value("PC", self.regs.reg_pc);
+        cpu.value("Stack Pointer", self.regs.reg_sp);
+        cpu.value("Program Counter", self.regs.reg_pc);
     }
 
     pub fn tick<U: RunUntil>(&mut self, pin_in: CpuPinIn, until: &mut U) -> TickResult {

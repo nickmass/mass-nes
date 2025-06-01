@@ -9,6 +9,39 @@ use tracing::instrument;
 use ui::{audio::SamplesSender, movie::MovieFile, wram::CartridgeId};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum StepKind {
+    Dot,
+    Cycle,
+    Instruction,
+    Scanline,
+    Frame,
+}
+
+impl StepKind {
+    pub fn all() -> &'static [StepKind] {
+        &[
+            StepKind::Dot,
+            StepKind::Cycle,
+            StepKind::Instruction,
+            StepKind::Scanline,
+            StepKind::Frame,
+        ]
+    }
+}
+
+impl std::fmt::Display for StepKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StepKind::Dot => write!(f, "Dot"),
+            StepKind::Cycle => write!(f, "Cycle"),
+            StepKind::Instruction => write!(f, "Instruction"),
+            StepKind::Scanline => write!(f, "Scanline"),
+            StepKind::Frame => write!(f, "Frame"),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum Playback {
     Normal,
     Rewind,
@@ -59,6 +92,13 @@ impl Playback {
             _ => false,
         }
     }
+
+    fn update_debug(&self) -> bool {
+        match self {
+            Playback::StepForward | Playback::StepBackward => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -77,7 +117,7 @@ pub enum EmulatorInput {
     ),
     DebugRequest(DebugRequest),
     StepBack,
-    StepForward,
+    StepForward(StepKind),
     FastForward(bool),
     SetFdsDisk(Option<usize>),
     SaveWram,
@@ -220,9 +260,25 @@ impl Runner {
                             }
                         }
                     }
-                    EmulatorInput::StepForward => {
+                    EmulatorInput::StepForward(kind) => {
                         playback = Playback::StepForward;
-                        self.step(playback, run_until::Frames(1));
+                        match kind {
+                            StepKind::Dot => {
+                                self.step(playback, run_until::Dots(1));
+                            }
+                            StepKind::Cycle => {
+                                self.step(playback, run_until::Cycles(1));
+                            }
+                            StepKind::Instruction => {
+                                self.step(playback, run_until::Instructions(1));
+                            }
+                            StepKind::Scanline => {
+                                self.step(playback, run_until::Scanlines(1));
+                            }
+                            StepKind::Frame => {
+                                self.step(playback, run_until::Frames(1));
+                            }
+                        }
                     }
                     EmulatorInput::LoadCartridge(cart_id, region, rom, file_name, wram, bios) => {
                         let mut rom = std::io::Cursor::new(rom);
@@ -394,7 +450,10 @@ impl Runner {
                         if self.frame % playback.frame_freq() == 0 {
                             self.update_frame();
                         }
-                        self.update_debug(false);
+                        self.update_debug(playback.update_debug());
+                    } else if playback.update_debug() {
+                        self.update_frame();
+                        self.update_debug(true);
                     }
                     self.update_audio(playback);
                 }
@@ -512,7 +571,7 @@ impl Runner {
                 data.extend(machine.get_debug().watch_items());
             });
 
-            self.debug.update_at(self.total_frames);
+            self.debug.update();
         }
     }
 }
