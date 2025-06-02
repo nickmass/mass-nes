@@ -74,8 +74,10 @@ async fn try_spawn_worker<T: WorkerSpawn>(
 
 pub async fn worker<T: WorkerSpawn>(ptr: u32, transferables: Array) {
     let worker = unsafe { Box::from_raw(ptr as *mut T) };
-    let global: DedicatedWorkerGlobalScope = js_sys::global().dyn_into().unwrap_throw();
-    global.post_message(&JsValue::TRUE).unwrap_throw();
+    {
+        let global: DedicatedWorkerGlobalScope = js_sys::global().dyn_into().unwrap_throw();
+        global.post_message(&JsValue::TRUE).unwrap_throw();
+    }
 
     worker.run(transferables).await
 }

@@ -1,6 +1,5 @@
 use crate::{egui, runner::StepKind};
 use eframe::egui::Vec2;
-use tracing::instrument;
 
 use crate::{
     cpu_6502::{Instruction, InstructionIter},
@@ -154,7 +153,6 @@ impl CodeViewer {
         }
     }
 
-    #[instrument(skip_all)]
     pub fn show(
         &mut self,
         pause: &mut bool,

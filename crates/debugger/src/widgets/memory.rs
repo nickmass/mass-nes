@@ -1,5 +1,4 @@
 use crate::egui;
-use tracing::instrument;
 
 pub struct MemoryViewer<'a> {
     title: egui::WidgetText,
@@ -14,7 +13,6 @@ impl<'a> MemoryViewer<'a> {
         }
     }
 
-    #[instrument(skip_all)]
     pub fn show(self, ctx: &egui::Context) {
         const CHUNK_SIZE: usize = 16;
         egui::Window::new(self.title).show(ctx, |ui| {

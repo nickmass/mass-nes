@@ -30,7 +30,6 @@ impl<C: FilterContext> Filter<C> for PalettedFilter {
         &self.program.fragment
     }
 
-    #[tracing::instrument(skip_all)]
     fn process(&mut self, display: &C, _render_size: (f64, f64), screen: &[u16]) -> C::Uniforms {
         let (width, height) = <Self as Filter<C>>::dimensions(self);
 

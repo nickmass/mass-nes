@@ -1,7 +1,6 @@
 use eframe::CreationContext;
 use nes::{ChannelPlayback, SaveWram, UserInput};
 use serde::{Deserialize, Serialize};
-use tracing::instrument;
 use ui::{
     audio::{Audio, SamplesSender},
     filters::NesNtscSetup,
@@ -507,7 +506,6 @@ impl<A: Audio> DebuggerApp<A> {
 }
 
 impl<A: Audio> eframe::App for DebuggerApp<A> {
-    #[instrument(skip_all)]
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.debug.breakpoint() {
             self.app_events.send(AppEvent::Breakpoint);

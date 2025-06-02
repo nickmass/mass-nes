@@ -1,6 +1,5 @@
 use crate::egui;
 use egui::{Vec2, Widget};
-use tracing::instrument;
 
 use crate::debug_state::{DebugUiState, Nametable, PpuView};
 
@@ -50,7 +49,6 @@ impl NametableViewer {
         }
     }
 
-    #[instrument(skip_all)]
     fn render_nts(&mut self, ppu: PpuView, now: u64, ctx: &egui::Context) {
         for nt_idx in 0..4 {
             let nt = match nt_idx {

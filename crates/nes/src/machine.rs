@@ -162,7 +162,6 @@ impl Machine {
         self.do_run(FrameEnd::ClearVblank, crate::run_until::Frames(1), ());
     }
 
-    #[tracing::instrument(skip_all)]
     fn do_run<H: BreakpointHandler, U: RunUntil>(
         &mut self,
         frame_end: FrameEnd,
@@ -400,13 +399,11 @@ impl Machine {
     }
 
     #[cfg(feature = "save-states")]
-    #[tracing::instrument(skip_all)]
     pub fn save_state(&self) -> crate::SaveData {
         crate::SaveData(<Self as SaveState>::save_state(self))
     }
 
     #[cfg(feature = "save-states")]
-    #[tracing::instrument(skip_all)]
     pub fn restore_state(&mut self, state: &crate::SaveData) {
         <Self as SaveState>::restore_state(self, &state.0)
     }

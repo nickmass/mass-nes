@@ -1,6 +1,5 @@
 use crate::egui;
 use egui::{Vec2, Widget};
-use tracing::instrument;
 
 use super::PaletteViewer;
 use crate::debug_state::{ChrTable, DebugUiState, PpuView};
@@ -78,7 +77,6 @@ impl ChrTiles {
         }
     }
 
-    #[instrument(skip_all)]
     fn update_images(
         &mut self,
         ppu: &PpuView,

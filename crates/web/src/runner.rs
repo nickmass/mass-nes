@@ -98,6 +98,12 @@ impl MachineRunner {
             panic!("no machine_channel inputs");
         };
 
+        while self.machine.is_none() {
+            if let Some(input) = inputs.next() {
+                self.handle_input(input);
+            }
+        }
+
         loop {
             for input in inputs.try_recv() {
                 self.handle_input(input);

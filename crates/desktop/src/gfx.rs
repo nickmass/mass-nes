@@ -212,7 +212,6 @@ impl Tracy {
         }
     }
 
-    #[tracing::instrument(skip_all)]
     fn frame(&mut self, screen: &[u16]) {
         if let Some(client) = tracy_client::Client::running() {
             let pixel = |x: usize, y: usize| {

@@ -44,7 +44,6 @@ impl<C: FilterContext> Filter<C> for NtscFilter {
         &self.program.fragment
     }
 
-    #[tracing::instrument(skip_all)]
     fn process(&mut self, display: &C, render_size: (f64, f64), screen: &[u16]) -> C::Uniforms {
         let mut unis = display.create_uniforms();
 

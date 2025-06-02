@@ -258,4 +258,8 @@ impl NesInputs {
     pub fn try_recv(&mut self) -> impl Iterator<Item = EmulatorInput> + '_ {
         self.rx.try_iter()
     }
+
+    pub fn next(&mut self) -> Option<EmulatorInput> {
+        self.rx.recv().ok()
+    }
 }

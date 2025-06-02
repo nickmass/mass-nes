@@ -5,7 +5,6 @@ use nes::{
     Cartridge, DebugEvent, FdsInput, Machine, MapperInput, Region, RunResult, SaveWram, UserInput,
     run_until::{self, RunUntil},
 };
-use tracing::instrument;
 use ui::{audio::SamplesSender, movie::MovieFile, wram::CartridgeId};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -401,7 +400,6 @@ impl Runner {
         }
     }
 
-    #[instrument(skip_all)]
     fn step<U: RunUntil>(&mut self, playback: Playback, until: U) {
         if let Some(machine) = self.machine.as_mut() {
             let frame_end = if self.movie_input.is_some() {
@@ -466,7 +464,6 @@ impl Runner {
         }
     }
 
-    #[instrument(skip_all)]
     fn update_audio(&mut self, playback: Playback) {
         if !playback.update_audio() {
             return;
@@ -491,7 +488,6 @@ impl Runner {
         }
     }
 
-    #[instrument(skip_all)]
     fn update_frame(&mut self) {
         if let Some(machine) = self.machine.as_mut() {
             self.back_buffer.update(|frame| {
@@ -500,7 +496,6 @@ impl Runner {
         }
     }
 
-    #[instrument(skip_all)]
     fn update_debug(&mut self, force_update: bool) {
         if !force_update
             && (self.debug_request.interval == 0

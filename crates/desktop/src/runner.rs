@@ -2,7 +2,6 @@ use std::{collections::VecDeque, time::Duration};
 
 use blip_buf_rs::Blip;
 use nes::{Cartridge, Machine, Region, UserInput};
-use tracing::instrument;
 use ui::audio::SamplesSender;
 
 use crate::{
@@ -106,7 +105,6 @@ impl Runner {
         self.update_frame();
     }
 
-    #[instrument(skip_all)]
     fn update_audio(&mut self) {
         let mut count = 0;
         for (i, v) in self.machine.get_samples().enumerate() {
@@ -118,7 +116,6 @@ impl Runner {
         self.samples_tx.add_samples_from_blip(&mut self.blip);
     }
 
-    #[instrument(skip_all)]
     fn update_frame(&mut self) {
         self.back_buffer.update(|frame| {
             frame.copy_from_slice(self.machine.get_screen());

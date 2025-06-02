@@ -1,6 +1,5 @@
 use crate::egui;
 use egui::{Rect, TextureHandle, Vec2, Widget};
-use tracing::instrument;
 
 use crate::debug_state::{DebugUiState, PpuView, Sprite};
 
@@ -61,7 +60,6 @@ impl SpriteViewer {
         }
     }
 
-    #[instrument(skip_all)]
     fn render_sprites(&mut self, ppu: &PpuView, now: u64, ctx: &egui::Context) {
         self.sprites.clear();
 
