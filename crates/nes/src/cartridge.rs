@@ -327,9 +327,12 @@ impl Cartridge {
             return Some(RomType::Ines);
         }
 
-        let ascii_ext = &file_name.as_bytes()[file_name.len() - 4..];
+        let fds_ext = (file_name.len() >= 4)
+            .then(|| &file_name.as_bytes()[file_name.len() - 4..])
+            .map(|ext| ext.eq_ignore_ascii_case(b".fds"))
+            .unwrap_or(false);
         let fds_header = b"FDS\x1a";
-        if rom.starts_with(fds_header) || ascii_ext.eq_ignore_ascii_case(b".fds") {
+        if rom.starts_with(fds_header) || fds_ext {
             return Some(RomType::Fds);
         }
 

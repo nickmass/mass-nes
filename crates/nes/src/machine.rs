@@ -62,8 +62,9 @@ pub enum FdsInput {
 pub struct Machine {
     #[cfg_attr(feature = "save-states", save(skip))]
     region: Region,
-    cycle: u64,
-    step_start_cycle: u64,
+    tick: u64,
+    step_start_tick: u64,
+    cpu_tick: Option<TickResult>,
 
     #[cfg_attr(feature = "save-states", save(nested))]
     pub(crate) ppu: Ppu,
@@ -104,8 +105,9 @@ impl Machine {
 
         let mut machine = Machine {
             region,
-            cycle: 0,
-            step_start_cycle: 0,
+            tick: 0,
+            step_start_tick: 0,
+            cpu_tick: None,
             ppu,
             cpu,
             cpu_bus,
@@ -170,80 +172,76 @@ impl Machine {
     ) -> RunResult {
         #[cfg(feature = "debugger")]
         let _ = self.debug.take_interest_notification();
-        self.step_start_cycle = self.cycle;
+        self.step_start_tick = self.tick;
         while !until.done() {
-            let tick_result = self.cpu.tick(self.cpu_pin_in, &mut until);
+            if self.tick % 3 == 0 {
+                self.cpu_pin_in.irq = self.apu.get_irq() | self.mapper.get_irq();
+                self.cpu_pin_in.nmi = self.ppu.nmi();
+                self.cpu_tick = Some(self.cpu.tick(self.cpu_pin_in, &mut until));
+                self.cpu_pin_in.power = false;
+                self.cpu_pin_in.reset = false;
 
-            let cpu_state = self.cpu.debug_state();
-            self.debug.trace(&self, cpu_state);
+                let cpu_state = self.cpu.debug_state();
+                self.debug.trace(&self, cpu_state);
 
-            if let Some(sample) = self.cpu.dma.dmc_sample() {
-                self.apu.dmc.dmc_read(sample);
-            }
-
-            self.apu.tick(&mut until);
-            self.mapper.tick();
-
-            self.tick_ppu(frame_end, &mut until);
-            self.tick_ppu(frame_end, &mut until);
-
-            match tick_result {
-                TickResult::Fetch(addr) => {
-                    let value = self.read(addr);
-                    self.debug.event_with_data(DebugEvent::CpuExec(addr), value);
-                    self.debug.fetch(addr);
-                    self.cpu_pin_in.data = value;
-                    until.add_instruction();
+                if let Some(sample) = self.cpu.dma.dmc_sample() {
+                    self.apu.dmc.dmc_read(sample);
                 }
-                TickResult::Read(addr) => {
-                    let value = self.read(addr);
-                    self.cpu_pin_in.data = value;
-                }
-                TickResult::Write(addr, value) => self.write(addr, value),
-                // Idle ticks while DMC/OAM DMA holds the bus, this is a simplification as
-                // the behavior depends on the register and the model of console.
-                // 200x registers will see multiple reads and no idle cycles as the are
-                // external to the CPU, while 400X registers (controllers) will see one
-                // read per contiguous set of writes so using idle cycles may be useful.
-                // Going to use idle cycles for now as they seem less prone to breaking
-                // actual games.
-                TickResult::Idle(_) => (),
-            }
 
-            self.tick_ppu(frame_end, &mut until);
-
-            if self.region.extra_ppu_tick() && self.cycle % 5 == 0 {
+                self.apu.tick(&mut until);
+                self.mapper.tick();
                 self.tick_ppu(frame_end, &mut until);
+            } else {
+                self.tick_ppu(frame_end, &mut until);
+                if let Some(tick) = self.cpu_tick.take() {
+                    match tick {
+                        TickResult::Fetch(addr) => {
+                            let value = self.read(addr);
+                            self.debug.event_with_data(DebugEvent::CpuExec(addr), value);
+                            self.debug.fetch(addr);
+                            self.cpu_pin_in.data = value;
+                            until.add_instruction();
+                        }
+                        TickResult::Read(addr) => {
+                            let value = self.read(addr);
+                            self.cpu_pin_in.data = value;
+                        }
+                        TickResult::Write(addr, value) => self.write(addr, value),
+                        // Idle ticks while DMC/OAM DMA holds the bus, this is a simplification as
+                        // the behavior depends on the register and the model of console.
+                        // 200x registers will see multiple reads and no idle cycles as the are
+                        // external to the CPU, while 400X registers (controllers) will see one
+                        // read per contiguous set of writes so using idle cycles may be useful.
+                        // Going to use idle cycles for now as they seem less prone to breaking
+                        // actual games.
+                        TickResult::Idle(_) => (),
+                    }
+
+                    if let Some(addr) = self.apu.get_dmc_req() {
+                        self.cpu.dma.request_dmc_dma(addr);
+                    }
+
+                    if let Some(addr) = self.apu.get_oam_req() {
+                        self.cpu.dma.request_oam_dma(addr as u16);
+                    }
+                }
             }
 
-            if let Some(addr) = self.apu.get_dmc_req() {
-                self.cpu.dma.request_dmc_dma(addr);
+            // Putting this tick here prevents single stepping to this specific PAL dot, not ideal
+            if self.region().extra_ppu_tick() && self.tick % 15 == 0 {
+                self.tick_ppu(frame_end, &mut until);
+                self.step_start_tick = self.step_start_tick.saturating_sub(1);
             }
 
-            if let Some(addr) = self.apu.get_oam_req() {
-                self.cpu.dma.request_oam_dma(addr as u16);
-            }
-
-            let apu_irq = self.apu.get_irq();
-            let mapper_irq = self.mapper.get_irq();
-
-            self.cpu_pin_in.irq = apu_irq | mapper_irq;
-            self.cpu_pin_in.nmi = self.ppu.nmi();
-
-            self.cpu_pin_in.power = false;
-            self.cpu_pin_in.reset = false;
-            self.cycle += 1;
+            self.tick += 1;
 
             if self.debug.breakpoint(&mut break_handler) {
-                #[cfg(feature = "debugger")]
                 self.watch();
                 return RunResult::Breakpoint;
             }
         }
 
-        #[cfg(feature = "debugger")]
         self.watch();
-
         RunResult::Done
     }
 
@@ -253,15 +251,17 @@ impl Machine {
         self.debug.trace_ppu(&self, ppu_state);
     }
 
-    #[cfg(feature = "debugger")]
     fn watch(&self) {
-        let mut visitor = self.debug.watch_visitor();
-        self.cpu.watch(&mut visitor);
-        self.ppu.watch(&mut visitor);
-        self.apu.watch(&mut visitor);
-        self.mapper.watch(&mut visitor);
-        let mut emu = visitor.group("Emulator");
-        emu.value("Step Cycles", (self.cycle - self.step_start_cycle) as u32);
+        #[cfg(feature = "debugger")]
+        {
+            let mut visitor = self.debug.watch_visitor();
+            self.cpu.watch(&mut visitor);
+            self.ppu.watch(&mut visitor);
+            self.apu.watch(&mut visitor);
+            self.mapper.watch(&mut visitor);
+            let mut emu = visitor.group("Emulator");
+            emu.value("Step Ticks", (self.tick - self.step_start_tick) as u32);
+        }
     }
 
     fn read(&mut self, addr: u16) -> u8 {

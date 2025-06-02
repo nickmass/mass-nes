@@ -35,7 +35,7 @@ impl Region {
     pub const fn prerender_line(&self) -> u32 {
         match self {
             Region::Ntsc => 261,
-            Region::Pal => 310,
+            Region::Pal => 311,
         }
     }
 
