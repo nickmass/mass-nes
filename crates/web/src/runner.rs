@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use nes::{FrameEnd, run_until::RunUntil};
 use web_sys::{
     js_sys::Array,
     wasm_bindgen::{self, prelude::*},
@@ -56,12 +57,12 @@ impl WorkerSpawn for MachineSpawner {
 struct MachineRunner {
     machine: Option<nes::Machine>,
     region: nes::Region,
-    frame_samples: usize,
     blip_delta: i32,
     blip: blip_buf_rs::Blip,
     back_buffer: GfxBackBuffer,
     samples_tx: SamplesSender,
     nes_inputs: Option<NesInputs>,
+    last_frame: Option<u32>,
 }
 
 impl MachineRunner {
@@ -80,17 +81,15 @@ impl MachineRunner {
             sample_rate as f64,
         );
 
-        let frame_samples = ((sample_rate as f64) / region.refresh_rate()).ceil() as usize;
-
         Self {
             machine: None,
             region,
-            frame_samples,
             nes_inputs: Some(nes_inputs),
             blip_delta: 0,
             blip,
             back_buffer,
             samples_tx,
+            last_frame: None,
         }
     }
 
@@ -104,11 +103,12 @@ impl MachineRunner {
                 self.handle_input(input);
             }
 
-            if self.samples_tx.wants_sample_count(self.frame_samples) {
-                self.step();
+            if let Some(samples) = self
+                .samples_tx
+                .wait_for_wants_samples(Duration::from_millis(1))
+            {
+                self.step(samples as u32);
             }
-
-            std::thread::sleep(Duration::from_millis(1));
         }
     }
 
@@ -122,6 +122,7 @@ impl MachineRunner {
                 };
                 let machine = nes::Machine::new(self.region, cart);
                 self.machine = Some(machine);
+                self.last_frame = None;
             }
             EmulatorInput::UserInput(input) => {
                 if let Some(machine) = self.machine.as_mut() {
@@ -131,9 +132,18 @@ impl MachineRunner {
         }
     }
 
-    fn step(&mut self) {
+    fn step(&mut self, samples: u32) {
         if let Some(machine) = self.machine.as_mut() {
-            machine.run();
+            let until = nes::run_until::Frames(1).or(nes::run_until::Samples(samples));
+            machine.run_with_breakpoints(FrameEnd::ClearVblank, until, ());
+            let frame = Some(machine.frame());
+
+            if frame != self.last_frame {
+                self.back_buffer.update(|frame| {
+                    frame.copy_from_slice(machine.get_screen());
+                });
+                self.last_frame = frame;
+            }
 
             let mut count = 0;
 
@@ -145,10 +155,6 @@ impl MachineRunner {
             self.blip.end_frame(count as u32);
 
             self.samples_tx.add_samples_from_blip(&mut self.blip);
-
-            self.back_buffer.update(|frame| {
-                frame.copy_from_slice(machine.get_screen());
-            });
         }
     }
 }

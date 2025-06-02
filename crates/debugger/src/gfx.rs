@@ -184,12 +184,10 @@ impl GfxBackBuffer {
     }
 
     pub fn update<F: FnOnce(&mut [u16])>(&mut self, func: F) {
-        {
-            let mut frame = self.frame.lock().unwrap();
-            func(&mut frame);
-            self.updated.store(true, Ordering::Relaxed);
-            self.repaint.request();
-        }
+        let mut frame = self.frame.lock().unwrap();
+        func(&mut frame);
+        self.updated.store(true, Ordering::Relaxed);
+        self.repaint.request();
     }
 
     pub fn attempt_swap(&self, other: &mut Vec<u16>) {
