@@ -1,4 +1,4 @@
-use eframe::{egui::PaintCallbackInfo, egui_glow::Painter, glow};
+use eframe::{egui::PaintCallbackInfo, egui_glow::Painter, epaint::ViewportInPixels, glow};
 use glow::HasContext;
 use serde::{Deserialize, Serialize};
 
@@ -53,6 +53,8 @@ pub struct Gfx {
     back_buffer: GfxBackBuffer,
     selected_filter: Option<Filter>,
     current_filter: Option<Filter>,
+    frame_buffer: Option<gl::FrameBuffer>,
+    simple_draw: gl::Program,
 }
 
 impl Gfx {
@@ -86,6 +88,11 @@ impl Gfx {
 
         let vertex_buffer = gl::VertexBuffer::new(&ctx, gl::Polygon::TriangleFan, &shape)?;
 
+        let quad_shaders = ui::filters::Preprocessor::new(ui::filters::TEXTURED_QUAD_SHADER)
+            .process()
+            .map_err(|e| format!("{e:?}"))?;
+        let simple_draw = gl::Program::new(&ctx, quad_shaders.vertex, quad_shaders.fragment)?;
+
         let tracy = Tracy::new(palette);
 
         Ok(Self {
@@ -97,6 +104,8 @@ impl Gfx {
             tracy,
             selected_filter: None,
             current_filter: None,
+            frame_buffer: None,
+            simple_draw,
         })
     }
 
@@ -111,57 +120,132 @@ impl Gfx {
             .unwrap_or((256, 240))
     }
 
-    pub fn swap(&mut self) {
-        self.back_buffer.attempt_swap(&mut self.frame);
-    }
-
     pub fn filter_parameters(&mut self) -> impl Iterator<Item = &mut Parameter<'static>> {
         self.filter.iter_mut().flat_map(|f| f.parameters_mut())
     }
 
+    fn swap(&mut self) -> bool {
+        self.back_buffer.attempt_swap(&mut self.frame)
+    }
+
+    fn is_framebuffer_ready(&self, viewport: &ViewportInPixels) -> bool {
+        let Some(fb) = self.frame_buffer.as_ref() else {
+            return false;
+        };
+
+        let (fb_width, fb_height) = fb.size();
+
+        viewport.width_px as u16 == fb_width && viewport.height_px as u16 == fb_height
+    }
+
+    fn update_framebuffer(
+        &mut self,
+        ctx: &GlowContext,
+        viewport: &ViewportInPixels,
+    ) -> Result<bool, String> {
+        if self.is_framebuffer_ready(viewport) {
+            return Ok(false);
+        }
+
+        if let Some(current_fb) = self.frame_buffer.take() {
+            current_fb.delete(ctx);
+        }
+
+        let width = viewport.width_px as u16;
+        let height = viewport.height_px as u16;
+
+        let fb = gl::FrameBuffer::new(ctx, width, height)?;
+        self.frame_buffer = Some(fb);
+        Ok(true)
+    }
+
+    fn update_filter(&mut self, ctx: &GlowContext) -> bool {
+        let Some(selected_filter) = self.selected_filter else {
+            return false;
+        };
+
+        if Some(selected_filter) == self.current_filter {
+            return false;
+        }
+
+        let ntsc_setup = ui::filters::NesNtscSetup::composite();
+
+        let filter: Box<dyn SyncFilter> = match selected_filter {
+            Filter::Paletted => Box::new(ui::filters::PalettedFilter::new(
+                ntsc_setup.generate_palette(),
+            )),
+            Filter::Ntsc => Box::new(ui::filters::NtscFilter::new(&ntsc_setup)),
+            Filter::Crt => Box::new(ui::filters::CrtFilter::new(&ntsc_setup)),
+        };
+
+        match gl::Program::new(&ctx, filter.vertex_shader(), filter.fragment_shader()) {
+            Ok(new_program) => {
+                let old_program = self.program.take();
+                if let Some(old_program) = old_program {
+                    old_program.delete(&ctx);
+                }
+
+                self.program = Some(new_program);
+                self.filter = Some(filter);
+                self.current_filter = self.selected_filter;
+            }
+            Err(e) => {
+                tracing::error!("unable to compile filter: {e}");
+                self.selected_filter = None;
+            }
+        }
+
+        true
+    }
+
+    fn draw_framebuffer(&mut self, ctx: &GlowContext) {
+        let Some(fb) = self.frame_buffer.as_ref() else {
+            return;
+        };
+
+        let mut uniforms = gl::Uniforms::new(ctx);
+        uniforms.add("tex", fb.texture().persistant());
+        self.simple_draw
+            .draw(ctx, &self.vertex_buffer, None, &uniforms)
+    }
+
     pub fn render(&mut self, painter: &Painter, paint_info: PaintCallbackInfo) {
         let ctx = GlowContext(painter.gl().clone());
-        self.swap();
+        let viewport = paint_info.viewport_in_pixels();
 
-        if let Some(selected_filter) = self.selected_filter {
-            if Some(selected_filter) != self.current_filter {
-                let ntsc_setup = ui::filters::NesNtscSetup::composite();
+        let updated_filter = self.update_filter(&ctx);
 
-                let filter: Box<dyn SyncFilter> = match selected_filter {
-                    Filter::Paletted => Box::new(ui::filters::PalettedFilter::new(
-                        ntsc_setup.generate_palette(),
-                    )),
-                    Filter::Ntsc => Box::new(ui::filters::NtscFilter::new(&ntsc_setup)),
-                    Filter::Crt => Box::new(ui::filters::CrtFilter::new(&ntsc_setup)),
-                };
-
-                match gl::Program::new(&ctx, filter.vertex_shader(), filter.fragment_shader()) {
-                    Ok(new_program) => {
-                        let old_program = self.program.take();
-                        if let Some(old_program) = old_program {
-                            old_program.delete(&ctx);
-                        }
-
-                        self.program = Some(new_program);
-                        self.filter = Some(filter);
-                        self.current_filter = self.selected_filter;
-                    }
-                    Err(e) => {
-                        tracing::error!("unable to compile filter: {e}");
-                        self.selected_filter = None;
-                    }
-                }
+        let updated_fb = match self.update_framebuffer(&ctx, &viewport) {
+            Ok(update) => update,
+            Err(e) => {
+                tracing::error!("unable to create framebuffer: {e}");
+                return;
             }
+        };
+
+        if !self.swap() && !updated_fb && !updated_filter {
+            self.draw_framebuffer(&ctx);
+            return;
         }
 
         let Some((filter, program)) = self.filter.as_mut().zip(self.program.as_mut()) else {
             return;
         };
 
-        let view = paint_info.viewport_in_pixels();
-        let size = (view.width_px as f64, view.height_px as f64);
+        let Some(fb) = self.frame_buffer.as_ref() else {
+            return;
+        };
+
+        let size = (viewport.width_px as f64, viewport.height_px as f64);
         let uniforms = filter.process(&ctx, size, &self.frame);
+
+        ctx.fb_viewport(&viewport);
+        fb.bind(&ctx);
         program.draw(&ctx, &self.vertex_buffer, None, &uniforms);
+        fb.unbind(&ctx);
+
+        ctx.render_viewport(&viewport);
+        self.draw_framebuffer(&ctx);
         self.tracy.frame(&self.frame);
     }
 }
@@ -190,18 +274,47 @@ impl GfxBackBuffer {
         self.repaint.request();
     }
 
-    pub fn attempt_swap(&self, other: &mut Vec<u16>) {
+    pub fn attempt_swap(&self, other: &mut Vec<u16>) -> bool {
         if self.updated.load(Ordering::Relaxed) {
             let Some(mut frame) = self.frame.try_lock().ok() else {
-                return;
+                return false;
             };
             std::mem::swap(&mut *frame, other);
             self.updated.store(false, Ordering::Relaxed);
+            true
+        } else {
+            false
         }
     }
 }
 
 pub struct GlowContext(gl::GlowContext);
+
+impl GlowContext {
+    fn fb_viewport(&self, viewport: &ViewportInPixels) {
+        unsafe {
+            self.scissor(0, 0, viewport.width_px, viewport.height_px);
+            self.viewport(0, 0, viewport.width_px, viewport.height_px);
+        }
+    }
+
+    fn render_viewport(&self, viewport: &ViewportInPixels) {
+        unsafe {
+            self.scissor(
+                viewport.left_px,
+                viewport.from_bottom_px,
+                viewport.width_px,
+                viewport.height_px,
+            );
+            self.viewport(
+                viewport.left_px,
+                viewport.from_bottom_px,
+                viewport.width_px,
+                viewport.height_px,
+            );
+        }
+    }
+}
 
 impl std::ops::Deref for GlowContext {
     type Target = gl::GlowContext;

@@ -58,6 +58,7 @@ pub(crate) const PALETTED_SHADER: &'static str = include_str!("../../shaders/pal
 pub(crate) const NTSC_SHADER: &'static str = include_str!("../../shaders/ntsc.glsl");
 pub(crate) const CRT_SHADER: &'static str = include_str!("../../shaders/crt.glsl");
 pub const SVG_SHADER: &'static str = include_str!("../../shaders/svg.glsl");
+pub const TEXTURED_QUAD_SHADER: &'static str = include_str!("../../shaders/textured_quad.glsl");
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) const PRELUDE_SHADER: &'static str = include_str!("../../shaders/prelude_gl.glsl");

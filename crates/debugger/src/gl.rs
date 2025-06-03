@@ -330,6 +330,17 @@ impl AsUniform for Texture {
     }
 }
 
+impl AsUniform for PersistantTexture {
+    fn bind(&self, ctx: &GlowContext, program: &Program, location: Option<&UniformLocation>) {
+        unsafe {
+            let texture_unit = program.next_texture_unit();
+            ctx.active_texture(glow::TEXTURE0 + texture_unit);
+            ctx.bind_texture(glow::TEXTURE_2D, Some(self.0));
+            ctx.uniform_1_i32(location, texture_unit as i32);
+        }
+    }
+}
+
 impl AsUniform for Box<dyn AsUniform> {
     fn bind(&self, ctx: &GlowContext, program: &Program, location: Option<&UniformLocation>) {
         (**self).bind(ctx, program, location)
@@ -426,6 +437,8 @@ impl Into<i32> for TextureFilter {
     }
 }
 
+pub struct PersistantTexture(glow::Texture);
+
 pub struct Texture {
     texture: glow::Texture,
 }
@@ -438,6 +451,25 @@ impl Texture {
         height: u16,
         pixels: &[u8],
     ) -> Result<Self, String> {
+        Self::create(ctx, format, width, height, Some(pixels))
+    }
+
+    pub fn empty(
+        ctx: &GlowContext,
+        format: PixelFormat,
+        width: u16,
+        height: u16,
+    ) -> Result<Self, String> {
+        Self::create(ctx, format, width, height, None)
+    }
+
+    fn create(
+        ctx: &GlowContext,
+        format: PixelFormat,
+        width: u16,
+        height: u16,
+        pixels: Option<&[u8]>,
+    ) -> Result<Texture, String> {
         unsafe {
             let texture = ctx.create_texture()?;
             ctx.bind_texture(glow::TEXTURE_2D, Some(texture));
@@ -450,7 +482,7 @@ impl Texture {
                 0,
                 format.format(),
                 format.ty(),
-                glow::PixelUnpackData::Slice(Some(pixels)),
+                glow::PixelUnpackData::Slice(pixels),
             );
 
             ctx.tex_parameter_i32(
@@ -493,6 +525,72 @@ impl Texture {
             ctx.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, filter.into());
 
             self
+        }
+    }
+
+    pub fn persistant(&self) -> PersistantTexture {
+        PersistantTexture(self.texture)
+    }
+}
+
+pub struct FrameBuffer {
+    texture: Texture,
+    frame_buffer: glow::Framebuffer,
+    width: u16,
+    height: u16,
+}
+
+impl FrameBuffer {
+    pub fn new(ctx: &GlowContext, width: u16, height: u16) -> Result<FrameBuffer, String> {
+        let texture = Texture::empty(ctx, PixelFormat::RGB, width, height)?;
+        unsafe {
+            let frame_buffer = ctx.create_framebuffer().expect("Create FrameBuffer");
+            ctx.bind_framebuffer(glow::FRAMEBUFFER, Some(frame_buffer));
+            ctx.framebuffer_texture_2d(
+                glow::FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                glow::TEXTURE_2D,
+                Some(texture.texture),
+                0,
+            );
+            ctx.bind_framebuffer(glow::FRAMEBUFFER, None);
+
+            Ok(Self {
+                frame_buffer,
+                texture,
+                width,
+                height,
+            })
+        }
+    }
+
+    pub fn bind(&self, ctx: &GlowContext) {
+        unsafe {
+            ctx.viewport(0, 0, self.width as i32, self.height as i32);
+            ctx.bind_framebuffer(glow::FRAMEBUFFER, Some(self.frame_buffer));
+        }
+    }
+
+    pub fn unbind(&self, ctx: &GlowContext) {
+        unsafe {
+            ctx.bind_framebuffer(glow::FRAMEBUFFER, None);
+        }
+    }
+
+    pub fn texture(&self) -> Texture {
+        Texture {
+            texture: self.texture.texture,
+        }
+    }
+
+    pub fn size(&self) -> (u16, u16) {
+        (self.width, self.height)
+    }
+
+    pub fn delete(self, ctx: &GlowContext) {
+        unsafe {
+            ctx.delete_framebuffer(self.frame_buffer);
+            self.texture.delete(ctx);
         }
     }
 }
