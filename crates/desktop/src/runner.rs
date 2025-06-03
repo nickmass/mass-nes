@@ -1,7 +1,10 @@
 use std::{collections::VecDeque, time::Duration};
 
 use blip_buf_rs::Blip;
-use nes::{Cartridge, Machine, Region, UserInput};
+use nes::{
+    Cartridge, FrameEnd, Machine, Region, UserInput,
+    run_until::{self, RunUntil},
+};
 use ui::audio::SamplesSender;
 
 use crate::{
@@ -16,10 +19,9 @@ pub struct Runner {
     samples_tx: SamplesSender,
     blip: Blip,
     blip_delta: i32,
-    frame_samples: usize,
     save_states: Vec<Option<(usize, nes::SaveData)>>,
     save_store: SaveStore,
-    frame: usize,
+    frame: Option<u32>,
 }
 
 impl Runner {
@@ -37,7 +39,6 @@ impl Runner {
             region.frame_ticks() * region.refresh_rate(),
             sample_rate as f64,
         );
-        let frame_samples = ((sample_rate as f64) / region.refresh_rate()).ceil() as usize;
 
         Self {
             machine,
@@ -46,10 +47,9 @@ impl Runner {
             samples_tx,
             blip,
             blip_delta: 0,
-            frame_samples,
             save_states: vec![None; 10],
             save_store: SaveStore::new(32000, 5),
-            frame: 0,
+            frame: None,
         }
     }
 
@@ -63,30 +63,33 @@ impl Runner {
                 match input {
                     EmulatorInput::Nes(input) => self.handle_input(input),
                     EmulatorInput::SaveState(slot) => {
-                        let data = self.machine.save_state();
+                        if let Some(frame) = self.frame {
+                            let data = self.machine.save_state();
 
-                        self.save_states[slot as usize] = Some((self.frame, data));
+                            self.save_states[slot as usize] = Some((frame as usize, data));
+                        }
                     }
                     EmulatorInput::RestoreState(slot) => {
                         if let Some((frame, data)) = self.save_states[slot as usize].as_ref() {
-                            self.frame = *frame;
+                            self.frame = Some(*frame as u32);
                             self.machine.restore_state(data);
                         }
                     }
                     EmulatorInput::Rewind => {
                         if let Some((frame, data)) = self.save_store.pop() {
-                            self.frame = frame;
+                            self.frame = Some(frame as u32);
                             self.machine.restore_state(&data);
                         }
                     }
                 }
             }
 
-            if self.samples_tx.wants_sample_count(self.frame_samples) {
-                self.step();
+            if let Some(samples) = self
+                .samples_tx
+                .wait_for_wants_samples(Duration::from_millis(1))
+            {
+                self.step(samples as u32);
             }
-
-            std::thread::sleep(Duration::from_millis(1));
         }
     }
 
@@ -94,15 +97,21 @@ impl Runner {
         self.machine.handle_input(input);
     }
 
-    fn step(&mut self) {
-        self.machine.run();
-
-        self.frame += 1;
-        self.save_store
-            .push(self.frame, || self.machine.save_state());
+    fn step(&mut self, samples: u32) {
+        self.machine.run_with_breakpoints(
+            FrameEnd::ClearVblank,
+            run_until::Frames(1).or(run_until::Samples(samples)),
+            (),
+        );
 
         self.update_audio();
-        self.update_frame();
+        let frame = self.machine.frame();
+        if self.frame != Some(frame) {
+            self.frame = Some(frame);
+            self.save_store
+                .push(frame as usize, || self.machine.save_state());
+            self.update_frame();
+        }
     }
 
     fn update_audio(&mut self) {
