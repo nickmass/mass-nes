@@ -31,7 +31,7 @@ pub enum TickResult {
     Fetch(u16),
     Read(u16),
     Write(u16, u8),
-    Idle(#[allow(unused)] u16),
+    Idle(u16),
 }
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
@@ -87,6 +87,7 @@ pub struct Cpu {
     pub dma: Dma,
     interrupts: Interrupts,
     halt: bool,
+    had_halt: bool,
 }
 
 impl Cpu {
@@ -99,6 +100,7 @@ impl Cpu {
             dma: Dma::new(region),
             interrupts: Interrupts::new(),
             halt: false,
+            had_halt: false,
         }
     }
 
@@ -162,7 +164,13 @@ impl Cpu {
             result
         } else {
             let tick = self.step();
-            self.dma.try_halt(tick).unwrap_or(tick)
+
+            if let Some(dma_tick) = self.dma.try_halt(tick) {
+                self.had_halt = true;
+                dma_tick
+            } else {
+                tick
+            }
         };
 
         self.interrupts.tick(&pin_in);
@@ -183,6 +191,7 @@ impl Cpu {
         if let Some(tick) = self.interrupts.interrupt(&self.pin_in, &mut self.regs) {
             tick
         } else {
+            self.had_halt = false;
             self.stage = Stage::Decode;
             self.regs.fetch_pc()
         }
@@ -1255,7 +1264,11 @@ impl Cpu {
 
     fn ill_inst_ahx(&mut self, addr: u16) -> ExecResult {
         let base_addr = addr.wrapping_sub(self.regs.reg_y as u16);
-        let hi = ((base_addr >> 8) as u8).wrapping_add(1);
+        let hi = if !self.had_halt {
+            ((base_addr >> 8) as u8).wrapping_add(1)
+        } else {
+            0xff
+        };
         let value = self.regs.reg_a & self.regs.reg_x & hi;
 
         let wrapped = addr & 0xff00 != base_addr & 0xff00;
@@ -1526,7 +1539,11 @@ impl Cpu {
 
     fn ill_inst_shx(&mut self, addr: u16) -> ExecResult {
         let base_addr = addr.wrapping_sub(self.regs.reg_y as u16);
-        let hi = ((base_addr >> 8) as u8).wrapping_add(1);
+        let hi = if !self.had_halt {
+            ((base_addr >> 8) as u8).wrapping_add(1)
+        } else {
+            0xff
+        };
         let value = self.regs.reg_x & hi;
 
         let wrapped = addr & 0xff00 != base_addr & 0xff00;
@@ -1542,7 +1559,11 @@ impl Cpu {
 
     fn ill_inst_shy(&mut self, addr: u16) -> ExecResult {
         let base_addr = addr.wrapping_sub(self.regs.reg_x as u16);
-        let hi = ((base_addr >> 8) as u8).wrapping_add(1);
+        let hi = if !self.had_halt {
+            ((base_addr >> 8) as u8).wrapping_add(1)
+        } else {
+            0xff
+        };
         let value = self.regs.reg_y & hi;
 
         let wrapped = addr & 0xff00 != base_addr & 0xff00;
@@ -1602,7 +1623,11 @@ impl Cpu {
 
     fn ill_inst_tas(&mut self, addr: u16) -> ExecResult {
         let base_addr = addr.wrapping_sub(self.regs.reg_y as u16);
-        let hi = ((base_addr >> 8) as u8).wrapping_add(1);
+        let hi = if !self.had_halt {
+            ((base_addr >> 8) as u8).wrapping_add(1)
+        } else {
+            0xff
+        };
         self.regs.reg_sp = self.regs.reg_a & self.regs.reg_x;
         let value = self.regs.reg_a & self.regs.reg_x & hi;
 

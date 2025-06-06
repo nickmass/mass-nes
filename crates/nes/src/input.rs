@@ -144,9 +144,9 @@ impl Input {
             0x4016 => {
                 if value & 0x01 == 1 {
                     self.input_buffer = self.input;
+                    self.read_counter = [8, 8];
                 } else {
                     self.read_shifter = self.input_buffer;
-                    self.read_counter = [8, 8];
                 }
             }
             _ => unimplemented!(),

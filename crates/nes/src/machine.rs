@@ -212,9 +212,11 @@ impl Machine {
                         // 200x registers will see multiple reads and no idle cycles as the are
                         // external to the CPU, while 400X registers (controllers) will see one
                         // read per contiguous set of writes so using idle cycles may be useful.
-                        // Going to use idle cycles for now as they seem less prone to breaking
-                        // actual games.
-                        TickResult::Idle(_) => (),
+                        TickResult::Idle(addr) => {
+                            if addr & 0xff00 != 0x4000 {
+                                self.read(addr);
+                            }
+                        }
                     }
 
                     if let Some(addr) = self.apu.get_dmc_req() {
