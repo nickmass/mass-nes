@@ -196,6 +196,7 @@ impl Cpu {
     fn addressing(&mut self, addressing: Addressing, instruction: Instruction) -> TickResult {
         use Addressing::*;
         let address_res = match addressing {
+            Jsr => self.addr_jsr(),
             None => self.addr_none(),
             Accumulator => self.addr_accumulator(),
             Immediate => self.addr_immediate(),
@@ -220,6 +221,10 @@ impl Cpu {
             }
             AddressResult::Address(addr) => self.execute(addr, instruction),
         }
+    }
+
+    fn addr_jsr(&mut self) -> AddressResult {
+        AddressResult::Address(0x0000)
     }
 
     fn addr_none(&mut self) -> AddressResult {
@@ -461,7 +466,7 @@ impl Cpu {
             Inx => self.inst_inx(),
             Iny => self.inst_iny(),
             Jmp => self.inst_jmp(address),
-            Jsr(step) => self.inst_jsr(address, step),
+            Jsr(step) => self.inst_jsr(step),
             Lda(step) => self.inst_lda(address, step),
             Ldx(step) => self.inst_ldx(address, step),
             Ldy(step) => self.inst_ldy(address, step),
@@ -865,28 +870,37 @@ impl Cpu {
         ExecResult::Done
     }
 
-    fn inst_jsr(&mut self, addr: u16, step: Jsr) -> ExecResult {
+    fn inst_jsr(&mut self, step: Jsr) -> ExecResult {
         use ExecResult::*;
         use Jsr::*;
         match step {
+            ReadLow => Next(self.regs.read_pc(), Instruction::Jsr(ReadDummy)),
             ReadDummy => {
                 let dummy_addr = self.regs.reg_sp as u16 | 0x100;
                 Next(
                     TickResult::Read(dummy_addr),
-                    Instruction::Jsr(WriteRegPcHigh),
+                    Instruction::Jsr(WriteRegPcHigh(self.pin_in.data)),
                 )
             }
-            WriteRegPcHigh => {
-                let value = (self.regs.reg_pc.wrapping_sub(1) >> 8) & 0xff;
+            WriteRegPcHigh(operand_low) => {
+                let value = (self.regs.reg_pc >> 8) & 0xff;
                 Next(
                     self.regs.push_stack(value as u8),
-                    Instruction::Jsr(WriteRegPcLow),
+                    Instruction::Jsr(WriteRegPcLow(operand_low)),
                 )
             }
-            WriteRegPcLow => {
-                let value = self.regs.reg_pc.wrapping_sub(1) & 0xff;
-                self.regs.reg_pc = addr;
-                Tick(self.regs.push_stack(value as u8))
+            WriteRegPcLow(operand_low) => {
+                let value = self.regs.reg_pc & 0xff;
+                Next(
+                    self.regs.push_stack(value as u8),
+                    Instruction::Jsr(ReadHigh(operand_low)),
+                )
+            }
+            ReadHigh(operand_low) => Next(self.regs.read_pc(), Instruction::Jsr(Exec(operand_low))),
+            Exec(operand_low) => {
+                let operand_high = self.pin_in.data;
+                self.regs.reg_pc = (operand_high as u16) << 8 | (operand_low as u16);
+                Done
             }
         }
     }

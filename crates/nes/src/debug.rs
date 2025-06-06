@@ -320,7 +320,7 @@ mod debugger {
                     let v = read(a2);
                     format!("${:02X},X @ {:04X} = {:02X}", a1, a2, v)
                 }
-                Addressing::Absolute(..) => {
+                Addressing::Absolute(..) | Addressing::Jsr => {
                     let a_low = read_pc() as u16;
                     let a_high = read_pc();
                     let a = ((a_high as u16) << 8) | a_low;

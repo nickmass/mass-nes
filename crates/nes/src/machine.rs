@@ -270,13 +270,16 @@ impl Machine {
             Some((addr, DeviceKind::Ppu)) => self.ppu.read(addr),
             Some((addr, DeviceKind::Mapper)) => self.mapper.read(BusKind::Cpu, addr),
             Some((addr, DeviceKind::Input)) => self.input.read(addr, self.cpu_bus.open_bus.get()),
-            Some((addr, DeviceKind::Apu)) => self.apu.read(addr),
+            Some((addr, DeviceKind::Apu)) => self.apu.read(addr, self.cpu_bus.open_bus.get()),
             Some((addr, DeviceKind::Debug)) => self.debug.read(addr),
             None => self.cpu_bus.open_bus.get(),
             _ => unimplemented!(),
         };
         self.debug.event_with_data(DebugEvent::CpuRead(addr), value);
-        self.cpu_bus.open_bus.set(value);
+
+        if addr != 0x4015 {
+            self.cpu_bus.open_bus.set(value);
+        }
 
         value
     }
@@ -285,6 +288,7 @@ impl Machine {
         self.debug
             .event_with_data(DebugEvent::CpuWrite(addr), value);
         use crate::channel::Channel;
+        self.cpu_bus.open_bus.set(value);
         // Loop through potential mappings to allow MMC5 to snoop on PPU register writes
         for mapping in self.cpu_bus.write_addrs(addr) {
             match mapping {

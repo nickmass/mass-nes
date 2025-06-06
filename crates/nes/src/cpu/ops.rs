@@ -221,9 +221,12 @@ pub enum Break {
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Copy, Clone)]
 pub enum Jsr {
+    ReadLow,
     ReadDummy,
-    WriteRegPcHigh,
-    WriteRegPcLow,
+    WriteRegPcHigh(u8),
+    WriteRegPcLow(u8),
+    ReadHigh(u8),
+    Exec(u8),
 }
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
@@ -336,6 +339,7 @@ pub enum DummyRead {
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Copy, Clone)]
 pub enum Addressing {
+    Jsr,
     None,
     ZeroPage(ZeroPage),
     Immediate,
@@ -359,7 +363,7 @@ impl Addressing {
             Immediate => 2,
             ZeroPage(..) => 2,
             ZeroPageOffset(..) => 2,
-            Absolute(..) => 3,
+            Jsr | Absolute(..) => 3,
             AbsoluteOffset(..) => 3,
             IndirectAbsolute(..) => 3,
             Relative(..) => 2,
@@ -1023,12 +1027,7 @@ impl Op {
             I::Jmp,
             A::IndirectAbsolute(IndirectAbsolute::ReadLow),
         );
-        set_op!(
-            ops,
-            0x20,
-            I::Jsr(Jsr::ReadDummy),
-            A::Absolute(Absolute::ReadLow),
-        );
+        set_op!(ops, 0x20, I::Jsr(Jsr::ReadLow), A::Jsr);
         set_op!(ops, 0x40, I::Rti(Rti::Dummy), A::None);
         set_op!(ops, 0x60, I::Rts(Rts::Dummy), A::None);
 

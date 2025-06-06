@@ -176,10 +176,10 @@ impl Apu {
         }
     }
 
-    pub fn read(&mut self, addr: u16) -> u8 {
+    pub fn read(&mut self, addr: u16, open_bus: u8) -> u8 {
         match addr {
             0x4015 => {
-                let mut val = 0;
+                let mut val = open_bus & 0x20;
                 if self.pulse_one.get_state() {
                     val |= 0x01;
                 }
