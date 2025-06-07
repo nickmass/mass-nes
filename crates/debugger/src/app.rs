@@ -79,6 +79,7 @@ struct UiState {
     filter: Filter,
     bios: Option<Vec<u8>>,
     variable_viewer: VariableViewerState,
+    movie_settings: MovieSettingsState,
 }
 
 impl Default for UiState {
@@ -109,6 +110,7 @@ impl Default for UiState {
             filter: Filter::Crt,
             bios: None,
             variable_viewer: VariableViewerState::default(),
+            movie_settings: MovieSettingsState::default(),
         }
     }
 }
@@ -140,6 +142,7 @@ pub struct DebuggerApp<A> {
     controller_svg: svg::SvgGlView,
     channel_viewer: ChannelViewer,
     variable_viewer: VariableViewer,
+    movie_settings: MovieSettings,
 }
 
 impl<A: Audio> DebuggerApp<A> {
@@ -242,6 +245,7 @@ impl<A: Audio> DebuggerApp<A> {
             svg_renderer,
             channel_viewer: ChannelViewer::new(),
             variable_viewer: VariableViewer::new(),
+            movie_settings: MovieSettings::new(),
         };
 
         app.hydrate();
@@ -278,7 +282,14 @@ impl<A: Audio> DebuggerApp<A> {
             .and_then(|r| r.parent())
             .map(|p| p.to_owned());
         let proxy = self.app_events.create_proxy();
-        pick_file(proxy, control, region, last_dir, self.state.bios.clone());
+        pick_file(
+            proxy,
+            control,
+            region,
+            last_dir,
+            self.state.bios.clone(),
+            self.state.movie_settings.restore_wram,
+        );
     }
 
     fn select_bios(&self) {
@@ -422,22 +433,25 @@ impl<A: Audio> DebuggerApp<A> {
             },
             AppEvent::SaveWram(cart, wram) => {
                 if let Some(store) = self.wram.as_ref() {
-                    store.save_wram(cart, wram);
+                    if self.state.movie_settings.restore_wram {
+                        store.save_wram(cart, wram);
+                    }
                 }
             }
             AppEvent::MovieLoaded(file_name, bytes) => {
                 let file = std::io::Cursor::new(bytes);
+                let offset = self.state.movie_settings.frame_offset;
                 let movie = if file_name.ends_with(".fm2") {
-                    Some(ui::movie::MovieFile::fm2(file))
+                    Some(ui::movie::MovieFile::fm2(file, offset))
                 } else if file_name.ends_with(".bk2") {
-                    Some(ui::movie::MovieFile::bk2(file))
+                    Some(ui::movie::MovieFile::bk2(file, offset))
                 } else if file_name.ends_with(".zip") {
                     if let Some(bytes) = read_first_match_in_zip(".fm2", file.clone()) {
                         let file = std::io::Cursor::new(bytes);
-                        Some(ui::movie::MovieFile::fm2(file))
+                        Some(ui::movie::MovieFile::fm2(file, offset))
                     } else if let Some(bytes) = read_first_match_in_zip(".bk2", file) {
                         let file = std::io::Cursor::new(bytes);
-                        Some(ui::movie::MovieFile::bk2(file))
+                        Some(ui::movie::MovieFile::bk2(file, offset))
                     } else {
                         None
                     }
@@ -461,8 +475,13 @@ impl<A: Audio> DebuggerApp<A> {
                 .and_then(|p| p.to_str())
                 .map(|s| s.to_string())
                 .unwrap_or(String::new());
-            self.emu_control
-                .load_rom(self.state.region.into(), bytes, file_name, bios);
+            self.emu_control.load_rom(
+                self.state.region.into(),
+                bytes,
+                file_name,
+                bios,
+                self.state.movie_settings.restore_wram,
+            );
             self.app_events.send(AppEvent::RomLoaded(rom_file));
         }
     }
@@ -536,6 +555,11 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
 
                     if ui.button("Load Movie").clicked() {
                         self.select_movie();
+                        ui.close_menu();
+                    }
+
+                    if ui.button("Movie Settings").clicked() {
+                        self.state.movie_settings.show_settings = true;
                         ui.close_menu();
                     }
 
@@ -687,6 +711,8 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
             self.nes_screen.show(&ctx);
         }
 
+        self.movie_settings
+            .show(&mut self.state.movie_settings, ctx);
         self.help.show(&ctx);
 
         if self.state.show_code {
@@ -929,10 +955,11 @@ impl EmulatorControl {
         rom: Vec<u8>,
         file_name: String,
         bios: Option<Vec<u8>>,
+        restore_wram: bool,
     ) {
         self.save_wram();
         let cart_id = ui::wram::CartridgeId::new(&rom);
-        let wram = if let Some(wram) = self.wram.as_ref() {
+        let wram = if let Some(wram) = self.wram.as_ref().filter(|_| restore_wram) {
             wram.load_wram(cart_id)
         } else {
             None
@@ -1108,6 +1135,7 @@ fn pick_file(
     region: Region,
     last_dir: Option<PathBuf>,
     bios: Option<Vec<u8>>,
+    restore_wram: bool,
 ) {
     std::thread::spawn(move || {
         let picker = rfd::FileDialog::new()
@@ -1130,7 +1158,7 @@ fn pick_file(
                 .and_then(|p| p.to_str())
                 .map(|s| s.to_string())
                 .unwrap_or(String::new());
-            control.load_rom(region.into(), bytes, file_name, bios);
+            control.load_rom(region.into(), bytes, file_name, bios, restore_wram);
             proxy.send(AppEvent::RomLoaded(path));
         }
     });
@@ -1143,6 +1171,7 @@ fn pick_file(
     region: Region,
     last_dir: Option<PathBuf>,
     bios: Option<Vec<u8>>,
+    restore_wram: bool,
 ) {
     let picker = rfd::AsyncFileDialog::new()
         .add_filter("All Supported Files", &["nes", "NES", "fds", "FDS"])
@@ -1161,7 +1190,13 @@ fn pick_file(
         };
 
         let bytes = rom_file.read().await;
-        control.load_rom(region.into(), bytes, rom_file.file_name(), bios);
+        control.load_rom(
+            region.into(),
+            bytes,
+            rom_file.file_name(),
+            bios,
+            restore_wram,
+        );
         proxy.send(AppEvent::RomLoaded(std::path::PathBuf::new()));
     };
 
