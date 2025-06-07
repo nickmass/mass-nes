@@ -15,13 +15,13 @@ pub enum MovieFile {
 }
 
 impl MovieFile {
-    pub fn fm2<R: Read>(reader: R) -> IoResult<Self> {
-        let fm2 = Fm2Input::read(reader)?;
+    pub fn fm2<R: Read>(reader: R, offset: i32) -> IoResult<Self> {
+        let fm2 = Fm2Input::read(reader, offset)?;
         Ok(MovieFile::Fm2(fm2))
     }
 
-    pub fn bk2<R: Read + Seek>(reader: R) -> IoResult<Self> {
-        let bk2 = Bk2Input::read(reader)?;
+    pub fn bk2<R: Read + Seek>(reader: R, offset: i32) -> IoResult<Self> {
+        let bk2 = Bk2Input::read(reader, offset)?;
         Ok(MovieFile::Bk2(bk2))
     }
 }
@@ -43,15 +43,27 @@ pub struct Fm2Input {
 }
 
 impl Fm2Input {
-    pub fn read<R: Read>(reader: R) -> IoResult<Self> {
+    pub fn read<R: Read>(reader: R, mut offset: i32) -> IoResult<Self> {
         let buf_reader = BufReader::new(reader);
         let mut inputs = VecDeque::new();
 
         inputs.push_back(MovieInput::Input(UserInput::Power));
 
+        while offset > 0 {
+            inputs.push_back(MovieInput::Input(UserInput::PlayerOne(
+                Controller::default(),
+            )));
+            offset -= 1;
+        }
+
         for line in buf_reader.split(b'\n') {
             let line = line?;
             if line.get(0).copied() != Some(b'|') {
+                continue;
+            }
+
+            if offset < 0 {
+                offset += 1;
                 continue;
             }
 
@@ -125,7 +137,7 @@ pub struct Bk2Input {
 }
 
 impl Bk2Input {
-    pub fn read<R: Read + Seek>(reader: R) -> IoResult<Self> {
+    pub fn read<R: Read + Seek>(reader: R, mut offset: i32) -> IoResult<Self> {
         let mut zip = zip::ZipArchive::new(reader)?;
         let file = zip.by_name("Input Log.txt")?;
         let buf_reader = BufReader::new(file);
@@ -134,6 +146,13 @@ impl Bk2Input {
 
         inputs.push_back(MovieInput::Input(UserInput::Power));
 
+        while offset > 0 {
+            inputs.push_back(MovieInput::Input(UserInput::PlayerOne(
+                Controller::default(),
+            )));
+            offset -= 1;
+        }
+
         let mut input = Vec::new();
 
         for line in buf_reader.split(b'\n') {
@@ -141,6 +160,12 @@ impl Bk2Input {
             if line.get(0).copied() != Some(b'|') {
                 continue;
             }
+
+            if offset < 0 {
+                offset += 1;
+                continue;
+            }
+
             input.clear();
 
             for c in line {
