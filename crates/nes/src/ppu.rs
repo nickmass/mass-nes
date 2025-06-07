@@ -222,6 +222,8 @@ impl Ppu {
         self.write(0x2006, 0);
 
         self.data_read_buffer = 0;
+        // Should have a delay here for North American NES, but will break some Japanese games because of the
+        // Famicoms shorter delay, eg. Star Wars Namco
         self.reset_delay = 0;
     }
 
@@ -607,6 +609,7 @@ impl Ppu {
 
                     // Any on line is a performance optimization
                     self.sprite_any_on_line = false;
+                    self.line_oam_index = 0;
                 }
                 Some(SpriteStep::Fetch(n)) => {
                     self.oam_addr = 0;
@@ -617,15 +620,24 @@ impl Ppu {
                         7 => self.sprite_fetch(step.scanline, true),
                         _ => (),
                     }
-                    match n {
-                        0 => self.sprite_oam_read(0),
-                        1 => self.sprite_oam_read(1),
-                        2 => self.sprite_oam_read(2),
-                        _ => self.sprite_oam_read(3),
+
+                    let index = match n {
+                        0 => 0,
+                        1 => 1,
+                        2 => 2,
+                        _ => 3,
+                    };
+
+                    let address = (self.line_oam_index + index) & 0x1f;
+                    self.next_sprite_byte = self.line_oam_data[address];
+
+                    if n == 7 {
+                        self.line_oam_index += 4;
                     }
                 }
                 Some(SpriteStep::BackgroundWait) => {
-                    self.next_sprite_byte = self.line_oam_data[0];
+                    self.line_oam_index = 0;
+                    self.next_sprite_byte = self.line_oam_data[self.line_oam_index];
                 }
                 _ => (),
             }
