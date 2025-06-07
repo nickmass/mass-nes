@@ -83,6 +83,7 @@ pub struct Ppu {
 
     current_tick: u64,
     last_status_read: u64,
+    last_data_write: u64,
     pub frame: u32,
     regs: [u8; 8],
     vblank: bool,
@@ -152,6 +153,7 @@ impl Ppu {
 
             current_tick: 0,
             last_status_read: 0,
+            last_data_write: 0,
             frame: 0,
             regs: [0; 8],
             vblank: false,
@@ -442,7 +444,19 @@ impl Ppu {
             }
             0x2007 => {
                 //PPUDATA
+                let rmw_write = self.current_tick - self.last_data_write <= 3;
+                if rmw_write {
+                    // Read-Modify-Write instructions to 2007 have odd behaviours: (tested by AccuracyCoin.nes)
+                    //  1. only increment vram_addr once
+                    //  2. If not writing to pallete, perform additional write to odd address
+                    //
+                    // Decrementing vram_addr here is to semi-emulate only incrementing once, this will be
+                    // wrong if done during rendering
+                    self.vram_addr = self.vram_addr.wrapping_sub(self.vram_inc()) & 0x7fff;
+                }
+
                 let addr = self.vram_addr;
+
                 if addr & 0x3f00 == 0x3f00 {
                     let addr = if addr & 0x03 != 0 {
                         addr & 0x1f
@@ -451,14 +465,20 @@ impl Ppu {
                     };
                     self.palette_data[addr as usize] = value;
                 } else {
+                    if rmw_write {
+                        let rmw_addr = (self.vram_addr & 0xff00) | (value as u16);
+                        self.ppu_write(rmw_addr, value);
+                    }
                     self.ppu_write(self.vram_addr, value);
                 }
+
                 if !self.in_vblank() && self.is_rendering() {
                     self.horz_increment();
                     self.vert_increment();
                 } else {
                     self.vram_addr = self.vram_addr.wrapping_add(self.vram_inc()) & 0x7fff;
                 }
+                self.last_data_write = self.current_tick;
             }
             _ => {
                 tracing::error!("unreachable ppu register: {:04X}", address);
