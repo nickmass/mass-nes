@@ -57,6 +57,7 @@ pub struct Apu {
     sequence_mode: SequenceMode,
     irq_inhibit: bool,
     irq: bool,
+    irq_flag: bool,
     last_4017: u8,
     oam_req: Option<u8>,
     #[cfg(feature = "debugger")]
@@ -97,6 +98,7 @@ impl Apu {
             sequence_mode: SequenceMode::FourStep,
             irq_inhibit: false,
             irq: false,
+            irq_flag: false,
             last_4017: 0,
             oam_req: None,
             #[cfg(feature = "debugger")]
@@ -195,13 +197,14 @@ impl Apu {
                 if self.dmc.get_state() {
                     val |= 0x10;
                 }
-                if self.irq {
+                if self.irq_flag {
                     val |= 0x40;
                 }
                 if self.dmc.get_irq() {
                     val |= 0x80;
                 }
                 self.irq = false;
+                self.irq_flag = false;
                 val
             }
             _ => unreachable!(),
@@ -248,7 +251,8 @@ impl Apu {
                 };
                 self.irq_inhibit = value & 0x40 != 0;
                 if self.irq_inhibit {
-                    self.irq = false
+                    self.irq = false;
+                    self.irq_flag = false;
                 }
                 if self.sequence_mode == SequenceMode::FiveStep {
                     self.forced_clock();
@@ -269,9 +273,7 @@ impl Apu {
     pub fn tick<U: RunUntil>(&mut self, until: &mut U) {
         self.current_tick += 1;
         self.increment_frame_counter();
-        if self.is_irq_frame() {
-            self.irq = true;
-        }
+        self.trigger_irq();
 
         if self.reset_delay != 0 {
             self.reset_delay -= 1;
@@ -372,16 +374,22 @@ impl Apu {
         self.frame_counter == steps[1] || self.frame_counter == steps[3]
     }
 
-    fn is_irq_frame(&self) -> bool {
-        match self.sequence_mode {
-            SequenceMode::FourStep => {
-                let steps = self.sequence_steps();
-                !self.irq_inhibit
-                    && (self.frame_counter == steps[3]
-                        || self.frame_counter == steps[3] - 1
-                        || self.frame_counter == 0)
+    fn trigger_irq(&mut self) {
+        if let SequenceMode::FiveStep = self.sequence_mode {
+            return;
+        }
+        let steps = self.sequence_steps();
+
+        if self.frame_counter == steps[3] - 1 || self.frame_counter == steps[3] {
+            if !self.irq_inhibit {
+                self.irq = true;
             }
-            SequenceMode::FiveStep => false,
+            self.irq_flag = true;
+        } else if self.frame_counter == 0 {
+            if !self.irq_inhibit {
+                self.irq = true;
+            }
+            self.irq_flag = self.irq;
         }
     }
 
