@@ -623,7 +623,7 @@ impl Cpu {
                 self.interrupts.poll(&self.regs);
                 if condition {
                     // TODO: Messy setting it to BCC
-                    Next(TickResult::Read(addr), Instruction::Bcc(Branch))
+                    Next(TickResult::Read(self.regs.reg_pc), Instruction::Bcc(Branch))
                 } else {
                     Done
                 }
@@ -1166,8 +1166,9 @@ impl Cpu {
             }
             Exec(low_addr) => {
                 let high_addr = (self.pin_in.data as u16) << 8;
-                self.regs.reg_pc = (high_addr | low_addr).wrapping_add(1);
-                Tick(TickResult::Read(self.regs.reg_pc))
+                let addr = high_addr | low_addr;
+                self.regs.reg_pc = addr.wrapping_add(1);
+                Tick(TickResult::Read(addr))
             }
         }
     }
