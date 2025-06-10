@@ -5,6 +5,12 @@ use std::path::PathBuf;
 
 pub enum Input {
     Delay(u32),
+    Up,
+    Down,
+    Left,
+    Right,
+    A,
+    B,
     Select,
     Start,
     None,
@@ -61,6 +67,36 @@ impl MachineBuilder {
                 Input::Start => {
                     let mut input = nes::Controller::new();
                     input.start = true;
+                    machine.handle_input(UserInput::PlayerOne(input));
+                }
+                Input::Up => {
+                    let mut input = nes::Controller::new();
+                    input.up = true;
+                    machine.handle_input(UserInput::PlayerOne(input));
+                }
+                Input::Down => {
+                    let mut input = nes::Controller::new();
+                    input.down = true;
+                    machine.handle_input(UserInput::PlayerOne(input));
+                }
+                Input::Left => {
+                    let mut input = nes::Controller::new();
+                    input.left = true;
+                    machine.handle_input(UserInput::PlayerOne(input));
+                }
+                Input::Right => {
+                    let mut input = nes::Controller::new();
+                    input.right = true;
+                    machine.handle_input(UserInput::PlayerOne(input));
+                }
+                Input::A => {
+                    let mut input = nes::Controller::new();
+                    input.a = true;
+                    machine.handle_input(UserInput::PlayerOne(input));
+                }
+                Input::B => {
+                    let mut input = nes::Controller::new();
+                    input.b = true;
                     machine.handle_input(UserInput::PlayerOne(input));
                 }
                 Input::None => {
@@ -166,9 +202,10 @@ enum Message {
     Indirect(u16),
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum Condition {
     Equals(u16, u8),
+    Any(u16, Vec<u8>),
     ScreenCrc(u32),
 }
 
@@ -201,10 +238,40 @@ impl Condition {
                     found,
                 );
             }
+            Condition::Any(addr, ref values) => {
+                let found = machine.peek(addr);
+
+                let res = values.iter().any(|v| *v == found);
+
+                if !res {
+                    use std::fmt::Write;
+                    let mut error_values = String::new();
+                    for v in values {
+                        if error_values.len() == 0 {
+                            let _ = write!(error_values, "[0x{:02X}", v);
+                        } else {
+                            let _ = write!(error_values, ", 0x{:02X}", v);
+                        }
+                    }
+                    error_values.push(']');
+
+                    panic!(
+                        "{}Expected '0x{:04X}' to be any of {}, found '0x{:02X}'.",
+                        message.unwrap_or(""),
+                        addr,
+                        error_values,
+                        found,
+                    );
+                }
+            }
             Condition::ScreenCrc(expected) => {
                 let screen = machine.get_screen();
                 let bytes = screen.into_iter().flat_map(|p| p.to_be_bytes());
                 let found = crc_32(bytes);
+
+                if expected != found {
+                    print_ansi_screen(screen);
+                }
 
                 assert!(
                     expected == found,
@@ -295,6 +362,37 @@ pub fn run<M: Into<MachineBuilder>, C: Into<Evaluation>, U: Into<End>>(
             eval.assert(&machine);
             break;
         }
+    }
+}
+
+fn print_ansi_screen(screen: &[u16]) {
+    use std::io::Write;
+
+    let palette = nes::Region::Ntsc.default_palette();
+    let mut stdout = std::io::stdout().lock();
+
+    for row_pair in 0..120 {
+        let row_pair = row_pair * 2;
+        for x in 0..256 {
+            let idx_top = (row_pair) * 256 + x;
+            let idx_bot = (row_pair + 1) * 256 + x;
+            let pixel_top = (screen[idx_top] as usize) * 3;
+            let pixel_bot = (screen[idx_bot] as usize) * 3;
+
+            let r_top = palette[pixel_top + 0];
+            let g_top = palette[pixel_top + 1];
+            let b_top = palette[pixel_top + 2];
+
+            let r_bot = palette[pixel_bot + 0];
+            let g_bot = palette[pixel_bot + 1];
+            let b_bot = palette[pixel_bot + 2];
+
+            let _ = write!(
+                stdout,
+                "\x1b[38;2;{r_top};{g_top};{b_top};48;2;{r_bot};{g_bot};{b_bot}m▀\x1b[m"
+            );
+        }
+        let _ = writeln!(stdout);
     }
 }
 

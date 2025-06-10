@@ -1,3 +1,4 @@
+mod accuracy_coin;
 mod apu_test;
 mod blargg_apu_2005;
 mod blargg_ppu_tests_2005;
