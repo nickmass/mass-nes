@@ -365,6 +365,20 @@ pub fn run<M: Into<MachineBuilder>, C: Into<Evaluation>, U: Into<End>>(
     }
 }
 
+#[allow(unused)]
+fn print_mem_range(range: std::ops::Range<u16>, machine: &Machine) {
+    for addr in range {
+        if addr % 16 == 0 {
+            println!();
+            print!("0x{addr:04x}:");
+        }
+
+        let val = machine.peek(addr);
+
+        print!(" 0x{val:02x}");
+    }
+}
+
 fn print_ansi_screen(screen: &[u16]) {
     use std::io::Write;
 

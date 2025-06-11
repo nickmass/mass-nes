@@ -131,6 +131,9 @@ test_fn!(address_2004, 16, 5, 0x45b);
 // PPU Misc
 test_fn!(rmw_2007_extra_write, 17, 1, 0x464);
 
+// CPU Behavior 2
+test_fn!(implied_dummy_read, 18, 1, 0x46d);
+
 fn run_test(page: u32, test: u32, result: u16, values: &[u8]) {
     let page = page - 1;
     let mut input = Vec::new();

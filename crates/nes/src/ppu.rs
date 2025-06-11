@@ -212,6 +212,15 @@ impl Ppu {
     }
 
     pub fn power(&mut self) {
+        for addr in 0u16..0x400 {
+            self.nt_internal_a.write(addr, 0x24);
+            self.nt_internal_b.write(addr, 0x24);
+        }
+
+        for addr in 0..32 {
+            self.palette_data[addr] = 0x0f;
+        }
+
         self.write(0x2000, 0);
         self.write(0x2001, 0);
         self.write(0x2002, 0xa0);

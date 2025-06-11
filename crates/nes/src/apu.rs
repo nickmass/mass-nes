@@ -58,6 +58,7 @@ pub struct Apu {
     irq_inhibit: bool,
     irq: bool,
     irq_flag: bool,
+    irq_flag_read: bool,
     last_4017: u8,
     oam_req: Option<u8>,
     #[cfg(feature = "debugger")]
@@ -99,6 +100,7 @@ impl Apu {
             irq_inhibit: false,
             irq: false,
             irq_flag: false,
+            irq_flag_read: false,
             last_4017: 0,
             oam_req: None,
             #[cfg(feature = "debugger")]
@@ -117,7 +119,7 @@ impl Apu {
         self.write(0x4015, 0);
         self.write(0x4017, 0);
 
-        for _ in 0..4 {
+        for _ in 0..2 {
             self.tick(&mut run_until::Frames(1));
         }
     }
@@ -126,7 +128,7 @@ impl Apu {
         self.write(0x4015, 0);
         self.write(0x4017, 0);
 
-        for _ in 0..4 {
+        for _ in 0..2 {
             self.tick(&mut run_until::Frames(1));
         }
     }
@@ -204,7 +206,7 @@ impl Apu {
                     val |= 0x80;
                 }
                 self.irq = false;
-                self.irq_flag = false;
+                self.irq_flag_read = true;
                 val
             }
             _ => unreachable!(),
@@ -274,6 +276,11 @@ impl Apu {
         self.current_tick += 1;
         self.increment_frame_counter();
         self.trigger_irq();
+
+        if self.irq_flag && self.irq_flag_read && self.current_tick & 1 == 1 {
+            self.irq_flag = false;
+            self.irq_flag_read = false;
+        }
 
         if self.reset_delay != 0 {
             self.reset_delay -= 1;
@@ -385,11 +392,13 @@ impl Apu {
                 self.irq = true;
             }
             self.irq_flag = true;
+            self.irq_flag_read = false;
         } else if self.frame_counter == 0 {
             if !self.irq_inhibit {
                 self.irq = true;
             }
             self.irq_flag = self.irq;
+            self.irq_flag_read = false;
         }
     }
 

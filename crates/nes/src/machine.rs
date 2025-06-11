@@ -387,8 +387,7 @@ impl Machine {
     pub fn power(&mut self) {
         self.cpu_pin_in.power = true;
         for addr in 0u16..0x800 {
-            let v = if addr & 1 == 1 { 0xff } else { 0x00 };
-            self.cpu_mem.write(addr, v);
+            self.cpu_mem.write(addr, 0xff);
         }
         self.apu.power();
         self.ppu.power();
