@@ -189,6 +189,7 @@ impl Machine {
                 }
 
                 self.apu.tick(&mut until);
+                self.input.tick();
                 self.mapper.tick();
                 self.tick_ppu(frame_end, &mut until);
             } else {

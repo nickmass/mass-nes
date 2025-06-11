@@ -69,6 +69,8 @@ impl InputDevice for Controller {
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 #[derive(Default)]
 pub struct Input {
+    current_tick: u32,
+    strobe: bool,
     read_counter: [u32; 2],
     read_shifter: [u8; 2],
     input_buffer: [u8; 2],
@@ -143,13 +145,21 @@ impl Input {
         match addr {
             0x4016 => {
                 if value & 0x01 == 1 {
-                    self.input_buffer = self.input;
-                    self.read_counter = [8, 8];
+                    self.strobe = true;
                 } else {
+                    self.strobe = false;
                     self.read_shifter = self.input_buffer;
                 }
             }
             _ => unimplemented!(),
+        }
+    }
+
+    pub fn tick(&mut self) {
+        self.current_tick += 1;
+        if self.strobe && self.current_tick & 1 == 0 {
+            self.input_buffer = self.input;
+            self.read_counter = [8, 8];
         }
     }
 

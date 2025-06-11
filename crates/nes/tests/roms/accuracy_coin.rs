@@ -81,13 +81,7 @@ test_fn!(dma_2007_read, 12, 2, 0x44c);
 test_fn!(dma_2007_write, 12, 3, 0x44f);
 test_fn!(dma_4015_read, 12, 4, 0x45d);
 test_fn!(dma_4016_read, 12, 5, 0x45e);
-test_fn!(
-    #[should_panic]
-    controller_strobing,
-    12,
-    6,
-    0x45f
-);
+test_fn!(controller_strobing, 12, 6, 0x45f);
 test_fn!(
     #[should_panic]
     apu_register_activation,
