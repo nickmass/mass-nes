@@ -3,7 +3,7 @@ use nes_traits::SaveState;
 #[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
 
-use crate::bus::{Address, AddressBus, DeviceKind};
+use crate::bus::{Address, AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::{Channel, Dmc, Noise, Pulse, PulseChannel, Triangle};
 use crate::cpu::dma::DmcDmaKind;
 use crate::mapper::RcMapper;
@@ -149,10 +149,10 @@ impl Apu {
     }
 
     #[cfg(feature = "debugger")]
-    pub fn peek(&self, addr: u16) -> u8 {
+    pub fn peek(&self, addr: u16, open_bus: u8) -> u8 {
         match addr {
             0x4015 => {
-                let mut val = 0;
+                let mut val = open_bus & 0x20;
                 if self.pulse_one.get_state() {
                     val |= 0x01;
                 }
@@ -176,7 +176,7 @@ impl Apu {
                 }
                 val
             }
-            _ => unreachable!(),
+            _ => open_bus,
         }
     }
 
@@ -209,7 +209,7 @@ impl Apu {
                 self.irq_flag_read = true;
                 val
             }
-            _ => unreachable!(),
+            _ => open_bus,
         }
     }
 
@@ -349,7 +349,7 @@ impl Apu {
     }
 
     pub fn register(&self, cpu: &mut AddressBus) {
-        cpu.register_read(DeviceKind::Apu, Address(0x4015));
+        cpu.register_read(DeviceKind::Apu, AndEqualsAndMask(0xf01f, 0x4015, 0x4015));
         cpu.register_write(DeviceKind::Apu, Address(0x4014));
         cpu.register_write(DeviceKind::Apu, Address(0x4015));
         cpu.register_write(DeviceKind::Apu, Address(0x4017));

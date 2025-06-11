@@ -34,6 +34,17 @@ pub enum TickResult {
     Idle(u16),
 }
 
+impl TickResult {
+    fn addr(&self) -> u16 {
+        match *self {
+            TickResult::Fetch(addr)
+            | TickResult::Read(addr)
+            | TickResult::Write(addr, _)
+            | TickResult::Idle(addr) => addr,
+        }
+    }
+}
+
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Copy, Clone)]
 enum AddressResult {
@@ -88,6 +99,7 @@ pub struct Cpu {
     interrupts: Interrupts,
     halt: bool,
     had_halt: bool,
+    bus: u16,
 }
 
 impl Cpu {
@@ -101,6 +113,7 @@ impl Cpu {
             interrupts: Interrupts::new(),
             halt: false,
             had_halt: false,
+            bus: 0,
         }
     }
 
@@ -146,6 +159,7 @@ impl Cpu {
         }
         cpu.value("Stack Pointer", self.regs.reg_sp);
         cpu.value("Program Counter", self.regs.reg_pc);
+        cpu.value("Address Bus", self.bus);
     }
 
     pub fn tick<U: RunUntil>(&mut self, pin_in: CpuPinIn, until: &mut U) -> TickResult {
@@ -164,6 +178,7 @@ impl Cpu {
             result
         } else {
             let tick = self.step();
+            self.bus = tick.addr();
 
             if let Some(dma_tick) = self.dma.try_halt(tick) {
                 self.had_halt = true;
@@ -176,6 +191,10 @@ impl Cpu {
         self.interrupts.tick(&pin_in);
 
         tick
+    }
+
+    pub fn registers_active(&self) -> bool {
+        self.bus & 0xffe0 == 0x4000
     }
 
     fn step(&mut self) -> TickResult {

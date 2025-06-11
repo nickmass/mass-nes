@@ -48,6 +48,7 @@ pub struct SpriteViewer {
     pixel_buf: Vec<u8>,
     texture: Option<TextureHandle>,
     age: u64,
+    show_bytes: bool,
 }
 
 impl SpriteViewer {
@@ -57,6 +58,7 @@ impl SpriteViewer {
             pixel_buf: vec![0; 8 * 16 * 8 * 8 * 3],
             texture: None,
             age: 0,
+            show_bytes: false,
         }
     }
 
@@ -137,31 +139,53 @@ impl SpriteViewer {
 
         egui::Window::new("Sprites")
             .resizable(false)
+            .auto_sized()
             .show(ctx, |ui| {
                 if let Some(tex) = &self.texture {
-                    ui.checkbox(show_all_sprites, "Show hidden sprites");
+                    ui.horizontal(|ui| {
+                        ui.checkbox(show_all_sprites, "Show hidden sprites");
+                        ui.checkbox(&mut self.show_bytes, "Show bytes");
+                    });
                     ui.separator();
                     let mut any_sprites = false;
-                    egui::Grid::new("sprite_viewer_grid")
-                        .num_columns(8)
-                        .min_row_height(16.0 * 4.0)
-                        .show(ui, |ui| {
-                            for (idx, sprite) in self
-                                .sprites
-                                .iter()
-                                .filter(|s| !s.hidden() || *show_all_sprites)
-                                .enumerate()
-                            {
-                                sprite.ui(tex, ui);
-                                any_sprites = true;
-                                if (idx + 1) % 8 == 0 {
+
+                    if self.show_bytes {
+                        egui::Grid::new("sprite_bytes_grid")
+                            .num_columns(17)
+                            .show(ui, |ui| {
+                                for i in 0..16 {
+                                    let base_addr = i * 16;
+                                    ui.label(format!("0x{base_addr:02X}:"));
+                                    for j in 0..16 {
+                                        let val = ppu.sprite_ram()[base_addr + j];
+                                        ui.label(format!("0x{val:02X}"));
+                                    }
+
                                     ui.end_row();
                                 }
-                            }
-                            if !any_sprites {
-                                ui.label("No visible sprites");
-                            }
-                        });
+                            });
+                    } else {
+                        egui::Grid::new("sprite_viewer_grid")
+                            .num_columns(8)
+                            .min_row_height(16.0 * 4.0)
+                            .show(ui, |ui| {
+                                for (idx, sprite) in self
+                                    .sprites
+                                    .iter()
+                                    .filter(|s| !s.hidden() || *show_all_sprites)
+                                    .enumerate()
+                                {
+                                    sprite.ui(tex, ui);
+                                    any_sprites = true;
+                                    if (idx + 1) % 8 == 0 {
+                                        ui.end_row();
+                                    }
+                                }
+                                if !any_sprites {
+                                    ui.label("No visible sprites");
+                                }
+                            });
+                    }
                 }
             });
     }

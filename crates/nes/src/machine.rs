@@ -184,8 +184,9 @@ impl Machine {
                 let cpu_state = self.cpu.debug_state();
                 self.debug.trace(&self, cpu_state);
 
-                if let Some(sample) = self.cpu.dma.dmc_sample() {
-                    self.apu.dmc.dmc_read(sample);
+                if let Some(_sample) = self.cpu.dma.dmc_sample() {
+                    let data_bus = self.cpu_bus.open_bus.get();
+                    self.apu.dmc.dmc_read(data_bus);
                 }
 
                 self.apu.tick(&mut until);
@@ -268,21 +269,42 @@ impl Machine {
     }
 
     fn read(&mut self, addr: u16) -> u8 {
+        let open_bus = self.cpu_bus.open_bus.get();
+        let cpu_regs = self.cpu.registers_active();
+        let mut read_input = false;
+
         let value = match self.cpu_bus.read_addr(addr) {
             Some((addr, DeviceKind::CpuRam)) => self.cpu_mem.read(addr),
             Some((addr, DeviceKind::Ppu)) => self.ppu.read(addr),
             Some((addr, DeviceKind::Mapper)) => self.mapper.read(BusKind::Cpu, addr),
-            Some((addr, DeviceKind::Input)) => self.input.read(addr, self.cpu_bus.open_bus.get()),
-            Some((addr, DeviceKind::Apu)) => self.apu.read(addr, self.cpu_bus.open_bus.get()),
             Some((addr, DeviceKind::Debug)) => self.debug.read(addr),
-            None => self.cpu_bus.open_bus.get(),
-            _ => unimplemented!(),
+            Some((addr, DeviceKind::Input)) if cpu_regs => {
+                read_input = true;
+                self.input.read(addr, open_bus)
+            }
+            _ => open_bus,
         };
-        self.debug.event_with_data(DebugEvent::CpuRead(addr), value);
 
-        if addr != 0x4015 {
-            self.cpu_bus.open_bus.set(value);
-        }
+        let value = if cpu_regs {
+            let mirror_addr = 0x4000 | (addr & 0x1f);
+
+            let bus_val = if !read_input {
+                self.input.read(mirror_addr, value)
+            } else {
+                value
+            };
+
+            self.cpu_bus.open_bus.set(bus_val);
+            self.apu.read(mirror_addr, value)
+        } else {
+            if addr != 0x4015 {
+                self.cpu_bus.open_bus.set(value);
+            }
+
+            value
+        };
+
+        self.debug.event_with_data(DebugEvent::CpuRead(addr), value);
 
         value
     }
@@ -292,6 +314,7 @@ impl Machine {
             .event_with_data(DebugEvent::CpuWrite(addr), value);
         use crate::channel::Channel;
         self.cpu_bus.open_bus.set(value);
+
         // Loop through potential mappings to allow MMC5 to snoop on PPU register writes
         for mapping in self.cpu_bus.write_addrs(addr) {
             match mapping {
@@ -312,15 +335,30 @@ impl Machine {
 
     #[cfg(feature = "debugger")]
     pub fn peek(&self, addr: u16) -> u8 {
-        match self.cpu_bus.read_addr(addr) {
+        let open_bus = self.cpu_bus.open_bus.get();
+        let cpu_regs = self.cpu.registers_active();
+        let mut read_input = false;
+
+        let value = match self.cpu_bus.read_addr(addr) {
             Some((addr, DeviceKind::CpuRam)) => self.cpu_mem.read(addr),
             Some((addr, DeviceKind::Ppu)) => self.ppu.peek(addr),
             Some((addr, DeviceKind::Mapper)) => self.mapper.peek(BusKind::Cpu, addr),
-            Some((addr, DeviceKind::Input)) => self.input.peek(addr, self.cpu_bus.open_bus.get()),
-            Some((addr, DeviceKind::Apu)) => self.apu.peek(addr),
             Some((addr, DeviceKind::Debug)) => self.debug.read(addr),
-            None => self.cpu_bus.open_bus.get(),
-            _ => unimplemented!(),
+            Some((addr, DeviceKind::Input)) if cpu_regs => {
+                read_input = true;
+                self.input.peek(addr, open_bus)
+            }
+            _ => open_bus,
+        };
+
+        if cpu_regs {
+            let addr = 0x4000 | (addr & 0x1f);
+            if !read_input {
+                self.input.peek(addr, value);
+            }
+            self.apu.peek(addr, value)
+        } else {
+            value
         }
     }
 

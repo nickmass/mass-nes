@@ -1,7 +1,7 @@
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 
-use crate::bus::{Address, AddressBus, DeviceKind};
+use crate::bus::{Address, AddressBus, AndEqualsAndMask, DeviceKind};
 
 pub trait InputDevice {
     fn to_byte(&self) -> u8;
@@ -85,8 +85,8 @@ impl Input {
     }
 
     pub fn register(&self, cpu: &mut AddressBus) {
-        cpu.register_read(DeviceKind::Input, Address(0x4016));
-        cpu.register_read(DeviceKind::Input, Address(0x4017));
+        cpu.register_read(DeviceKind::Input, AndEqualsAndMask(0xf01f, 0x4016, 0x4016));
+        cpu.register_read(DeviceKind::Input, AndEqualsAndMask(0xf01f, 0x4017, 0x4017));
         cpu.register_write(DeviceKind::Input, Address(0x4016));
     }
 
@@ -107,7 +107,7 @@ impl Input {
                     self.read_shifter[1] & 1
                 }
             }
-            _ => unimplemented!(),
+            _ => open_bus,
         };
 
         value | (open_bus & 0xe0)
@@ -135,7 +135,7 @@ impl Input {
                     value
                 }
             }
-            _ => unimplemented!(),
+            _ => open_bus,
         };
 
         value | (open_bus & 0xe0)

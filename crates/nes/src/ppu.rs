@@ -278,6 +278,7 @@ impl Ppu {
         ppu.value("Scanline", self.step.scanline);
         ppu.value("Dot", self.step.dot);
         ppu.value("VRAM Addr.", self.vram_addr);
+        ppu.value("OAM Addr.", self.oam_addr);
         ppu.value("Vblank", self.vblank);
         ppu.value("NMI", self.nmi());
         ppu.value("Sprite Zero Hit", self.sprite_zero_hit);
