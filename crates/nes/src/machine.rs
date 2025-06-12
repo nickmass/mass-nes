@@ -173,8 +173,25 @@ impl Machine {
         #[cfg(feature = "debugger")]
         let _ = self.debug.take_interest_notification();
         self.step_start_tick = self.tick;
+
         while !until.done() {
             if self.tick % 3 == 0 {
+                // The order of operations here is very sensitive to changes:
+                // 1. Handle previous cpu ticks read/write
+                // 2. Tick PPU
+                // 3. Tick CPU
+
+                self.handle_cpu_tick(&mut until);
+                self.tick_ppu(frame_end, &mut until);
+
+                if let Some(addr) = self.apu.get_dmc_req() {
+                    self.cpu.dma.request_dmc_dma(addr);
+                }
+
+                if let Some(addr) = self.apu.get_oam_req() {
+                    self.cpu.dma.request_oam_dma(addr as u16);
+                }
+
                 self.cpu_pin_in.irq = self.apu.get_irq() | self.mapper.get_irq();
                 self.cpu_pin_in.nmi = self.ppu.nmi();
                 self.cpu_tick = Some(self.cpu.tick(self.cpu_pin_in, &mut until));
@@ -190,45 +207,11 @@ impl Machine {
                 }
 
                 self.apu.tick(&mut until);
+
                 self.input.tick();
                 self.mapper.tick();
-                self.tick_ppu(frame_end, &mut until);
             } else {
                 self.tick_ppu(frame_end, &mut until);
-                if let Some(tick) = self.cpu_tick.take() {
-                    match tick {
-                        TickResult::Fetch(addr) => {
-                            let value = self.read(addr);
-                            self.debug.event_with_data(DebugEvent::CpuExec(addr), value);
-                            self.debug.fetch(addr);
-                            self.cpu_pin_in.data = value;
-                            until.add_instruction();
-                        }
-                        TickResult::Read(addr) => {
-                            let value = self.read(addr);
-                            self.cpu_pin_in.data = value;
-                        }
-                        TickResult::Write(addr, value) => self.write(addr, value),
-                        // Idle ticks while DMC/OAM DMA holds the bus, this is a simplification as
-                        // the behavior depends on the register and the model of console.
-                        // 200x registers will see multiple reads and no idle cycles as the are
-                        // external to the CPU, while 400X registers (controllers) will see one
-                        // read per contiguous set of writes so using idle cycles may be useful.
-                        TickResult::Idle(addr) => {
-                            if addr & 0xff00 != 0x4000 {
-                                self.read(addr);
-                            }
-                        }
-                    }
-
-                    if let Some(addr) = self.apu.get_dmc_req() {
-                        self.cpu.dma.request_dmc_dma(addr);
-                    }
-
-                    if let Some(addr) = self.apu.get_oam_req() {
-                        self.cpu.dma.request_oam_dma(addr as u16);
-                    }
-                }
             }
 
             // Putting this tick here prevents single stepping to this specific PAL dot, not ideal
@@ -253,6 +236,35 @@ impl Machine {
         self.ppu.tick(frame_end, until);
         let ppu_state = self.ppu.debug_state();
         self.debug.trace_ppu(&self, ppu_state);
+    }
+
+    fn handle_cpu_tick<U: RunUntil>(&mut self, until: &mut U) {
+        if let Some(tick) = self.cpu_tick.take() {
+            match tick {
+                TickResult::Fetch(addr) => {
+                    let value = self.read(addr);
+                    self.debug.event_with_data(DebugEvent::CpuExec(addr), value);
+                    self.debug.fetch(addr);
+                    self.cpu_pin_in.data = value;
+                    until.add_instruction();
+                }
+                TickResult::Read(addr) => {
+                    let value = self.read(addr);
+                    self.cpu_pin_in.data = value;
+                }
+                TickResult::Write(addr, value) => self.write(addr, value),
+                // Idle ticks while DMC/OAM DMA holds the bus, this is a simplification as
+                // the behavior depends on the register and the model of console.
+                // 200x registers will see multiple reads and no idle cycles as the are
+                // external to the CPU, while 400X registers (controllers) will see one
+                // read per contiguous set of writes so using idle cycles may be useful.
+                TickResult::Idle(addr) => {
+                    if addr & 0xff00 != 0x4000 {
+                        self.read(addr);
+                    }
+                }
+            }
+        }
     }
 
     fn watch(&self) {

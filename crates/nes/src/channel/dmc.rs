@@ -36,6 +36,10 @@ impl Dmc {
         }
     }
 
+    pub fn power(&mut self) {
+        self.timer_counter = 428;
+    }
+
     pub fn dmc_read(&mut self, value: u8) {
         self.read_pending = false;
         self.sample_buffer = value;
@@ -179,6 +183,7 @@ impl Channel for Dmc {
         let mut dmc = visitor.group("DMC");
         dmc.value("Enabled", self.get_state());
         dmc.value("IRQ", self.irq);
+        dmc.value("Timer", self.timer_counter);
         dmc.value("Sample Address", self.sample_address());
         dmc.value("Sample Length", self.sample_length());
         dmc.value("Sample Buffer", self.sample_buffer);

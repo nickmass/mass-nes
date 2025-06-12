@@ -110,6 +110,7 @@ impl Apu {
     }
 
     pub fn power(&mut self) {
+        self.dmc.power();
         for a in 0..4 {
             self.pulse_one.write(a, 0);
             self.pulse_two.write(a, 0);
