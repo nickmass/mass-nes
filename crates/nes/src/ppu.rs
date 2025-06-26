@@ -411,7 +411,7 @@ impl Ppu {
             0x2004 => {
                 //OAMDATA
                 if !self.in_vblank() && self.is_rendering() {
-                    self.oam_addr = self.oam_addr.wrapping_add(4);
+                    self.oam_addr = self.oam_addr.wrapping_add(4) & 0xfc;
                 } else {
                     // OAM byte 2 bits 2-4 dont exist in hardware are read back as 0
                     if self.oam_addr & 3 == 2 {

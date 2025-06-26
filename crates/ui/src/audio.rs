@@ -139,7 +139,7 @@ impl SamplesSender {
         let used = self.capacity - self.tx.available();
         let buffer_required = self.buffer_len.load(Ordering::Relaxed) * self.buffer_depth;
 
-        (used < buffer_required).then_some(buffer_required - used)
+        (used < buffer_required).then_some(buffer_required.saturating_sub(used))
     }
 
     pub fn wants_sample_count(&self, samples: usize) -> bool {

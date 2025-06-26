@@ -1,0 +1,12 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+authors = ["Nick Massey <nickmass@nickmass.com>"]
+license = "MIT"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+anyhow = "1.0.98"
+xshell = "0.2.7"

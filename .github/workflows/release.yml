@@ -34,7 +34,6 @@ jobs:
           rustup component list --installed
       - name: Install Tools
         run: |
-          cargo install cargo-make
           cargo install wasm-bindgen-cli
           cargo install wasm-pack
       - name: Checkout
@@ -44,7 +43,7 @@ jobs:
           cargo test --release -p nes || true
       - name: Build
         run: |
-          cargo make release
+          cargo xtask release
       - name: Upload Build Artifact
         id: deployment
         uses: actions/upload-pages-artifact@v3
