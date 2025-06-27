@@ -12,40 +12,41 @@ details. You should have received a copy of the GNU Lesser General Public
 License along with this module; if not, write to the Free Software Foundation,
 Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA */
 
+#[derive(Debug, Clone)]
 pub struct NesNtscSetup {
     /// -1 = -180 degrees, +1 = +180 degrees
-    hue: f64,
+    pub hue: f64,
     /// -1 = grayscale (0.0), +1 = oversaturated colors (2.0)
-    saturation: f64,
+    pub saturation: f64,
     /// -1 = dark (0.5), +1 = light (1.5)
-    contrast: f64,
+    pub contrast: f64,
     /// -1 = dark (0.5), +1 = light (1.5)
-    brightness: f64,
+    pub brightness: f64,
     /// edge contrast enhancement/blurring
-    sharpness: f64,
+    pub sharpness: f64,
 
     /// -1 = dark (1.5), +1 = light (0.5)
-    gamma: f64,
+    pub gamma: f64,
     /// image resolution
-    resolution: f64,
+    pub resolution: f64,
     /// artifacts casused by color changes
-    artifacts: f64,
+    pub artifacts: f64,
     /// color artifacts caused by brightness changes
-    fringing: f64,
+    pub fringing: f64,
     /// color bleed (color resolution reduction)
-    bleed: f64,
+    pub bleed: f64,
     /// if set, merges even and odd fields together to reduce flicker
-    merge_fields: bool,
+    pub merge_fields: bool,
     /// optional RGB decoder matrix
-    decoder_matrix: Option<[f32; 6]>,
+    pub decoder_matrix: Option<[f32; 6]>,
 
     /* You can replace the standard NES color generation with an RGB palette. The
     first replaces all color generation, while the second replaces only the core
     64-color generation and does standard color emphasis calculations on it. */
     /// optional 512-entry RGB palette in, 3 bytes per color
-    palette: Option<[u8; 64 * 8 * 3]>,
+    pub palette: Option<[u8; 64 * 8 * 3]>,
     /// optional 64-entry RGB palette in, 3 bytes per color
-    base_palette: Option<[u8; 64 * 3]>,
+    pub base_palette: Option<[u8; 64 * 3]>,
 }
 
 impl NesNtscSetup {
@@ -510,7 +511,7 @@ impl NesNtsc {
     /// Filters one or more rows of pixels. Input pixels are 6/9-bit palette indicies.
     /// In_row_width is the number of pixels to get to the next input row. Out_pitch
     /// is the number of *bytes* to get to the next output row. Output pixel format
-    /// is set by NES_NTSC_OUT_DEPTH (defaults to 16-bit RGB). */
+    /// is set by NES_NTSC_OUT_DEPTH (defaults to 16-bit RGB).
     pub fn blit(
         &self,
         nes_input: &[u16],

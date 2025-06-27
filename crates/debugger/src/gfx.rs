@@ -9,7 +9,10 @@ use std::sync::{
 
 use ui::filters::{Filter as FilterTrait, FilterContext, FilterUniforms, Parameter};
 
-use crate::gl::{self, Vertex as _};
+use crate::{
+    gl::{self, Vertex as _},
+    widgets::NtscConfig,
+};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Filter {
@@ -55,13 +58,15 @@ pub struct Gfx {
     current_filter: Option<Filter>,
     frame_buffer: Option<gl::FrameBuffer>,
     simple_draw: gl::Program,
+    current_ntsc: NtscConfig,
+    selected_ntsc: NtscConfig,
 }
 
 impl Gfx {
     pub fn new(
         ctx: gl::GlowContext,
         back_buffer: GfxBackBuffer,
-        palette: &[u8],
+        ntsc_config: NtscConfig,
     ) -> Result<Self, String> {
         let ctx = GlowContext(ctx);
         let ver = ctx.version();
@@ -93,7 +98,9 @@ impl Gfx {
             .map_err(|e| format!("{e:?}"))?;
         let simple_draw = gl::Program::new(&ctx, quad_shaders.vertex, quad_shaders.fragment)?;
 
-        let tracy = Tracy::new(palette);
+        let ntsc_setup = ntsc_config.setup();
+        let palette = ntsc_setup.generate_palette();
+        let tracy = Tracy::new(&palette);
 
         Ok(Self {
             filter: None,
@@ -106,11 +113,17 @@ impl Gfx {
             current_filter: None,
             frame_buffer: None,
             simple_draw,
+            current_ntsc: ntsc_config.clone(),
+            selected_ntsc: ntsc_config,
         })
     }
 
     pub fn filter(&mut self, filter: Filter) {
         self.selected_filter = Some(filter);
+    }
+
+    pub fn ntsc_config(&mut self, ntsc_config: NtscConfig) {
+        self.selected_ntsc = ntsc_config;
     }
 
     pub fn filter_dimensions(&self) -> (u32, u32) {
@@ -164,12 +177,14 @@ impl Gfx {
             return false;
         };
 
-        if Some(selected_filter) == self.current_filter {
+        let filter_change = Some(selected_filter) != self.current_filter;
+        let ntsc_change = self.selected_ntsc != self.current_ntsc;
+
+        if !filter_change && !ntsc_change {
             return false;
         }
 
-        let ntsc_setup = ui::filters::NesNtscSetup::composite();
-
+        let ntsc_setup = self.selected_ntsc.setup();
         let filter: Box<dyn SyncFilter> = match selected_filter {
             Filter::Paletted => Box::new(ui::filters::PalettedFilter::new(
                 ntsc_setup.generate_palette(),
@@ -177,22 +192,27 @@ impl Gfx {
             Filter::Ntsc => Box::new(ui::filters::NtscFilter::new(&ntsc_setup)),
             Filter::Crt => Box::new(ui::filters::CrtFilter::new(&ntsc_setup)),
         };
+        self.current_ntsc = self.selected_ntsc.clone();
 
-        match gl::Program::new(&ctx, filter.vertex_shader(), filter.fragment_shader()) {
-            Ok(new_program) => {
-                let old_program = self.program.take();
-                if let Some(old_program) = old_program {
-                    old_program.delete(&ctx);
+        if filter_change {
+            match gl::Program::new(&ctx, filter.vertex_shader(), filter.fragment_shader()) {
+                Ok(new_program) => {
+                    let old_program = self.program.take();
+                    if let Some(old_program) = old_program {
+                        old_program.delete(&ctx);
+                    }
+
+                    self.program = Some(new_program);
+                    self.filter = Some(filter);
+                    self.current_filter = self.selected_filter;
                 }
-
-                self.program = Some(new_program);
-                self.filter = Some(filter);
-                self.current_filter = self.selected_filter;
+                Err(e) => {
+                    tracing::error!("unable to compile filter: {e}");
+                    self.selected_filter = None;
+                }
             }
-            Err(e) => {
-                tracing::error!("unable to compile filter: {e}");
-                self.selected_filter = None;
-            }
+        } else {
+            self.filter = Some(filter);
         }
 
         true

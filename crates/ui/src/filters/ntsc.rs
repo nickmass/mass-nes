@@ -11,10 +11,13 @@ pub struct NtscFilter {
     width: u32,
     height: u32,
     frame: Vec<u32>,
+    merge_fields: bool,
+    phase: i32,
 }
 
 impl NtscFilter {
     pub fn new(setup: &NesNtscSetup) -> NtscFilter {
+        let merge_fields = setup.merge_fields;
         let processor = Preprocessor::new(super::NTSC_SHADER);
         let program = processor.process().expect("valid shader source");
         let width = NesNtsc::out_width(256);
@@ -27,6 +30,8 @@ impl NtscFilter {
             width,
             height,
             frame: vec![0; (width * height) as usize],
+            merge_fields,
+            phase: 0,
         }
     }
 }
@@ -47,7 +52,12 @@ impl<C: FilterContext> Filter<C> for NtscFilter {
     fn process(&mut self, display: &C, render_size: (f64, f64), screen: &[u16]) -> C::Uniforms {
         let mut unis = display.create_uniforms();
 
-        self.ntsc.blit(screen, &mut self.frame, 256, 240, 0);
+        if !self.merge_fields {
+            self.phase ^= 1;
+        }
+
+        self.ntsc
+            .blit(screen, &mut self.frame, 256, 240, self.phase & 1);
 
         let params = TextureParams {
             width: self.width as usize,

@@ -3,7 +3,6 @@ use nes::{ChannelPlayback, SaveWram, UserInput};
 use serde::{Deserialize, Serialize};
 use ui::{
     audio::{Audio, SamplesSender},
-    filters::NesNtscSetup,
     gamepad::{GamepadChannel, GamepadEvent, GilrsInput},
     input::{InputMap, InputType},
     wram::{CartridgeId, WramStorage},
@@ -77,6 +76,7 @@ struct UiState {
     debug_interval: u64,
     selected_palette: u8,
     filter: Filter,
+    ntsc_config: NtscConfig,
     bios: Option<Vec<u8>>,
     variable_viewer: VariableViewerState,
     movie_settings: MovieSettingsState,
@@ -108,6 +108,7 @@ impl Default for UiState {
             debug_interval: 1,
             selected_palette: 0,
             filter: Filter::Crt,
+            ntsc_config: NtscConfig::default(),
             bios: None,
             variable_viewer: VariableViewerState::default(),
             movie_settings: MovieSettingsState::default(),
@@ -155,14 +156,26 @@ impl<A: Audio> DebuggerApp<A> {
         // Force dark mode as it is currently the only version I ever test
         cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
 
-        let ntsc_setup = NesNtscSetup::composite();
-        let palette = ntsc_setup.generate_palette();
+        let state = if let Some(storage) = cc.storage {
+            storage
+                .get_string("debugger_ui_state")
+                .and_then(|s| ron::from_str(&s).ok())
+        } else {
+            None
+        };
+
+        let state: UiState = state.unwrap_or_default();
 
         let gl = cc.gl.as_ref().expect("require glow opengl context").clone();
         let app_events = AppEvents::new();
         let back_buffer = GfxBackBuffer::new(Repainter::new(cc.egui_ctx.clone()));
-        let gfx = Gfx::new(gl.clone(), back_buffer.clone(), &palette)?;
+        let gfx = Gfx::new(gl.clone(), back_buffer.clone(), state.ntsc_config.clone())?;
         let nes_screen = NesScreen::new(gfx);
+
+        // This palette used in debug tools wont be live updated by filter config,
+        // will require an application restart in order to update the values
+        let ntsc_setup = state.ntsc_config.setup();
+        let palette = ntsc_setup.generate_palette();
         let palette = Palette::new(palette);
 
         let wram = platform::wram_storage();
@@ -205,16 +218,6 @@ impl<A: Audio> DebuggerApp<A> {
 
             wasm_bindgen_futures::spawn_local(gamepad_poll);
         }
-
-        let state = if let Some(storage) = cc.storage {
-            storage
-                .get_string("debugger_ui_state")
-                .and_then(|s| ron::from_str(&s).ok())
-        } else {
-            None
-        };
-
-        let state: UiState = state.unwrap_or_default();
 
         let svg_renderer = svg::SvgRenderer::new(gl).unwrap();
 
@@ -795,7 +798,8 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
         }
 
         if self.state.show_filter_config {
-            self.nes_screen.configure_filter(ctx);
+            self.nes_screen
+                .configure_filter(ctx, &mut self.state.ntsc_config);
         }
 
         if self.state.show_input_viewer {

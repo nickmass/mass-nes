@@ -28,7 +28,7 @@ pub use nametables::NametableViewer;
 pub use palette_viewer::PaletteViewer;
 pub use popup_message::{Message, PopupMessage};
 pub use recents::Recents;
-pub use screen::NesScreen;
+pub use screen::{NesScreen, NtscConfig};
 pub use sprite_viewer::SpriteViewer;
 pub use variable_viewer::{VariableViewer, VariableViewerState};
 pub use volume::{VolumeChanged, VolumePicker};

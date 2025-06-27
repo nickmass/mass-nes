@@ -11,10 +11,13 @@ pub struct CrtFilter {
     width: u32,
     height: u32,
     frame: Vec<u32>,
+    merge_fields: bool,
+    phase: i32,
 }
 
 impl CrtFilter {
     pub fn new(setup: &NesNtscSetup) -> Self {
+        let merge_fields = setup.merge_fields;
         let width = NesNtsc::out_width(256);
         let height = 240;
         let ntsc = NesNtsc::new(setup);
@@ -28,6 +31,8 @@ impl CrtFilter {
             width,
             height,
             frame: vec![0; (width * height) as usize],
+            merge_fields,
+            phase: 0,
         }
     }
 }
@@ -48,7 +53,12 @@ impl<C: FilterContext> Filter<C> for CrtFilter {
     fn process(&mut self, display: &C, render_size: (f64, f64), screen: &[u16]) -> C::Uniforms {
         let mut unis = display.create_uniforms();
 
-        self.ntsc.blit(screen, &mut self.frame, 256, 240, 0);
+        if !self.merge_fields {
+            self.phase ^= 1;
+        }
+
+        self.ntsc
+            .blit(screen, &mut self.frame, 256, 240, self.phase & 1);
 
         for p in self.frame.iter_mut() {
             let r = (*p & 0x00ff0000) >> 16;

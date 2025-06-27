@@ -112,7 +112,6 @@ impl<T: Filter<GliumContext>> Gfx<T> {
     }
 
     pub fn render(&mut self) {
-        let uniforms = self.filter.process(&self.display, self.size, &self.frame);
         let mut target = self.display.draw();
 
         let (filter_width, filter_height) = self.filter.dimensions();
@@ -143,6 +142,10 @@ impl<T: Filter<GliumContext>> Gfx<T> {
                 surface_height as u32,
             )
         };
+
+        let uniforms =
+            self.filter
+                .process(&self.display, (width as f64, height as f64), &self.frame);
 
         let params = glium::DrawParameters {
             viewport: Some(glium::Rect {
