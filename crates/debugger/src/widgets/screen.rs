@@ -183,6 +183,7 @@ impl NesScreen {
             egui::Slider::new(&mut ntsc_config.sharpness, -1.0..=1.0)
                 .text("Sharpness")
                 .ui(ui);
+            ui.checkbox(&mut ntsc_config.merge_fields, "Merge Fields");
 
             gfx.ntsc_config(ntsc_config.clone());
 
@@ -214,6 +215,7 @@ pub struct NtscConfig {
     contrast: f64,
     brightness: f64,
     sharpness: f64,
+    merge_fields: bool,
 }
 
 impl Default for NtscConfig {
@@ -230,9 +232,7 @@ impl NtscConfig {
         setup.contrast = self.contrast.min(1.0).max(-1.0);
         setup.brightness = self.brightness.min(1.0).max(-1.0);
         setup.sharpness = self.sharpness.min(1.0).max(-1.0);
-
-        // Worried about unmerged fields flickering too much with the browsers limited perf.
-        setup.merge_fields = cfg!(target_arch = "wasm32");
+        setup.merge_fields = self.merge_fields;
 
         setup
     }
@@ -285,6 +285,9 @@ impl NtscPreset {
     }
 
     fn default_config(&self) -> NtscConfig {
+        // Worried about unmerged fields flickering too much with the browsers limited perf.
+        let merge_fields = cfg!(target_arch = "wasm32");
+
         match self {
             NtscPreset::Monochrome => NtscConfig {
                 preset: *self,
@@ -293,6 +296,7 @@ impl NtscPreset {
                 contrast: 0.0,
                 brightness: 0.0,
                 sharpness: 0.2,
+                merge_fields,
             },
             NtscPreset::Composite => NtscConfig {
                 preset: *self,
@@ -301,6 +305,7 @@ impl NtscPreset {
                 contrast: 0.0,
                 brightness: 0.0,
                 sharpness: 0.0,
+                merge_fields,
             },
             NtscPreset::Svideo => NtscConfig {
                 preset: *self,
@@ -309,6 +314,7 @@ impl NtscPreset {
                 contrast: 0.0,
                 brightness: 0.0,
                 sharpness: 0.2,
+                merge_fields,
             },
             NtscPreset::Rgb => NtscConfig {
                 preset: *self,
@@ -317,6 +323,7 @@ impl NtscPreset {
                 contrast: 0.0,
                 brightness: 0.0,
                 sharpness: 0.2,
+                merge_fields: true,
             },
         }
     }
