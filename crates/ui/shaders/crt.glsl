@@ -54,15 +54,15 @@ uniform float clampFalloff;
 #pragma parameter beam_min          "Scanline Dark" 1.5 0.5 3.0 0.05
 #pragma parameter beam_max          "Scanline Bright" 2.0 0.5 3.0 0.05
 #pragma parameter h_sharp           "Horizontal Sharpness" 2.5 1.0 5.0 0.05
-#pragma parameter shadowMask        "CRT Mask: 0:CGWG, 1-4:Lottes, 5-6:Trinitron" 11.0 -1.0 11.0 1.0
+#pragma parameter shadowMask        "CRT Mask: 0:CGWG, 1-4:Lottes, 5-6:Trinitron" 5.0 -1.0 11.0 1.0
 #pragma parameter thres             "Mask Effect Threshold" 0.4 0.0 0.9 0.02
-#pragma parameter masksize          "CRT Mask Size (2.0 is nice in 4k)" 1.0 1.0 2.0 1.0
+#pragma parameter masksize          "CRT Mask Size" 2.0 1.0 2.0 1.0
 #pragma parameter mcut              "Mask 5-7-10 cutoff" 0.2 0.0 0.5 0.05
 #pragma parameter maskDark          "Lottes maskDark" 0.0 0.0 2.0 0.1
 #pragma parameter maskLight         "Lottes maskLight" 1.5 0.0 2.0 0.1
 #pragma parameter CGWG              "CGWG Mask Str." 1.0 0.0 1.0 0.1
-#pragma parameter warpX             "CurvatureX (default 0.03)" 0.03 0.0 0.25 0.01
-#pragma parameter warpY             "CurvatureY (default 0.04)" 0.04 0.0 0.25 0.01
+#pragma parameter warpX             "Curvature X" 0.01 0.0 0.25 0.01
+#pragma parameter warpY             "Curvature Y" 0.02 0.0 0.25 0.01
 #pragma parameter vignette          "Vignette On/Off" 1.0 0.0 1.0 1.0
 #pragma parameter gamma_out_red     "Gamma out Red" 2.2 1.0 4.0 0.1
 #pragma parameter gamma_out_green   "Gamma out Green" 2.2 1.0 4.0 0.1
