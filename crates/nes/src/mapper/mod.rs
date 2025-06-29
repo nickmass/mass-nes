@@ -228,7 +228,7 @@ pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
             }
         },
         66 => RcMapper::new(gxrom::Gxrom::new(cart)),
-        69 => RcMapper::new(fme7::Fme7::new(cart)),
+        69 => RcMapper::new(fme7::Fme7::new(cart, debug)),
         71 | 232 => RcMapper::new(bf909x::Bf909x::new(cart)),
         79 | 146 => RcMapper::new(nina006::Nina006::new(cart)),
         85 => match cart.submapper {

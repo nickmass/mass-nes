@@ -1,8 +1,11 @@
+use std::rc::Rc;
+
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 #[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
 
+use crate::Debug;
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind};
 use crate::cartridge::INes;
 use crate::mapper::Mapper;
@@ -55,6 +58,8 @@ enum PrgBank {
 pub struct Fme7 {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
+    #[cfg_attr(feature = "save-states", save(skip))]
+    debug: Rc<Debug>,
     prg_ram: MemoryBlock,
     prg_banks: [PrgBank; 5],
     chr_ram: Option<FixedMemoryBlock<8>>,
@@ -90,7 +95,7 @@ pub struct Fme7 {
 }
 
 impl Fme7 {
-    pub fn new(mut cartridge: INes) -> Fme7 {
+    pub fn new(mut cartridge: INes, debug: Rc<Debug>) -> Fme7 {
         let fixed_bank = ((cartridge.prg_rom.len() / 0x2000) - 1) as u8;
         let prg_banks = [
             PrgBank::Ram(0),
@@ -128,8 +133,9 @@ impl Fme7 {
             })
             .collect();
 
-        let mut mapper = Fme7 {
+        Fme7 {
             cartridge,
+            debug,
             prg_ram,
             prg_banks,
             chr_ram,
@@ -161,11 +167,7 @@ impl Fme7 {
 
             audio_lookup,
             sample: 0,
-        };
-
-        mapper.command(0);
-
-        mapper
+        }
     }
 
     fn read_cpu(&self, addr: u16) -> u8 {
@@ -452,6 +454,9 @@ impl Mapper for Fme7 {
         if self.irq_counter_enable {
             self.irq_counter = self.irq_counter.wrapping_sub(1);
             if self.irq_counter == 0xffff && self.irq_enable {
+                if !self.irq {
+                    self.debug.event(crate::DebugEvent::MapperIrq);
+                }
                 self.irq = true;
             }
         }
