@@ -402,14 +402,10 @@ impl Runner {
 
     fn step<U: RunUntil>(&mut self, playback: Playback, until: U) {
         if let Some(machine) = self.machine.as_mut() {
-            let frame_end = if self.movie_input.is_some() {
-                nes::FrameEnd::SetVblank
-            } else {
-                nes::FrameEnd::ClearVblank
-            };
-
-            let run_result =
-                machine.run_with_breakpoints(frame_end, until, |debug: &nes::Debug| {
+            let run_result = machine.run_with_breakpoints(
+                nes::FrameEnd::SetVblank,
+                until,
+                |debug: &nes::Debug| {
                     let event_notif = debug.take_interest_notification();
                     if event_notif & self.debug_request.interest_breakpoints != 0 {
                         return true;
@@ -421,7 +417,8 @@ impl Runner {
                     } else {
                         false
                     }
-                });
+                },
+            );
 
             let frame = machine.frame() as usize;
 

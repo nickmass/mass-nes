@@ -21,7 +21,7 @@ use crate::gfx::{Filter, Gfx, GfxBackBuffer};
 use crate::runner::{DebugRequest, EmulatorInput, StepKind};
 use crate::widgets::*;
 use crate::{
-    debug_state::{DebugSwapState, DebugUiState, Palette},
+    debug_state::{DebugSwapState, DebugUiState},
     platform,
 };
 use crate::{
@@ -171,13 +171,6 @@ impl<A: Audio> DebuggerApp<A> {
         let back_buffer = GfxBackBuffer::new(Repainter::new(cc.egui_ctx.clone()));
         let gfx = Gfx::new(gl.clone(), back_buffer.clone(), state.ntsc_config.clone())?;
         let nes_screen = NesScreen::new(gfx);
-
-        // This palette used in debug tools wont be live updated by filter config,
-        // will require an application restart in order to update the values
-        let ntsc_setup = state.ntsc_config.setup();
-        let palette = ntsc_setup.generate_palette();
-        let palette = Palette::new(palette);
-
         let wram = platform::wram_storage();
         let input = SharedInput::new();
         let last_input = input.state();
@@ -185,12 +178,13 @@ impl<A: Audio> DebuggerApp<A> {
             EmulatorControl::new(app_events.create_proxy(), wram.clone());
         let gamepad_channel = GilrsInput::new(app_events.create_proxy()).ok();
         let debug_swap = DebugSwapState::new();
-        let debug = DebugUiState::new(debug_swap.clone(), palette);
+        let debug = DebugUiState::new(debug_swap.clone(), state.ntsc_config.clone());
         let chr_tiles = ChrTiles::new();
         let nt_viewer = NametableViewer::new();
         let sprite_viewer = SpriteViewer::new();
         let messages = Messages::new(message_store);
         let help = Help::new(app_events.create_proxy(), emu_control.clone());
+        let svg_renderer = svg::SvgRenderer::new(gl).unwrap();
 
         let machine = MachineSpawner {
             emu_commands,
@@ -218,8 +212,6 @@ impl<A: Audio> DebuggerApp<A> {
 
             wasm_bindgen_futures::spawn_local(gamepad_poll);
         }
-
-        let svg_renderer = svg::SvgRenderer::new(gl).unwrap();
 
         let mut app = DebuggerApp {
             first_update: true,
@@ -662,23 +654,23 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
                 ui.menu_button("Filter", |ui| {
                     ui.toggle_value(&mut self.state.show_filter_config, "Configure");
                     ui.separator();
-                    if ui
-                        .radio_value(&mut self.state.filter, Filter::Paletted, "None")
-                        .changed()
-                    {
-                        self.nes_screen.filter(self.state.filter);
-                    }
-                    if ui
-                        .radio_value(&mut self.state.filter, Filter::Ntsc, "NTSC")
-                        .changed()
-                    {
-                        self.nes_screen.filter(self.state.filter);
-                    }
-                    if ui
-                        .radio_value(&mut self.state.filter, Filter::Crt, "CRT")
-                        .changed()
-                    {
-                        self.nes_screen.filter(self.state.filter);
+                    let old_filter = self.state.filter;
+
+                    let filters = [
+                        (Filter::Paletted, "None"),
+                        (Filter::Ntsc, "NTSC"),
+                        (Filter::Crt, "CRT"),
+                    ];
+
+                    for (filter, label) in filters {
+                        if ui
+                            .radio_value(&mut self.state.filter, filter, label)
+                            .changed()
+                        {
+                            if !self.nes_screen.filter(self.state.filter) {
+                                self.state.filter = old_filter;
+                            }
+                        }
                     }
                 });
                 ui.separator();
@@ -799,7 +791,7 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
 
         if self.state.show_filter_config {
             self.nes_screen
-                .configure_filter(ctx, &mut self.state.ntsc_config);
+                .configure_filter(ctx, &mut self.state.ntsc_config, &mut self.debug);
         }
 
         if self.state.show_input_viewer {

@@ -99,7 +99,7 @@ impl Runner {
 
     fn step(&mut self, samples: u32) {
         self.machine.run_with_breakpoints(
-            FrameEnd::ClearVblank,
+            FrameEnd::SetVblank,
             run_until::Frames(1).or(run_until::Samples(samples)),
             (),
         );

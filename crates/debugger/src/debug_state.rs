@@ -1,4 +1,4 @@
-use crate::egui;
+use crate::{egui, widgets::NtscConfig};
 use std::{
     ops::{Deref, DerefMut},
     sync::{
@@ -152,7 +152,11 @@ pub struct DebugUiState {
 }
 
 impl DebugUiState {
-    pub fn new(swap: DebugSwapState, palette: Palette) -> Self {
+    pub fn new(swap: DebugSwapState, ntsc_config: NtscConfig) -> Self {
+        let ntsc_setup = ntsc_config.setup();
+        let palette = ntsc_setup.generate_palette();
+        let palette = Palette::new(palette);
+
         Self {
             swap,
             cpu_mem: vec![0; 0x10000],
@@ -198,6 +202,12 @@ impl DebugUiState {
 
     pub fn palette(&self) -> &Palette {
         &self.palette
+    }
+
+    pub fn update_palette(&mut self, config: NtscConfig) {
+        let setup = config.setup();
+        let palette = setup.generate_palette();
+        self.palette = Palette::new(palette);
     }
 
     pub fn state(&self) -> &State {

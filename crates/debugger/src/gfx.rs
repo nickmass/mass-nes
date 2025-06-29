@@ -426,7 +426,11 @@ mod desktop {
         }
 
         pub fn request(&mut self) {
-            self.ctx.request_repaint();
+            // As of eframe 0.31.0, using `ctx.request_repaint()` causes a extra repaint to be
+            // triggered immediately after the first. Inserting this 1us parameter prevents that
+            // while still always presenting the freshest frame
+            self.ctx
+                .request_repaint_after(std::time::Duration::from_micros(1));
         }
     }
 

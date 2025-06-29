@@ -4,6 +4,7 @@ use std::sync::{
 };
 
 use crate::{
+    debug_state::DebugUiState,
     egui, egui_glow,
     gfx::{Filter, Gfx},
 };
@@ -99,9 +100,13 @@ impl NesScreen {
         }
     }
 
-    pub fn filter(&mut self, filter: Filter) {
-        let mut gfx = self.gfx.lock().unwrap();
-        gfx.filter(filter);
+    pub fn filter(&mut self, filter: Filter) -> bool {
+        if let Ok(mut gfx) = self.gfx.lock() {
+            gfx.filter(filter);
+            true
+        } else {
+            false
+        }
     }
 
     pub fn focus(&self, ctx: &egui::Context) {
@@ -149,7 +154,12 @@ impl NesScreen {
         self.popup.has_message()
     }
 
-    pub fn configure_filter(&self, ctx: &egui::Context, ntsc_config: &mut NtscConfig) {
+    pub fn configure_filter(
+        &self,
+        ctx: &egui::Context,
+        ntsc_config: &mut NtscConfig,
+        debug_state: &mut DebugUiState,
+    ) {
         let Ok(mut gfx) = self.gfx.try_lock() else {
             return;
         };
@@ -164,28 +174,35 @@ impl NesScreen {
                     }
                 });
 
+            let mut changed = false;
             if old_preset != ntsc_config.preset {
                 *ntsc_config = ntsc_config.preset.default_config();
+                changed = true;
             }
 
-            egui::Slider::new(&mut ntsc_config.hue, -1.0..=1.0)
-                .text("Hue")
-                .ui(ui);
-            egui::Slider::new(&mut ntsc_config.saturation, -1.0..=1.0)
-                .text("Saturation")
-                .ui(ui);
-            egui::Slider::new(&mut ntsc_config.contrast, -1.0..=1.0)
-                .text("Contrast")
-                .ui(ui);
-            egui::Slider::new(&mut ntsc_config.brightness, -1.0..=1.0)
-                .text("Brightness")
-                .ui(ui);
-            egui::Slider::new(&mut ntsc_config.sharpness, -1.0..=1.0)
-                .text("Sharpness")
-                .ui(ui);
-            ui.checkbox(&mut ntsc_config.merge_fields, "Merge Fields");
+            let fields = [
+                (&mut ntsc_config.hue, "Hue"),
+                (&mut ntsc_config.saturation, "Saturation"),
+                (&mut ntsc_config.contrast, "Contrast"),
+                (&mut ntsc_config.brightness, "Brightness"),
+                (&mut ntsc_config.sharpness, "Sharpness"),
+            ];
 
-            gfx.ntsc_config(ntsc_config.clone());
+            for (field, label) in fields {
+                changed |= egui::Slider::new(field, -1.0..=1.0)
+                    .text(label)
+                    .ui(ui)
+                    .changed();
+            }
+
+            changed |= ui
+                .checkbox(&mut ntsc_config.merge_fields, "Merge Fields")
+                .changed();
+
+            if changed {
+                gfx.ntsc_config(ntsc_config.clone());
+                debug_state.update_palette(ntsc_config.clone());
+            }
 
             let mut first = true;
             for param in gfx.filter_parameters() {
@@ -227,11 +244,11 @@ impl Default for NtscConfig {
 impl NtscConfig {
     pub fn setup(&self) -> NesNtscSetup {
         let mut setup = self.preset.setup();
-        setup.hue = self.hue.min(1.0).max(-1.0);
-        setup.saturation = self.saturation.min(1.0).max(-1.0);
-        setup.contrast = self.contrast.min(1.0).max(-1.0);
-        setup.brightness = self.brightness.min(1.0).max(-1.0);
-        setup.sharpness = self.sharpness.min(1.0).max(-1.0);
+        setup.hue = self.hue.clamp(-1.0, 1.0);
+        setup.saturation = self.saturation.clamp(-1.0, 1.0);
+        setup.contrast = self.contrast.clamp(-1.0, 1.0);
+        setup.brightness = self.brightness.clamp(-1.0, 1.0);
+        setup.sharpness = self.sharpness.clamp(-1.0, 1.0);
         setup.merge_fields = self.merge_fields;
 
         setup

@@ -21,6 +21,7 @@ bytemuck = "1.18.0"
 crossbeam = "0.8.4"
 eframe = { version = "0.31.0", features = ["persistence"] }
 nes = { path = "../nes", features = ["serde", "debugger", "save-states"] }
+# profiling = { version = "1.0.17", features = ["profile-with-tracy"] }
 rfd = "0.15.0"
 ron = "0.8.1"
 serde = { version = "1.0.210", features = ["derive"] }

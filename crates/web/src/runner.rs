@@ -141,7 +141,7 @@ impl MachineRunner {
     fn step(&mut self, samples: u32) {
         if let Some(machine) = self.machine.as_mut() {
             let until = nes::run_until::Frames(1).or(nes::run_until::Samples(samples));
-            machine.run_with_breakpoints(FrameEnd::ClearVblank, until, ());
+            machine.run_with_breakpoints(FrameEnd::SetVblank, until, ());
             let frame = Some(machine.frame());
 
             if frame != self.last_frame {
