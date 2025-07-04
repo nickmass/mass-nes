@@ -20,7 +20,7 @@ jobs:
       - name: Install System Deps
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y libasound2-dev libudev-dev
+          sudo apt-get install -y libasound2-dev libudev-dev libpipewire-0.3-dev libspa-0.2-dev
       - name: Install Rust Toolchain
         run: |
           rustup toolchain install nightly
