@@ -19,10 +19,12 @@ fn main() {
         ..Default::default()
     };
 
-    #[cfg(not(feature = "jack"))]
-    let (mut audio, samples_tx) = ui::audio::CpalAudio::new().unwrap();
     #[cfg(feature = "jack")]
     let (mut audio, samples_tx) = ui::audio::JackAudio::new().unwrap();
+    #[cfg(all(not(target_os = "linux"), not(feature = "jack")))]
+    let (mut audio, samples_tx) = ui::audio::CpalAudio::new().unwrap();
+    #[cfg(all(target_os = "linux", not(feature = "jack")))]
+    let (mut audio, samples_tx) = ui::audio::PipewireAudio::new().unwrap();
 
     audio.pause();
 

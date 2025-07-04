@@ -7,6 +7,8 @@ use jack::{AudioOut, ClientOptions, Port};
 
 use super::{Audio, SamplesReceiver, SamplesSender, samples_channel};
 
+const SAMPLE_LATENCY: u32 = 64;
+
 pub struct JackAudio {
     #[allow(unused)]
     client: jack::AsyncClient<Notification, Processor>,
@@ -23,7 +25,8 @@ impl JackAudio {
         tracing::debug!("JACK sample rate: {sample_rate}");
         let status = Arc::new(PlayStatus::new(sample_rate));
 
-        let (samples_tx, samples_rx) = samples_channel(sample_rate as usize, 64, 2);
+        let (samples_tx, samples_rx) =
+            samples_channel(sample_rate as usize, SAMPLE_LATENCY as usize, 2);
 
         let processor = Processor {
             port,
@@ -37,7 +40,7 @@ impl JackAudio {
 
         let client = client.activate_async(notification, processor)?;
 
-        let _ = client.as_client().set_buffer_size(64);
+        let _ = client.as_client().set_buffer_size(SAMPLE_LATENCY);
         let system_ports =
             client
                 .as_client()
@@ -90,6 +93,8 @@ impl jack::ProcessHandler for Processor {
             let s = s as f32 / i16::MAX as f32;
             *out = s * volume;
         }
+
+        self.samples_rx.notify();
 
         jack::Control::Continue
     }

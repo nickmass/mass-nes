@@ -109,6 +109,10 @@ impl NesScreen {
         }
     }
 
+    pub fn id(&self) -> egui::Id {
+        SCREEN_INTERACT.into()
+    }
+
     pub fn focus(&self, ctx: &egui::Context) {
         ctx.memory_mut(|m| m.request_focus(SCREEN_INTERACT.into()))
     }

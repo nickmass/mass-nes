@@ -13,6 +13,10 @@ pub use cpal::CpalAudio;
 mod jack;
 #[cfg(all(not(target_arch = "wasm32"), feature = "jack"))]
 pub use jack::JackAudio;
+#[cfg(all(not(target_arch = "wasm32"), feature = "pipewire"))]
+mod pipewire;
+#[cfg(all(not(target_arch = "wasm32"), feature = "pipewire"))]
+pub use pipewire::PipewireAudio;
 
 #[cfg(target_arch = "wasm32")]
 mod browser;
@@ -21,6 +25,8 @@ pub use browser::BrowserAudio;
 
 mod null;
 pub use null::Null;
+
+use crate::wav_writer::WavWriter;
 
 pub trait Audio {
     fn sample_rate(&self) -> u32;
@@ -52,6 +58,7 @@ fn samples_channel(
         buffer_len,
         notify,
         buffer_depth,
+        wav_writer: None,
     };
 
     (tx, rx)
@@ -106,15 +113,37 @@ pub struct SamplesSender {
     buffer_len: Arc<AtomicUsize>,
     buffer_depth: usize,
     notify: SamplesNotify,
+    wav_writer: Option<WavWriter>,
 }
 
 impl SamplesSender {
+    pub fn start_recording(
+        &mut self,
+        file: std::fs::File,
+        sample_rate: u32,
+    ) -> std::io::Result<()> {
+        self.end_recording()?;
+
+        let wav = WavWriter::new(file, sample_rate)?;
+
+        self.wav_writer = Some(wav);
+        Ok(())
+    }
+
+    pub fn end_recording(&mut self) -> std::io::Result<()> {
+        let Some(wav) = self.wav_writer.take() else {
+            return Ok(());
+        };
+
+        wav.finalize()
+    }
+
     pub fn add_samples(&mut self, samples: &[i16]) {
         let mut total_count = 0;
         self.tx.write_slices(
             |buf, _offset| {
                 let to_write = (samples.len() - total_count).min(buf.len());
-                buf[..to_write].copy_from_slice(&samples[total_count..total_count + to_write]);
+                process_samples(self.wav_writer.as_mut(), &buf[..to_write]);
                 total_count += to_write;
                 to_write
             },
@@ -125,7 +154,11 @@ impl SamplesSender {
     pub fn add_samples_from_blip(&mut self, blip: &mut blip_buf_rs::Blip) {
         let avail = blip.samples_avail() as usize;
         let written = self.tx.write_slices(
-            |buf, _offset| blip.read_samples(buf, buf.len() as u32, false) as usize,
+            |buf, _offset| {
+                let count = blip.read_samples(buf, buf.len() as u32, false) as usize;
+                process_samples(self.wav_writer.as_mut(), &buf[..count]);
+                count
+            },
             Some(avail),
         );
 
@@ -154,6 +187,14 @@ impl SamplesSender {
 
         self.notify.wait_timeout(duration);
         self.wants_samples()
+    }
+}
+
+fn process_samples(wav: Option<&mut WavWriter>, samples: &[i16]) {
+    if let Some(wav) = wav {
+        if let Err(err) = wav.write_samples(samples) {
+            tracing::error!("wav recording: {err:?}");
+        }
     }
 }
 
@@ -229,7 +270,8 @@ macro_rules! impl_audio_devices {
 
 impl_audio_devices! {
     #[cfg(not(target_arch = "wasm32"))] Cpal => CpalAudio;
-    #[cfg(feature = "jack")] Jack => JackAudio;
+    #[cfg(all(not(target_arch = "wasm32"), feature = "jack"))] Jack => JackAudio;
+    #[cfg(all(not(target_arch = "wasm32"), feature = "pipewire"))] Pipewire => PipewireAudio;
     #[cfg(target_arch = "wasm32")] Browser => BrowserAudio;
     Null => Null;
 }

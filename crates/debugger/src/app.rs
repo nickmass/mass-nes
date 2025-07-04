@@ -9,6 +9,7 @@ use ui::{
 };
 
 use std::{
+    fs::File,
     path::PathBuf,
     sync::{
         Arc, Mutex,
@@ -144,6 +145,7 @@ pub struct DebuggerApp<A> {
     channel_viewer: ChannelViewer,
     variable_viewer: VariableViewer,
     movie_settings: MovieSettings,
+    recording_wav: bool,
 }
 
 impl<A: Audio> DebuggerApp<A> {
@@ -241,6 +243,7 @@ impl<A: Audio> DebuggerApp<A> {
             channel_viewer: ChannelViewer::new(),
             variable_viewer: VariableViewer::new(),
             movie_settings: MovieSettings::new(),
+            recording_wav: false,
         };
 
         app.hydrate();
@@ -460,6 +463,14 @@ impl<A: Audio> DebuggerApp<A> {
                     None => tracing::warn!("No movie found in file"),
                 }
             }
+            AppEvent::PickWav(path_buf) => {
+                if let Ok(file) = File::create(path_buf) {
+                    self.recording_wav = true;
+                    self.emu_control.record_wav(file);
+                } else {
+                    tracing::error!("unable to create wav file");
+                }
+            }
         }
     }
 
@@ -556,6 +567,21 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
                     if ui.button("Movie Settings").clicked() {
                         self.state.movie_settings.show_settings = true;
                         ui.close_menu();
+                    }
+
+                    if cfg!(not(target_arch = "wasm32")) {
+                        if self.recording_wav {
+                            if ui.button("End Recording").clicked() {
+                                self.emu_control.stop_record_wav();
+                                self.recording_wav = false;
+                                ui.close_menu();
+                            }
+                        } else {
+                            if ui.button("Record WAV").clicked() {
+                                pick_wav(self.app_events.create_proxy());
+                                ui.close_menu();
+                            }
+                        }
                     }
 
                     ui.separator();
@@ -844,7 +870,7 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
         }
     }
 
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         let input_iter = raw_input.events.iter().filter_map(|ev| {
             if let &Event::Key { key, pressed, .. } = ev {
                 Some(Input { key, pressed })
@@ -853,15 +879,17 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
             }
         });
 
-        if let Some(state) = self.input.update(input_iter) {
-            self.handle_input(state);
+        if ctx.memory(|m| m.has_focus(self.nes_screen.id())) {
+            if let Some(state) = self.input.update(input_iter) {
+                self.handle_input(state);
+            }
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum AppEvent {
-    RomLoaded(std::path::PathBuf),
+    RomLoaded(PathBuf),
     FocusScreen,
     Breakpoint,
     Gamepad(GamepadEvent),
@@ -869,6 +897,7 @@ pub enum AppEvent {
     CartridgeInfo(CartridgeKind),
     SaveWram(CartridgeId, SaveWram),
     MovieLoaded(String, Vec<u8>),
+    PickWav(PathBuf),
 }
 
 impl From<GamepadEvent> for AppEvent {
@@ -1015,6 +1044,14 @@ impl EmulatorControl {
 
     fn play_movie(&self, movie: ui::movie::MovieFile) {
         let _ = self.tx.send(EmulatorInput::PlayMovie(movie));
+    }
+
+    fn record_wav(&self, file: File) {
+        let _ = self.tx.send(EmulatorInput::RecordWav(file));
+    }
+
+    fn stop_record_wav(&self) {
+        let _ = self.tx.send(EmulatorInput::StopRecordWav);
     }
 }
 
@@ -1269,6 +1306,26 @@ fn pick_movie(proxy: AppEventsProxy) {
     };
 
     wasm_bindgen_futures::spawn_local(pick);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn pick_wav(proxy: AppEventsProxy) {
+    std::thread::spawn(move || {
+        let Some(wav_file) = rfd::FileDialog::new()
+            .set_file_name("recording.wav")
+            .add_filter("All Supported Files", &["wav"])
+            .save_file()
+        else {
+            return;
+        };
+
+        proxy.send(AppEvent::PickWav(wav_file));
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn pick_wav(proxy: AppEventsProxy) {
+    // unsupported
 }
 
 fn read_first_match_in_zip<R: std::io::Read + std::io::Seek>(

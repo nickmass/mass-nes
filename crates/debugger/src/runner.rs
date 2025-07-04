@@ -122,6 +122,8 @@ pub enum EmulatorInput {
     SaveWram,
     PlayMovie(MovieFile),
     ChannelPlayback(nes::ChannelPlayback),
+    RecordWav(std::fs::File),
+    StopRecordWav,
 }
 
 #[derive(Debug)]
@@ -346,6 +348,16 @@ impl Runner {
                             machine.set_channel_playback(playback);
                         }
                     }
+                    EmulatorInput::RecordWav(file) => {
+                        if let Err(err) = self.samples_tx.start_recording(file, self.sample_rate) {
+                            tracing::error!("recording wav: {err:?}");
+                        }
+                    }
+                    EmulatorInput::StopRecordWav => {
+                        if let Err(err) = self.samples_tx.end_recording() {
+                            tracing::error!("recording wav: {err:?}");
+                        }
+                    }
                 }
             }
 
@@ -364,7 +376,7 @@ impl Runner {
                 }
             } else {
                 self.samples_tx
-                    .wait_for_wants_samples(Duration::from_millis(1))
+                    .wait_for_wants_samples(Duration::from_millis(4))
             };
 
             let Some(samples) = wants_samples else {
