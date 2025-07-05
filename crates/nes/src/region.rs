@@ -81,6 +81,13 @@ impl Region {
         }
     }
 
+    pub const fn noise_rates(&self) -> &'static [u16] {
+        match self {
+            Region::Ntsc => NOISE_RATES_NTSC,
+            Region::Pal => NOISE_RATES_PAL,
+        }
+    }
+
     pub const fn dmc_rates(&self) -> &'static [u16] {
         match self {
             Region::Ntsc => DMC_RATES_NTSC,
@@ -101,6 +108,13 @@ const FIVE_STEP_SEQ_PAL: &[u32] = &[8313, 16627, 24939, 41565, 41566];
 
 const FOUR_STEP_SEQ_NTSC: &[u32] = &[7457, 14913, 22371, 29829, 29830];
 const FOUR_STEP_SEQ_PAL: &[u32] = &[8313, 16627, 24939, 33253, 33254];
+
+const NOISE_RATES_NTSC: &[u16] = &[
+    4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068,
+];
+const NOISE_RATES_PAL: &[u16] = &[
+    4, 8, 14, 30, 60, 88, 118, 148, 188, 236, 354, 472, 708, 944, 1890, 3778,
+];
 
 const DMC_RATES_NTSC: &[u16] = &[
     428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 84, 72, 54,

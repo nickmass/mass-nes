@@ -73,13 +73,13 @@ impl Apu {
         let mut pulse_table = Vec::new();
         for x in 0..32 {
             let f_val = 95.52 / (8128.0 / (x as f64) + 100.0);
-            pulse_table.push((f_val * ::std::i16::MAX as f64) as i16);
+            pulse_table.push((f_val * i16::MAX as f64) as i16);
         }
 
         let mut tnd_table = Vec::new();
         for x in 0..204 {
             let f_val = 163.67 / (24329.0 / (x as f64) + 100.0);
-            tnd_table.push((f_val * ::std::i16::MAX as f64) as i16);
+            tnd_table.push((f_val * i16::MAX as f64) as i16);
         }
 
         Apu {
@@ -88,7 +88,7 @@ impl Apu {
             pulse_one: Pulse::new(PulseChannel::InternalOne),
             pulse_two: Pulse::new(PulseChannel::InternalTwo),
             triangle: Triangle::new(),
-            noise: Noise::new(),
+            noise: Noise::new(region),
             dmc: Dmc::new(region),
             pulse_table,
             tnd_table,

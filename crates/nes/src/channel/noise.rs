@@ -1,18 +1,16 @@
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 
+use crate::Region;
 use crate::apu::ApuSnapshot;
 use crate::bus::{AddressBus, AndEqualsAndMask, DeviceKind};
 use crate::channel::Channel;
 
-//Im not sure if these are in CPU clocks, or APU clocks.
-const RATES: &[u16] = &[
-    4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068,
-];
-
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 #[derive(Default)]
 pub struct Noise {
+    #[cfg_attr(feature = "save-states", save(skip))]
+    region: Region,
     timer_counter: u16,
     length_counter: u8,
     enabled: bool,
@@ -29,8 +27,9 @@ pub struct Noise {
 }
 
 impl Noise {
-    pub fn new() -> Noise {
+    pub fn new(region: Region) -> Noise {
         Noise {
+            region,
             shifter: 1,
             ..Default::default()
         }
@@ -84,7 +83,7 @@ impl Noise {
     }
 
     fn timer_period(&self) -> u16 {
-        RATES[(self.regs[2] & 0xf) as usize]
+        self.region.noise_rates()[(self.regs[2] & 0xf) as usize]
     }
 }
 
@@ -110,14 +109,11 @@ impl Channel for Noise {
     fn tick(&mut self, state: ApuSnapshot) -> u8 {
         self.current_tick += 1;
 
-        if self.current_tick & 1 == 0 {
-            if self.timer_counter == 0 {
-                self.timer_counter = self.timer_period();
-                self.clock_shifter();
-            } else {
-                self.timer_counter -= 1;
-            }
+        if self.timer_counter == 0 {
+            self.timer_counter = self.timer_period();
+            self.clock_shifter();
         }
+        self.timer_counter -= 1;
 
         if state.is_quarter_frame || self.forced_clock {
             if self.envelope_start {
