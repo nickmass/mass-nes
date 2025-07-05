@@ -389,6 +389,7 @@ impl<A: Audio> DebuggerApp<A> {
                 self.state.recent_files = self.recents.iter().map(|p| p.to_path_buf()).collect();
                 self.pause = false;
                 self.handle_pause();
+                self.nes_screen.focus(ctx);
             }
             AppEvent::FocusScreen => {
                 self.nes_screen.focus(ctx);

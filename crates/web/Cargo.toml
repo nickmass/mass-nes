@@ -12,11 +12,10 @@ crate-type = ["cdylib"]
 ui = { path = "../ui" }
 
 [dependencies]
-blip_buf-rs = "0.1"
+blip_buf = "0.1.5"
 bytemuck = "1.18.0"
 byteorder = "1.5.0"
 console_error_panic_hook = "0.1.7"
-cpal = { version = "0.15", features = ["wasm-bindgen"] }
 futures = "0.3"
 gloo = { version = "0.11", features = ["futures"] }
 nes = { path = "../nes", default-features = false }
@@ -26,7 +25,7 @@ ui = { path = "../ui" }
 wasm-bindgen-futures = { version = "0.4" }
 winit = { version = "0.30.5" }
 tracing = { version = "0.1.40" }
-wasm-tracing = "1.0"
+wasm-tracing = "2.0"
 direct_ring_buffer = "0.2"
 crossbeam = "0.8.4"
 web-worker = { path = "../web-worker" }

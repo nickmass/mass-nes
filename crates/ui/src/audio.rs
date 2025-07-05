@@ -140,9 +140,15 @@ impl SamplesSender {
 
     pub fn add_samples(&mut self, samples: &[i16]) {
         let mut total_count = 0;
+
+        if samples.is_empty() {
+            return;
+        }
+
         self.tx.write_slices(
             |buf, _offset| {
                 let to_write = (samples.len() - total_count).min(buf.len());
+                buf[..to_write].copy_from_slice(&samples[total_count..total_count + to_write]);
                 process_samples(self.wav_writer.as_mut(), &buf[..to_write]);
                 total_count += to_write;
                 to_write
@@ -151,11 +157,16 @@ impl SamplesSender {
         );
     }
 
-    pub fn add_samples_from_blip(&mut self, blip: &mut blip_buf_rs::Blip) {
+    pub fn add_samples_from_blip(&mut self, blip: &mut blip_buf::BlipBuf) {
         let avail = blip.samples_avail() as usize;
+
+        if avail == 0 {
+            return;
+        }
+
         let written = self.tx.write_slices(
             |buf, _offset| {
-                let count = blip.read_samples(buf, buf.len() as u32, false) as usize;
+                let count = blip.read_samples(buf, false) as usize;
                 process_samples(self.wav_writer.as_mut(), &buf[..count]);
                 count
             },

@@ -6,7 +6,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-blip_buf-rs = "0.1"
+blip_buf = "0.1.5"
 clap = { version = "4.5", features = ["derive"] }
 crossbeam = "0.8"
 nes = { path = "../nes" }

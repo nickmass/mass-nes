@@ -16,20 +16,20 @@ ui = { path = "../ui", features = ["egui"] }
 
 [dependencies]
 bitflags = "2.9.0"
-blip_buf-rs = "0.1"
+blip_buf = "0.1.5"
 bytemuck = "1.18.0"
 crossbeam = "0.8.4"
 eframe = { version = "0.31.0", features = ["persistence"] }
 nes = { path = "../nes", features = ["serde", "debugger", "save-states"] }
 # profiling = { version = "1.0.17", features = ["profile-with-tracy"] }
 rfd = "0.15.0"
-ron = "0.8.1"
+ron = "0.10.1"
 serde = { version = "1.0.210", features = ["derive"] }
 svg-tessellator = { path = "../svg-tessellator" }
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 ui = { path = "../ui", features = ["egui"] }
-zip = { version = "2.2.3", default-features = false, features = ["deflate"] }
+zip = { version = "4.2.0", default-features = false, features = ["deflate"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 ui = { path = "../ui", features = ["egui"] }
@@ -51,7 +51,7 @@ gloo = { version = "0.11", features = ["futures"] }
 serde_json = "1.0"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-wasm-tracing = "1.0.1"
+wasm-tracing = "2.0"
 web-worker = { path = "../web-worker" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies.web-sys]

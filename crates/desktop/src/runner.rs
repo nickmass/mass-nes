@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, time::Duration};
 
-use blip_buf_rs::Blip;
+use blip_buf::BlipBuf;
 use nes::{
     Cartridge, FrameEnd, Machine, Region, UserInput,
     run_until::{self, RunUntil},
@@ -17,7 +17,7 @@ pub struct Runner {
     back_buffer: GfxBackBuffer,
     inputs: Option<NesInputs>,
     samples_tx: SamplesSender,
-    blip: Blip,
+    blip: BlipBuf,
     blip_delta: i32,
     save_states: Vec<Option<(usize, nes::SaveData)>>,
     save_store: SaveStore,
@@ -34,7 +34,7 @@ impl Runner {
         sample_rate: u32,
     ) -> Self {
         let machine = Machine::new(region, cart);
-        let mut blip = blip_buf_rs::Blip::new(sample_rate / 20);
+        let mut blip = BlipBuf::new(sample_rate / 20);
         blip.set_rates(
             region.frame_ticks() * region.refresh_rate(),
             sample_rate as f64,

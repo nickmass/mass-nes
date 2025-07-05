@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, time::Duration};
 
-use blip_buf_rs::Blip;
+use blip_buf::BlipBuf;
 use nes::{
     Cartridge, DebugEvent, FdsInput, Machine, MapperInput, Region, RunResult, SaveWram, UserInput,
     run_until::{self, RunUntil},
@@ -157,7 +157,7 @@ pub struct Runner {
     movie_input: Option<MovieFile>,
     samples_tx: SamplesSender,
     sample_rate: u32,
-    blip: Blip,
+    blip: BlipBuf,
     blip_delta: i32,
     save_states: Vec<Option<(usize, nes::SaveData)>>,
     save_store: SaveStore,
@@ -175,7 +175,7 @@ impl Runner {
         sample_rate: u32,
         debug: DebugSwapState,
     ) -> Self {
-        let blip = blip_buf_rs::Blip::new(sample_rate);
+        let blip = BlipBuf::new(sample_rate);
 
         let save_store = SaveStore::builder()
             .add(1, 600)

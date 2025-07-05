@@ -58,7 +58,7 @@ struct MachineRunner {
     machine: Option<nes::Machine>,
     region: nes::Region,
     blip_delta: i32,
-    blip: blip_buf_rs::Blip,
+    blip: blip_buf::BlipBuf,
     back_buffer: GfxBackBuffer,
     samples_tx: SamplesSender,
     nes_inputs: Option<NesInputs>,
@@ -75,7 +75,7 @@ impl MachineRunner {
             samples_tx,
         } = channel;
 
-        let mut blip = blip_buf_rs::Blip::new(sample_rate / 20);
+        let mut blip = blip_buf::BlipBuf::new(sample_rate / 20);
         blip.set_rates(
             region.frame_ticks() * region.refresh_rate(),
             sample_rate as f64,

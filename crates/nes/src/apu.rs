@@ -92,7 +92,7 @@ impl Apu {
             dmc: Dmc::new(region),
             pulse_table,
             tnd_table,
-            samples: RingBuf::new(33248), //Max cycles for the longer pal frame
+            samples: RingBuf::new(region.frame_ticks().ceil() as usize * 2),
             current_tick: 0,
             reset_delay: 0,
             frame_counter: 6,
