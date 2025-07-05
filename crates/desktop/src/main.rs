@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use nes::{Cartridge, Machine};
 use runner::Runner;
-use ui::audio::{Audio, AudioDevices, CpalAudio, Null, SamplesSender};
+use ui::audio::{Audio, AudioDevices, Null, PipewireAudio, SamplesSender};
 use ui::filters::NesNtscSetup;
 
 use std::{fs::File, path::PathBuf};
@@ -75,7 +75,7 @@ fn bench(path: PathBuf, region: nes::Region, mut frames: u32) {
 }
 
 fn init_audio() -> (AudioDevices, SamplesSender) {
-    match CpalAudio::new() {
+    match PipewireAudio::new() {
         _ if std::env::var("MASS_NES_NO_AUDIO").is_ok() => {
             let (audio, tx) = Null::new();
             (audio.into(), tx)

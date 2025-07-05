@@ -10,7 +10,7 @@ use std::{
 use super::{Audio, SamplesReceiver, SamplesSender, samples_channel};
 
 const SAMPLE_RATE: u32 = 48000;
-const SAMPLE_LATENCY: u32 = 32;
+const SAMPLE_LATENCY: u32 = 64;
 
 #[derive(Debug)]
 pub enum Error {
@@ -123,35 +123,24 @@ impl PipewireMainThread {
         )?;
 
         let _listener = stream
-            .add_local_listener_with_user_data((status, samples_rx))
-            .process(|stream, (status, samples)| match stream.dequeue_buffer() {
+            .add_local_listener_with_user_data(samples_rx)
+            .process(|stream, samples| match stream.dequeue_buffer() {
                 Some(mut buffer) => {
                     let datas = buffer.datas_mut();
                     let data = &mut datas[0];
-                    let stride = std::mem::size_of::<f32>();
-                    let volume = status.volume();
+                    let stride = std::mem::size_of::<i16>();
                     let mut n_frames = 0;
 
                     if let Some(slice) = data.data() {
-                        if status.is_paused() {
-                            for out_sample in
-                                slice.chunks_exact_mut(stride).take(SAMPLE_LATENCY as usize)
-                            {
-                                out_sample.copy_from_slice(&0.0f32.to_le_bytes());
-                                n_frames += 1;
-                            }
-                        } else {
-                            for (out_sample, sample) in slice
-                                .chunks_exact_mut(stride)
-                                .zip(&mut *samples)
-                                .take(SAMPLE_LATENCY as usize)
-                            {
-                                let sample = sample as f32 / i16::MAX as f32 * volume;
-                                out_sample.copy_from_slice(&sample.to_le_bytes());
-                                n_frames += 1;
-                            }
-                            samples.notify();
+                        for (out_sample, sample) in slice
+                            .chunks_exact_mut(stride)
+                            .zip(&mut *samples)
+                            .take(SAMPLE_LATENCY as usize)
+                        {
+                            out_sample.copy_from_slice(&sample.to_le_bytes());
+                            n_frames += 1;
                         }
+                        samples.notify();
                     }
 
                     let chunk = data.chunk_mut();
@@ -165,7 +154,7 @@ impl PipewireMainThread {
 
         use pipewire::spa;
         let mut audio_info = spa::param::audio::AudioInfoRaw::new();
-        audio_info.set_format(spa::param::audio::AudioFormat::F32LE);
+        audio_info.set_format(spa::param::audio::AudioFormat::S16LE);
         audio_info.set_rate(sample_rate);
         audio_info.set_channels(1);
         let mut position = [0; spa::param::audio::MAX_CHANNELS];
@@ -195,6 +184,18 @@ impl PipewireMainThread {
             &mut params,
         )?;
 
+        let control_interval = std::time::Duration::from_millis(4);
+        let timer = main_loop.loop_().add_timer({
+            let status = status.clone();
+            move |_| {
+                if status.is_changed() {
+                    let _ = stream.set_active(!status.is_paused());
+                    let _ = stream.set_control(spa::sys::SPA_PROP_volume, &[status.volume()]);
+                }
+            }
+        });
+        timer.update_timer(Some(control_interval), Some(control_interval));
+
         init.send(Ok(())).unwrap();
 
         main_loop.run();
@@ -207,6 +208,7 @@ struct PlayStatus {
     volume: AtomicU32,
     paused: AtomicBool,
     sample_rate: AtomicU32,
+    changed: AtomicBool,
 }
 
 impl PlayStatus {
@@ -215,11 +217,18 @@ impl PlayStatus {
             volume: AtomicU32::new(u32::MAX),
             paused: AtomicBool::new(false),
             sample_rate: AtomicU32::new(sample_rate),
+            changed: AtomicBool::new(false),
         }
     }
+
+    fn is_changed(&self) -> bool {
+        self.changed.swap(false, Ordering::Relaxed)
+    }
+
     fn set_volume(&self, volume: f32) {
-        let volume = (volume.max(0.0).min(1.0) * u32::MAX as f32) as u32;
+        let volume = (volume.clamp(0.0, 1.0) * u32::MAX as f32) as u32;
         self.volume.store(volume, Ordering::Relaxed);
+        self.changed.store(true, Ordering::Relaxed);
     }
 
     fn volume(&self) -> f32 {
@@ -240,10 +249,12 @@ impl PlayStatus {
 
     fn play(&self) {
         self.paused.store(false, Ordering::Relaxed);
+        self.changed.store(true, Ordering::Relaxed);
     }
 
     fn pause(&self) {
         self.paused.store(true, Ordering::Relaxed);
+        self.changed.store(true, Ordering::Relaxed);
     }
 
     fn is_paused(&self) -> bool {

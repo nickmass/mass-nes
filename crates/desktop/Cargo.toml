@@ -13,7 +13,7 @@ nes = { path = "../nes" }
 glium = { git = "https://github.com/glium/glium.git", rev = "7c541983dcc5c1d516225559129ac9a27e9af4e8", features = [
     "simple_window_builder",
 ] }
-ui = { path = "../ui" }
+ui = { path = "../ui", features = ["pipewire"] }
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 tracing-tracy = { version = "0.11.1", features = [
