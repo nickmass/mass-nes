@@ -30,7 +30,7 @@ pub struct ApuSnapshot {
 }
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
-pub struct Apu {
+pub struct Apu<S: Sample = i16> {
     #[cfg_attr(feature = "save-states", save(skip))]
     region: Region,
     #[cfg_attr(feature = "save-states", save(skip))]
@@ -46,11 +46,9 @@ pub struct Apu {
     #[cfg_attr(feature = "save-states", save(nested))]
     pub dmc: Dmc,
     #[cfg_attr(feature = "save-states", save(skip))]
-    pulse_table: Vec<i16>,
+    mixer: S::Mixer,
     #[cfg_attr(feature = "save-states", save(skip))]
-    tnd_table: Vec<i16>,
-    #[cfg_attr(feature = "save-states", save(skip))]
-    samples: RingBuf<i16>,
+    samples: RingBuf<S>,
     current_tick: u32,
     reset_delay: u32,
     frame_counter: u32,
@@ -68,20 +66,8 @@ pub struct Apu {
     playback: ChannelPlayback,
 }
 
-impl Apu {
-    pub fn new(region: Region, mapper: RcMapper) -> Apu {
-        let mut pulse_table = Vec::new();
-        for x in 0..32 {
-            let f_val = 95.52 / (8128.0 / (x as f64) + 100.0);
-            pulse_table.push((f_val * i16::MAX as f64) as i16);
-        }
-
-        let mut tnd_table = Vec::new();
-        for x in 0..204 {
-            let f_val = 163.67 / (24329.0 / (x as f64) + 100.0);
-            tnd_table.push((f_val * i16::MAX as f64) as i16);
-        }
-
+impl<S: Sample> Apu<S> {
+    pub fn new(region: Region, mapper: RcMapper) -> Apu<S> {
         Apu {
             region,
             mapper,
@@ -90,8 +76,7 @@ impl Apu {
             triangle: Triangle::new(),
             noise: Noise::new(region),
             dmc: Dmc::new(region),
-            pulse_table,
-            tnd_table,
+            mixer: S::Mixer::default(),
             samples: RingBuf::new(region.frame_ticks().ceil() as usize * 2),
             current_tick: 0,
             reset_delay: 0,
@@ -309,20 +294,16 @@ impl Apu {
         let dmc = self.playback.dmc(dmc);
         let ext = self.playback.ext(ext);
 
-        let pulse_out = self.pulse_table[(pulse_1 + pulse_2) as usize];
-        let tnd_out = self.tnd_table[((3 * triangle) + (2 * noise) + dmc) as usize];
-        let sample = (pulse_out + tnd_out) - ext;
+        let sample = self.mixer.mix(pulse_1, pulse_2, triangle, noise, dmc, ext);
         self.samples.push(sample);
         until.add_sample();
     }
 
-    pub fn samples(&mut self) -> impl Iterator<Item = i16> + '_ {
+    pub fn samples(&mut self) -> impl Iterator<Item = S> + '_ {
         self.samples.iter()
     }
 
-    pub fn take_samples(
-        &mut self,
-    ) -> impl DoubleEndedIterator<Item = i16> + ExactSizeIterator + '_ {
+    pub fn take_samples(&mut self) -> impl DoubleEndedIterator<Item = S> + ExactSizeIterator + '_ {
         self.samples.take_iter()
     }
 
@@ -594,5 +575,87 @@ impl ChannelPlayback {
         } else {
             v
         }
+    }
+}
+
+pub trait Sample: Copy + Default {
+    type Mixer: SampleMixer<Self>;
+}
+
+pub trait SampleMixer<S>: Default {
+    fn mix(&self, pulse_1: u8, pulse_2: u8, triangle: u8, noise: u8, dmc: u8, ext: i16) -> S;
+}
+
+impl Sample for i16 {
+    type Mixer = I16LutMixer;
+}
+
+pub struct I16LutMixer {
+    pulse_table: Vec<i16>,
+    tnd_table: Vec<i16>,
+}
+
+impl Default for I16LutMixer {
+    fn default() -> Self {
+        let mut pulse_table = Vec::new();
+        pulse_table.push(0);
+        for x in 1..32 {
+            let x = x as f64;
+            let f_val = 95.52 / (8128.0 / x + 100.0);
+            let val = (f_val.clamp(0.0, 1.0) * i16::MAX as f64).round();
+            pulse_table.push(val as i16);
+        }
+
+        let mut tnd_table = Vec::new();
+        tnd_table.push(0);
+        for x in 1..204 {
+            let x = x as f64;
+            let f_val = 163.67 / (24329.0 / x + 100.0);
+            let val = (f_val.clamp(0.0, 1.0) * i16::MAX as f64).round();
+            tnd_table.push(val as i16);
+        }
+
+        Self {
+            pulse_table,
+            tnd_table,
+        }
+    }
+}
+
+impl SampleMixer<i16> for I16LutMixer {
+    fn mix(&self, pulse_1: u8, pulse_2: u8, triangle: u8, noise: u8, dmc: u8, ext: i16) -> i16 {
+        let pulse_out = self.pulse_table[(pulse_1 + pulse_2) as usize];
+        let tnd_out = self.tnd_table[(3 * triangle + 2 * noise + dmc) as usize];
+        pulse_out + tnd_out - ext
+    }
+}
+
+impl Sample for f32 {
+    type Mixer = ();
+}
+
+impl SampleMixer<f32> for () {
+    fn mix(&self, pulse_1: u8, pulse_2: u8, triangle: u8, noise: u8, dmc: u8, ext: i16) -> f32 {
+        let pulse_out = if pulse_1 + pulse_2 == 0 {
+            0.0
+        } else {
+            let pulse_1 = pulse_1 as f32;
+            let pulse_2 = pulse_2 as f32;
+            95.88 / ((8128.0 / (pulse_1 + pulse_2)) + 100.0)
+        };
+
+        let tnd_out = if triangle + noise + dmc == 0 {
+            0.0
+        } else {
+            let triangle = triangle as f32;
+            let noise = noise as f32;
+            let dmc = dmc as f32;
+            159.79 / (1.0 / ((triangle / 8227.0) + (noise / 12241.0) + (dmc / 22638.0)) + 100.0)
+        };
+
+        let ext = ext as f32;
+        let ext_out = ext / i16::MAX as f32;
+
+        pulse_out + tnd_out - ext_out
     }
 }

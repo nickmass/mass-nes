@@ -20,6 +20,10 @@ fn main() {
     match args.mode {
         Mode::Run { file } => run(file, args.region.into()),
         Mode::Bench { frames, file } => bench(file, args.region.into(), frames),
+        Mode::Mdf {
+            out_file,
+            sample_rate,
+        } => mdf(out_file, sample_rate),
     }
 }
 
@@ -72,6 +76,76 @@ fn bench(path: PathBuf, region: nes::Region, mut frames: u32) {
             break;
         }
     }
+}
+
+fn mdf(out_file: PathBuf, sample_rate: Option<u32>) {
+    let region = nes::Region::Ntsc;
+
+    let system_rate = region.frame_ticks() * region.refresh_rate();
+    let wav_rate = sample_rate.unwrap_or(system_rate.ceil() as u32);
+    let out_wav = File::create(&out_file).unwrap();
+    let mut wav_writer = ui::wav_writer::WavWriter::new(out_wav, wav_rate).unwrap();
+
+    let mut rom = &include_bytes!("../assets/mdfourier4k.nes")[..];
+    let cart = Cartridge::load(&mut rom, None, None, "mdfourier.nes").unwrap();
+    let mut machine = Machine::new(region, cart);
+
+    let mut blip = if let Some(sample_rate) = sample_rate {
+        let mut blip = blip_buf::BlipBuf::new(sample_rate);
+        blip.set_rates(system_rate, sample_rate as f64);
+        Some(blip)
+    } else {
+        None
+    };
+    let mut blip_delta = 0;
+
+    let mut recording = false;
+    let mut sample_buf = vec![0; region.frame_ticks() as usize * 4];
+
+    let start_frame = 65;
+    let end_frame = start_frame + (111 * 60);
+
+    for frame in 0..end_frame {
+        if frame == start_frame {
+            recording = true;
+            let controller = nes::Controller {
+                a: frame == start_frame,
+                ..Default::default()
+            };
+
+            let input = nes::UserInput::PlayerOne(controller);
+            machine.handle_input(input);
+        }
+
+        if frame != 0 && frame % (end_frame / 6) == 0 {
+            tracing::info!("Frame: {frame}/{end_frame}");
+        }
+
+        machine.run();
+
+        let samples = if let Some(blip) = blip.as_mut() {
+            let samples = machine.take_samples();
+            let count = samples.len();
+            for (i, v) in samples.enumerate() {
+                blip.add_delta(i as u32, v as i32 - blip_delta);
+                blip_delta = v as i32;
+            }
+            blip.end_frame(count as u32);
+            let n = blip.read_samples(&mut sample_buf, false);
+            &sample_buf[0..n]
+        } else {
+            sample_buf.clear();
+            sample_buf.extend(machine.take_samples());
+            &sample_buf
+        };
+
+        if recording {
+            wav_writer.write_samples(samples).unwrap();
+        }
+    }
+
+    wav_writer.finalize().unwrap();
+    tracing::info!("Finished: {}", out_file.display());
 }
 
 fn init_audio() -> (AudioDevices, SamplesSender) {
@@ -144,5 +218,12 @@ enum Mode {
     Run {
         /// Provides a rom file to emulate
         file: PathBuf,
+    },
+    /// Create a MDFourier recording
+    Mdf {
+        /// Location to write .wav result
+        out_file: PathBuf,
+        /// Target sample rate, defaults to raw NES output rate of 1.78mhz with no resampling
+        sample_rate: Option<u32>,
     },
 }
