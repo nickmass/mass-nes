@@ -221,7 +221,7 @@ impl Runner {
     pub fn run(mut self) {
         let mut rewinding = false;
         let mut fast_forwarding = false;
-        let mut max_step = nes::Region::Ntsc.frame_ticks().ceil() as u32;
+        let mut max_step = nes::Region::Ntsc.cpu_clock().ceil() as u32;
         let mut samples_per_frame =
             (self.sample_rate as f64 / nes::Region::Ntsc.refresh_rate()).ceil() as usize;
         loop {
@@ -302,10 +302,8 @@ impl Runner {
                                     self.debug_request.interests.iter().copied(),
                                 );
                                 self.machine = Some(machine);
-                                self.blip.set_rates(
-                                    region.frame_ticks() * region.refresh_rate(),
-                                    self.sample_rate as f64,
-                                );
+                                self.blip
+                                    .set_rates(region.cpu_clock(), self.sample_rate as f64);
                                 max_step = region.frame_ticks().ceil() as u32;
                                 samples_per_frame =
                                     (self.sample_rate as f64 / region.refresh_rate()).ceil()

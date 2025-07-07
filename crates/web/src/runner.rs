@@ -76,10 +76,7 @@ impl MachineRunner {
         } = channel;
 
         let mut blip = blip_buf::BlipBuf::new(sample_rate / 20);
-        blip.set_rates(
-            region.frame_ticks() * region.refresh_rate(),
-            sample_rate as f64,
-        );
+        blip.set_rates(region.cpu_clock(), sample_rate as f64);
 
         Self {
             machine: None,

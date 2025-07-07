@@ -81,8 +81,7 @@ fn bench(path: PathBuf, region: nes::Region, mut frames: u32) {
 fn mdf(out_file: PathBuf, sample_rate: Option<u32>) {
     let region = nes::Region::Ntsc;
 
-    let system_rate = region.frame_ticks() * region.refresh_rate();
-    let wav_rate = sample_rate.unwrap_or(system_rate.ceil() as u32);
+    let wav_rate = sample_rate.unwrap_or(region.cpu_clock().ceil() as u32);
     let out_wav = File::create(&out_file).unwrap();
     let mut wav_writer = ui::wav_writer::WavWriter::new(out_wav, wav_rate).unwrap();
 
@@ -92,7 +91,7 @@ fn mdf(out_file: PathBuf, sample_rate: Option<u32>) {
 
     let mut blip = if let Some(sample_rate) = sample_rate {
         let mut blip = blip_buf::BlipBuf::new(sample_rate);
-        blip.set_rates(system_rate, sample_rate as f64);
+        blip.set_rates(region.cpu_clock(), sample_rate as f64);
         Some(blip)
     } else {
         None

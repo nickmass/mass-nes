@@ -11,11 +11,42 @@ impl Default for Region {
 }
 
 impl Region {
-    pub const fn frame_ticks(&self) -> f64 {
+    pub const fn master_clock(&self) -> f64 {
         match self {
-            Region::Ntsc => 29780.5,
-            Region::Pal => 33247.5,
+            Region::Ntsc => 236250000.0 / 11.0,
+            Region::Pal => 26601712.5,
         }
+    }
+
+    pub const fn cpu_clock(&self) -> f64 {
+        match self {
+            Region::Ntsc => self.master_clock() / 12.0,
+            Region::Pal => self.master_clock() / 16.0,
+        }
+    }
+
+    pub const fn ppu_clock(&self) -> f64 {
+        match self {
+            Region::Ntsc => self.master_clock() / 4.0,
+            Region::Pal => self.master_clock() / 5.0,
+        }
+    }
+
+    pub const fn dots_per_tick(&self) -> f64 {
+        self.ppu_clock() / self.cpu_clock()
+    }
+
+    pub const fn frame_dots(&self) -> f64 {
+        let ticks = self.prerender_line() as f64 * 341.0;
+        if self.uneven_frames() {
+            ticks + 340.5
+        } else {
+            ticks + 341.0
+        }
+    }
+
+    pub const fn frame_ticks(&self) -> f64 {
+        self.frame_dots() / self.dots_per_tick()
     }
 
     pub const fn default_palette(&self) -> &'static [u8; 1536] {
@@ -61,10 +92,7 @@ impl Region {
     }
 
     pub const fn refresh_rate(&self) -> f64 {
-        match self {
-            Region::Ntsc => 60.0988,
-            Region::Pal => 50.007,
-        }
+        self.cpu_clock() / self.frame_ticks()
     }
 
     pub const fn five_step_seq(&self) -> &'static [u32] {
