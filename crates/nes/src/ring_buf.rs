@@ -41,7 +41,7 @@ impl<T: Clone> RingBuf<T> {
         std::iter::from_fn(|| self.pop())
     }
 
-    pub fn take_iter(&mut self) -> RingIter<T> {
+    pub fn take_iter(&mut self) -> RingIter<'_, T> {
         let iter = RingIter {
             items: &self.items,
             cursor: RingIterCursor {
@@ -57,7 +57,7 @@ impl<T: Clone> RingBuf<T> {
         iter
     }
 
-    pub fn iter_ref(&self) -> RingIterRef<T> {
+    pub fn iter_ref(&self) -> RingIterRef<'_, T> {
         let iter = RingIterRef {
             items: &self.items,
             cursor: RingIterCursor {

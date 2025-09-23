@@ -626,7 +626,7 @@ impl SampleMixer<i16> for I16LutMixer {
     fn mix(&self, pulse_1: u8, pulse_2: u8, triangle: u8, noise: u8, dmc: u8, ext: i16) -> i16 {
         let pulse_out = self.pulse_table[(pulse_1 + pulse_2) as usize];
         let tnd_out = self.tnd_table[(3 * triangle + 2 * noise + dmc) as usize];
-        pulse_out + tnd_out - ext
+        ext - (pulse_out + tnd_out)
     }
 }
 
@@ -656,6 +656,6 @@ impl SampleMixer<f32> for () {
         let ext = ext as f32;
         let ext_out = ext / i16::MAX as f32;
 
-        pulse_out + tnd_out - ext_out
+        ext_out - (pulse_out + tnd_out)
     }
 }

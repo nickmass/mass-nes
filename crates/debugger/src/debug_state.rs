@@ -222,7 +222,7 @@ impl DebugUiState {
         &self.frame
     }
 
-    pub fn ppu(&self) -> PpuView {
+    pub fn ppu(&self) -> PpuView<'_> {
         PpuView(self)
     }
 

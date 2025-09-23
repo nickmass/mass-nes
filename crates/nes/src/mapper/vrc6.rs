@@ -345,22 +345,20 @@ impl Pulse {
     pub fn tick(&mut self, freq: FreqMode) {
         if self.enabled && !self.constant {
             if self.counter == 0 {
-                if self.duty_counter == 0 {
-                    self.duty_counter = 15;
+                self.duty_counter = self.duty_counter.wrapping_sub(1);
+                self.duty_counter &= 0xf;
+                if self.duty_counter <= self.duty {
+                    self.sample = self.volume
                 } else {
-                    self.duty_counter -= 1;
-                    if self.duty_counter <= self.duty {
-                        self.sample = self.volume
-                    } else {
-                        self.sample = 0;
-                    }
+                    self.sample = 0;
                 }
+
                 self.counter = freq.set(self.period);
             } else {
                 self.counter -= 1;
             }
         } else if !self.enabled {
-            self.duty_counter = 15;
+            self.duty_counter = 0;
             self.sample = 0;
         } else if self.constant {
             self.sample = self.volume;

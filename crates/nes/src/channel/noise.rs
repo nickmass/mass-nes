@@ -73,17 +73,17 @@ impl Noise {
 
     fn clock_shifter(&mut self) {
         let feedback = if self.noise_mode() {
-            (self.shifter & 1) ^ ((self.shifter >> 6) & 1)
+            self.shifter ^ (self.shifter >> 6)
         } else {
-            (self.shifter & 1) ^ ((self.shifter >> 1) & 1)
+            self.shifter ^ (self.shifter >> 1)
         };
 
         self.shifter >>= 1;
-        self.shifter |= feedback << 14;
+        self.shifter |= (feedback & 1) << 14;
     }
 
     fn timer_period(&self) -> u16 {
-        self.region.noise_rates()[(self.regs[2] & 0xf) as usize]
+        self.region.noise_rates()[(self.regs[2] & 0xf) as usize] - 1
     }
 }
 
@@ -112,8 +112,9 @@ impl Channel for Noise {
         if self.timer_counter == 0 {
             self.timer_counter = self.timer_period();
             self.clock_shifter();
+        } else {
+            self.timer_counter -= 1;
         }
-        self.timer_counter -= 1;
 
         if state.is_quarter_frame || self.forced_clock {
             if self.envelope_start {
