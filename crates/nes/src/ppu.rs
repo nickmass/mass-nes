@@ -475,7 +475,7 @@ impl Ppu {
                     } else {
                         addr & 0x0f
                     };
-                    self.palette_data[addr as usize] = value;
+                    self.palette_data[addr as usize] = value & 0x3f;
                 } else {
                     if rmw_write {
                         let rmw_addr = (self.vram_addr & 0xff00) | (value as u16);

@@ -93,6 +93,7 @@ pub enum CartridgeInfo {
 
 pub enum Cartridge {
     INes(INes),
+    GameGenie(INes),
     Fds(Fds),
 }
 
@@ -347,16 +348,24 @@ impl Cartridge {
     pub fn build_mapper(self, debug: Rc<Debug>) -> mapper::RcMapper {
         match self {
             Cartridge::INes(ines) => mapper::ines(ines, debug),
+            Cartridge::GameGenie(ines) => mapper::ines(ines, debug).with_game_genie(),
             Cartridge::Fds(fds) => mapper::fds(fds),
         }
     }
 
     pub fn info(&self) -> CartridgeInfo {
         match self {
-            Cartridge::INes(_) => CartridgeInfo::Cartridge,
+            Cartridge::INes(_) | Cartridge::GameGenie(_) => CartridgeInfo::Cartridge,
             Cartridge::Fds(fds) => CartridgeInfo::Fds {
                 total_sides: fds.disk_sides.len(),
             },
+        }
+    }
+
+    pub fn with_game_genie(self) -> Self {
+        match self {
+            Cartridge::INes(ines) => Cartridge::GameGenie(ines),
+            _ => self,
         }
     }
 }

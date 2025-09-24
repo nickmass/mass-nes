@@ -81,6 +81,7 @@ struct UiState {
     bios: Option<Vec<u8>>,
     variable_viewer: VariableViewerState,
     movie_settings: MovieSettingsState,
+    game_genie: bool,
 }
 
 impl Default for UiState {
@@ -113,6 +114,7 @@ impl Default for UiState {
             bios: None,
             variable_viewer: VariableViewerState::default(),
             movie_settings: MovieSettingsState::default(),
+            game_genie: false,
         }
     }
 }
@@ -287,6 +289,7 @@ impl<A: Audio> DebuggerApp<A> {
             last_dir,
             self.state.bios.clone(),
             self.state.movie_settings.restore_wram,
+            self.state.game_genie,
         );
     }
 
@@ -488,6 +491,7 @@ impl<A: Audio> DebuggerApp<A> {
                 file_name,
                 bios,
                 self.state.movie_settings.restore_wram,
+                self.state.game_genie,
             );
             self.app_events.send(AppEvent::RomLoaded(rom_file));
         }
@@ -559,6 +563,8 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
                         self.select_bios();
                         ui.close_menu();
                     }
+
+                    ui.checkbox(&mut self.state.game_genie, "Game Genie");
 
                     if ui.button("Load Movie").clicked() {
                         self.select_movie();
@@ -982,6 +988,7 @@ impl EmulatorControl {
         file_name: String,
         bios: Option<Vec<u8>>,
         restore_wram: bool,
+        game_genie: bool,
     ) {
         self.save_wram();
         let cart_id = ui::wram::CartridgeId::new(&rom);
@@ -991,7 +998,7 @@ impl EmulatorControl {
             None
         };
         let _ = self.tx.send(EmulatorInput::LoadCartridge(
-            cart_id, region, rom, file_name, wram, bios,
+            cart_id, region, rom, file_name, wram, bios, game_genie,
         ));
     }
 
@@ -1170,6 +1177,7 @@ fn pick_file(
     last_dir: Option<PathBuf>,
     bios: Option<Vec<u8>>,
     restore_wram: bool,
+    game_genie: bool,
 ) {
     std::thread::spawn(move || {
         let picker = rfd::FileDialog::new()
@@ -1192,7 +1200,14 @@ fn pick_file(
                 .and_then(|p| p.to_str())
                 .map(|s| s.to_string())
                 .unwrap_or(String::new());
-            control.load_rom(region.into(), bytes, file_name, bios, restore_wram);
+            control.load_rom(
+                region.into(),
+                bytes,
+                file_name,
+                bios,
+                restore_wram,
+                game_genie,
+            );
             proxy.send(AppEvent::RomLoaded(path));
         }
     });
@@ -1206,6 +1221,7 @@ fn pick_file(
     last_dir: Option<PathBuf>,
     bios: Option<Vec<u8>>,
     restore_wram: bool,
+    game_genie: bool,
 ) {
     let picker = rfd::AsyncFileDialog::new()
         .add_filter("All Supported Files", &["nes", "NES", "fds", "FDS"])
@@ -1230,6 +1246,7 @@ fn pick_file(
             rom_file.file_name(),
             bios,
             restore_wram,
+            game_genie,
         );
         proxy.send(AppEvent::RomLoaded(std::path::PathBuf::new()));
     };

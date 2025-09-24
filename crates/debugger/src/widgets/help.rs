@@ -57,6 +57,7 @@ mod web {
                             "example.nes".to_string(),
                             None,
                             true,
+                            false,
                         );
                         proxy.send(AppEvent::RomLoaded(PathBuf::new()));
                     }

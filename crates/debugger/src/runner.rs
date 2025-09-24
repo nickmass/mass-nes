@@ -113,6 +113,7 @@ pub enum EmulatorInput {
         String,
         Option<SaveWram>,
         Option<Vec<u8>>,
+        bool,
     ),
     DebugRequest(DebugRequest),
     StepBack,
@@ -281,11 +282,24 @@ impl Runner {
                             }
                         }
                     }
-                    EmulatorInput::LoadCartridge(cart_id, region, rom, file_name, wram, bios) => {
+                    EmulatorInput::LoadCartridge(
+                        cart_id,
+                        region,
+                        rom,
+                        file_name,
+                        wram,
+                        bios,
+                        game_genie,
+                    ) => {
                         let mut rom = std::io::Cursor::new(rom);
                         let mut bios = bios.map(std::io::Cursor::new);
                         match Cartridge::load(&mut rom, wram, bios.as_mut(), file_name) {
                             Ok(cart) => {
+                                let cart = if game_genie {
+                                    cart.with_game_genie()
+                                } else {
+                                    cart
+                                };
                                 let cart_info = match cart.info() {
                                     nes::CartridgeInfo::Cartridge => CartridgeKind::Cartridge,
                                     nes::CartridgeInfo::Fds { total_sides } => CartridgeKind::Fds {

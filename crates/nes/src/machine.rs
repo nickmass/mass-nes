@@ -442,6 +442,7 @@ impl Machine {
         }
         self.apu.power();
         self.ppu.power();
+        self.mapper.power();
     }
 
     pub fn reset(&mut self) {

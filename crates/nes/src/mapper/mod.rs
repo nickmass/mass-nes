@@ -6,6 +6,7 @@ mod cnrom;
 mod color_dreams;
 mod fds;
 mod fme7;
+mod game_genie;
 mod gxrom;
 mod j87;
 mod mmc1;
@@ -105,6 +106,8 @@ pub trait Mapper {
         None
     }
 
+    fn power(&mut self) {}
+
     fn input(&mut self, _input: MapperInput) {}
 
     fn save_wram(&self) -> Option<SaveWram> {
@@ -162,6 +165,10 @@ impl RcMapper {
         self.0.borrow().get_sample()
     }
 
+    pub fn power(&self) {
+        self.0.borrow_mut().power()
+    }
+
     pub fn input(&self, input: MapperInput) {
         self.0.borrow_mut().input(input);
     }
@@ -173,6 +180,10 @@ impl RcMapper {
     #[cfg(feature = "debugger")]
     pub fn watch(&self, visitor: &mut crate::debug::WatchVisitor) {
         self.0.borrow().watch(visitor);
+    }
+
+    pub fn with_game_genie(self) -> Self {
+        RcMapper::new(game_genie::GameGenie::new(self))
     }
 }
 

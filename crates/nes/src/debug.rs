@@ -218,8 +218,9 @@ mod debugger {
             state.machine_state.cpu.instruction_addr = Some(addr);
         }
 
-        pub fn trace(&self, system: &Machine, cpu: CpuDebugState) {
+        pub fn trace(&self, system: &Machine, mut cpu: CpuDebugState) {
             let mut state = self.state.borrow_mut();
+            cpu.instruction_addr = state.machine_state.cpu.instruction_addr;
             state.machine_state.cpu = cpu;
             let ppu = state.machine_state.ppu;
             if let Some(inst_addr) = cpu.instruction_addr {
