@@ -771,10 +771,12 @@ impl Ppu {
 
         self.screen[((scanline * 256) + dot) as usize] = pixel_result as u16 | self.emph_bits();
 
-        self.low_attr_shift <<= 1;
-        self.high_attr_shift <<= 1;
-        self.low_bg_shift <<= 1;
-        self.high_bg_shift <<= 1;
+        if self.is_rendering() {
+            self.low_attr_shift <<= 1;
+            self.high_attr_shift <<= 1;
+            self.low_bg_shift <<= 1;
+            self.high_bg_shift <<= 1;
+        }
     }
 
     fn sprite_on_line(&self, sprite_y: u8, scanline: u32) -> bool {
