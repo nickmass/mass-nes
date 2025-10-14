@@ -59,7 +59,7 @@ pub struct Rainbow {
     #[cfg_attr(feature = "save-states", save(skip))]
     debug: Rc<Debug>,
     prg_ram: MemoryBlock,
-    chr_ram: MemoryBlock,
+    chr_ram: Option<MemoryBlock>,
     fpga_ram: FixedMemoryBlock<8>,
     // Storing CIRAM inside mapper greatly simplifies applying window/ext-bg effects
     nt_ram: FixedMemoryBlock<2>,
@@ -128,7 +128,11 @@ impl Rainbow {
             fpga_ram.write(addr, value);
         }
 
-        let chr_ram = MemoryBlock::new(cartridge.chr_ram_bytes / 1024);
+        let chr_ram = if cartridge.chr_ram_bytes >= 1024 {
+            Some(MemoryBlock::new(cartridge.chr_ram_bytes / 1024))
+        } else {
+            None
+        };
         let nt_ram = FixedMemoryBlock::new();
 
         let master_volume = (i16::MAX as f32 / 64.0) as i16;
@@ -295,6 +299,7 @@ impl Rainbow {
                     tracing::error!("rainbow oam routine unsupported: {:04x}", addr);
                     self.warn_oam = true;
                 }
+                return 0x60; // RTS
             }
             0xfffa | 0xfffb => self.ppu_state.leave_frame(),
             _ => (),
@@ -429,7 +434,13 @@ impl Rainbow {
 
             match chip {
                 0 => self.nt_ram.read_mapped(bank & 1, 1024, addr),
-                1 => self.chr_ram.read_mapped(bank, 1024, addr),
+                1 => {
+                    if let Some(chr_ram) = self.chr_ram.as_ref() {
+                        chr_ram.read_mapped(bank, 1024, addr)
+                    } else {
+                        0
+                    }
+                }
                 2 => self.fpga_ram.read_mapped(bank & 3, 1024, addr),
                 3 => self.cartridge.chr_rom.read_mapped(bank, 1024, addr),
                 _ => unreachable!(),
@@ -459,7 +470,11 @@ impl Rainbow {
 
             match chip {
                 0 => self.nt_ram.write_mapped(bank & 1, 1024, addr, value),
-                1 => self.chr_ram.write_mapped(bank, 1024, addr, value),
+                1 => {
+                    if let Some(chr_ram) = self.chr_ram.as_mut() {
+                        chr_ram.write_mapped(bank, 1024, addr, value);
+                    }
+                }
                 2 => self.fpga_ram.write_mapped(bank & 3, 1024, addr, value),
                 3 => (), // chr-rom,
                 _ => unreachable!(),
@@ -551,7 +566,11 @@ impl Rainbow {
         let (bank, size) = self.map_chr(addr);
 
         if ram {
-            self.chr_ram.read_mapped(bank, size, addr)
+            if let Some(chr_ram) = self.chr_ram.as_ref() {
+                chr_ram.read_mapped(bank, size, addr)
+            } else {
+                0
+            }
         } else {
             self.cartridge.chr_rom.read_mapped(bank, size, addr)
         }
@@ -565,7 +584,11 @@ impl Rainbow {
         let ram = self.chr_mode & 0x40 != 0;
 
         if ram {
-            self.chr_ram.read_mapped(bank, size, addr)
+            if let Some(chr_ram) = self.chr_ram.as_ref() {
+                chr_ram.read_mapped(bank, size, addr)
+            } else {
+                0
+            }
         } else {
             self.cartridge.chr_rom.read_mapped(bank, size, addr)
         }
@@ -583,7 +606,9 @@ impl Rainbow {
 
         let (bank, size) = self.map_chr(addr);
 
-        self.chr_ram.write_mapped(bank, size, addr, value);
+        if let Some(chr_ram) = self.chr_ram.as_mut() {
+            chr_ram.write_mapped(bank, size, addr, value);
+        }
     }
 
     fn map_chr(&self, addr: u16) -> (usize, usize) {
