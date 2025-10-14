@@ -198,9 +198,6 @@ impl Machine {
                 self.cpu_pin_in.power = false;
                 self.cpu_pin_in.reset = false;
 
-                let cpu_state = self.cpu.debug_state();
-                self.debug.trace(&self, cpu_state);
-
                 if let Some(_sample) = self.cpu.dma.dmc_sample() {
                     let data_bus = self.cpu_bus.open_bus.get();
                     self.apu.dmc.dmc_read(data_bus);
@@ -244,7 +241,8 @@ impl Machine {
                 TickResult::Fetch(addr) => {
                     let value = self.read(addr);
                     self.debug.event_with_data(DebugEvent::CpuExec(addr), value);
-                    self.debug.fetch(addr);
+                    let cpu_state = self.cpu.debug_state();
+                    self.debug.trace_cpu(addr, self, cpu_state);
                     self.cpu_pin_in.data = value;
                     until.add_instruction();
                 }

@@ -213,16 +213,13 @@ mod debugger {
             }
         }
 
-        pub fn fetch(&self, addr: u16) {
+        pub fn trace_cpu(&self, addr: u16, system: &Machine, mut cpu: CpuDebugState) {
             let mut state = self.state.borrow_mut();
-            state.machine_state.cpu.instruction_addr = Some(addr);
-        }
-
-        pub fn trace(&self, system: &Machine, mut cpu: CpuDebugState) {
-            let mut state = self.state.borrow_mut();
-            cpu.instruction_addr = state.machine_state.cpu.instruction_addr;
+            cpu.instruction_addr = Some(addr);
+            cpu.reg_pc = cpu.reg_pc.wrapping_sub(1);
             state.machine_state.cpu = cpu;
             let ppu = state.machine_state.ppu;
+
             if let Some(inst_addr) = cpu.instruction_addr {
                 state.logging_range = if let Some(&(start, end)) = state.log_range.as_ref() {
                     if inst_addr >= start && inst_addr <= end {
@@ -242,11 +239,6 @@ mod debugger {
                 }
 
                 state.log_inst((cpu, ppu));
-
-                let inst = OPS[system.peek(inst_addr) as usize];
-                if let Instruction::IllKil = inst.instruction {
-                    self.do_log_history(system, &*state);
-                }
             }
 
             if let Some(trace_fn) = state.trace_fn.as_mut() {
@@ -432,7 +424,11 @@ mod debugger {
         }
 
         pub fn breakpoint<H: BreakpointHandler>(&self, handler: &mut H) -> bool {
-            handler.breakpoint(self)
+            let res = handler.breakpoint(self);
+
+            let mut state = self.state.borrow_mut();
+            state.machine_state.cpu.instruction_addr = None;
+            res
         }
 
         pub fn event(&self, event: DebugEvent) {
@@ -623,9 +619,7 @@ pub mod no_debugger {
 
         pub fn write(&self, _addr: u16, _value: u8) {}
 
-        pub fn fetch(&self, _addr: u16) {}
-
-        pub fn trace(&self, _system: &Machine, _cpu_state: CpuDebugState) {}
+        pub fn trace_cpu(&self, _addr: u16, _system: &Machine, _cpu: CpuDebugState) {}
 
         pub fn trace_ppu(&self, _system: &Machine, _ppu_state: PpuDebugState) {}
 
