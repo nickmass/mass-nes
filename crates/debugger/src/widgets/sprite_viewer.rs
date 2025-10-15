@@ -139,7 +139,6 @@ impl SpriteViewer {
 
         egui::Window::new("Sprites")
             .resizable(false)
-            .auto_sized()
             .show(ctx, |ui| {
                 if let Some(tex) = &self.texture {
                     ui.horizontal(|ui| {
@@ -184,6 +183,7 @@ impl SpriteViewer {
                                 if !any_sprites {
                                     ui.label("No visible sprites");
                                 }
+                                ui.end_row();
                             });
                     }
                 }

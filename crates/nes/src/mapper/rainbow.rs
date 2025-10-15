@@ -567,8 +567,10 @@ impl Rainbow {
     }
 
     fn read_chr(&self, addr: u16) -> u8 {
-        if self.chr_mode & 0x80 != 0 {
+        if self.chr_mode & 0xc0 == 0x80 {
             return self.fpga_ram.read(addr);
+        } else if self.chr_mode & 0xc0 == 0xc0 {
+            return self.nt_ram.read(addr);
         }
 
         let ram = self.chr_mode & 0x40 != 0;
@@ -587,8 +589,10 @@ impl Rainbow {
     }
 
     fn read_bank_chr(&self, bank: usize, addr: u16, size: usize) -> u8 {
-        if self.chr_mode & 0x80 != 0 {
+        if self.chr_mode & 0xc0 == 0x80 {
             return self.fpga_ram.read(addr);
+        } else if self.chr_mode & 0xc0 == 0xc0 {
+            return self.nt_ram.read(addr);
         }
 
         let ram = self.chr_mode & 0x40 != 0;
@@ -605,8 +609,12 @@ impl Rainbow {
     }
 
     fn write_chr(&mut self, addr: u16, value: u8) {
-        if self.chr_mode & 0x80 != 0 {
-            return self.fpga_ram.write(addr, value);
+        if self.chr_mode & 0xc0 == 0x80 {
+            self.fpga_ram.write(addr, value);
+            return;
+        } else if self.chr_mode & 0xc0 == 0xc0 {
+            self.nt_ram.write(addr, value);
+            return;
         }
 
         let ram = self.chr_mode & 0x40 != 0;
