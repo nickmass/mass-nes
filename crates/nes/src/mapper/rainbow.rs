@@ -113,6 +113,7 @@ pub struct Rainbow {
     window_line_end: u8,
     window_tile_scroll: u8,
     window_line_scroll: u8,
+    m2_parity: bool,
     warn_oam: bool,
 }
 
@@ -194,6 +195,7 @@ impl Rainbow {
             window_line_end: 0,
             window_tile_scroll: 0,
             window_line_scroll: 0,
+            m2_parity: false,
             warn_oam: false,
         }
     }
@@ -223,6 +225,13 @@ impl Rainbow {
                 val
             }
             0x4154 => self.ppu_state.irq_jitter,
+            0x4157 => {
+                if self.m2_parity {
+                    0x80
+                } else {
+                    0x00
+                }
+            }
             0x415f => self.fpga_ram.read(self.fpga_reader_addr),
             0x4160 => 0x20,
             0x4161 => {
@@ -335,6 +344,7 @@ impl Rainbow {
                 self.ppu_state.irq_pending = false;
             }
             0x4153 => self.ppu_state.irq_offset = value.max(1).min(170),
+            0x4157 => self.m2_parity = false,
             0x4158 => self.cpu_irq_latch = (self.cpu_irq_latch & 0x00ff) | ((value as u16) << 8),
             0x4159 => self.cpu_irq_latch = (self.cpu_irq_latch & 0xff00) | (value as u16),
             0x415a => {
@@ -766,6 +776,7 @@ impl Mapper for Rainbow {
         self.pulse_a.tick(FreqMode::X1);
         self.pulse_b.tick(FreqMode::X1);
         self.sawtooth.tick(FreqMode::X1);
+        self.m2_parity = !self.m2_parity;
     }
 
     fn get_irq(&self) -> bool {
