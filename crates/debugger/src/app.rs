@@ -544,11 +544,10 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
         self.process_app_events(ctx);
 
         egui::TopBottomPanel::top("Menu Area").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("Open").clicked() {
                         self.select_rom();
-                        ui.close_menu();
                     }
                     if let Some(file) = self.recents.ui(ui) {
                         self.load_rom(file.to_path_buf(), self.state.bios.clone());
@@ -561,19 +560,16 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
 
                     if ui.button("Load Bios").clicked() {
                         self.select_bios();
-                        ui.close_menu();
                     }
 
                     ui.checkbox(&mut self.state.game_genie, "Game Genie");
 
                     if ui.button("Load Movie").clicked() {
                         self.select_movie();
-                        ui.close_menu();
                     }
 
                     if ui.button("Movie Settings").clicked() {
                         self.state.movie_settings.show_settings = true;
-                        ui.close_menu();
                     }
 
                     if cfg!(not(target_arch = "wasm32")) {
@@ -581,12 +577,10 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
                             if ui.button("End Recording").clicked() {
                                 self.emu_control.stop_record_wav();
                                 self.recording_wav = false;
-                                ui.close_menu();
                             }
                         } else {
                             if ui.button("Record WAV").clicked() {
                                 pick_wav(self.app_events.create_proxy());
-                                ui.close_menu();
                             }
                         }
                     }

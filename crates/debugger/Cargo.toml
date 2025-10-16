@@ -19,7 +19,7 @@ bitflags = "2.9.0"
 blip_buf = "0.1.5"
 bytemuck = "1.18.0"
 crossbeam = "0.8.4"
-eframe = { version = "0.31.0", features = ["persistence"] }
+eframe = { version = "0.33.0", features = ["persistence"] }
 nes = { path = "../nes", features = ["serde", "debugger", "save-states"] }
 # profiling = { version = "1.0.17", features = ["profile-with-tracy"] }
 rfd = "0.15.0"

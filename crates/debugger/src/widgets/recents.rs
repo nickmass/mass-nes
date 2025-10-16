@@ -45,7 +45,6 @@ impl Recents {
                     if let Some(name) = f.file_name().and_then(|s| s.to_str()) {
                         if ui.button(name).clicked() {
                             ret = Some(f);
-                            ui.close_menu();
                         }
                     }
                 }

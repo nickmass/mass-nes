@@ -6,6 +6,6 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-epaint = "0.31.1"
+epaint = "0.33.0"
 lyon = "1.0.1"
 usvg = "0.45.0"
