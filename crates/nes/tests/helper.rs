@@ -1,6 +1,7 @@
-use nes::{Cartridge, Machine, Region, UserInput};
+use nes::{Cartridge, Machine, Region, SimpleInput, UserInput};
 
 use std::fs::File;
+use std::ops::Deref;
 use std::path::PathBuf;
 
 pub enum Input {
@@ -35,7 +36,7 @@ pub struct MachineBuilder {
 }
 
 impl MachineBuilder {
-    fn build(self) -> Machine {
+    fn build(self) -> MachineRunner {
         let mut path = PathBuf::from("tests/data");
         path.push(self.rom);
 
@@ -52,61 +53,66 @@ impl MachineBuilder {
             machine.with_debug_mem(addr, size);
         }
 
+        let mut input_source = SimpleInput::new();
+
         for i in self.input {
             match i {
                 Input::Delay(n) => {
                     for _ in 0..n {
-                        machine.run();
+                        machine.run(&mut input_source);
                     }
                 }
                 Input::Select => {
                     let mut input = nes::Controller::new();
                     input.select = true;
-                    machine.handle_input(UserInput::PlayerOne(input));
+                    input_source.handle_input(UserInput::PlayerOne(input));
                 }
                 Input::Start => {
                     let mut input = nes::Controller::new();
                     input.start = true;
-                    machine.handle_input(UserInput::PlayerOne(input));
+                    input_source.handle_input(UserInput::PlayerOne(input));
                 }
                 Input::Up => {
                     let mut input = nes::Controller::new();
                     input.up = true;
-                    machine.handle_input(UserInput::PlayerOne(input));
+                    input_source.handle_input(UserInput::PlayerOne(input));
                 }
                 Input::Down => {
                     let mut input = nes::Controller::new();
                     input.down = true;
-                    machine.handle_input(UserInput::PlayerOne(input));
+                    input_source.handle_input(UserInput::PlayerOne(input));
                 }
                 Input::Left => {
                     let mut input = nes::Controller::new();
                     input.left = true;
-                    machine.handle_input(UserInput::PlayerOne(input));
+                    input_source.handle_input(UserInput::PlayerOne(input));
                 }
                 Input::Right => {
                     let mut input = nes::Controller::new();
                     input.right = true;
-                    machine.handle_input(UserInput::PlayerOne(input));
+                    input_source.handle_input(UserInput::PlayerOne(input));
                 }
                 Input::A => {
                     let mut input = nes::Controller::new();
                     input.a = true;
-                    machine.handle_input(UserInput::PlayerOne(input));
+                    input_source.handle_input(UserInput::PlayerOne(input));
                 }
                 Input::B => {
                     let mut input = nes::Controller::new();
                     input.b = true;
-                    machine.handle_input(UserInput::PlayerOne(input));
+                    input_source.handle_input(UserInput::PlayerOne(input));
                 }
                 Input::None => {
                     let input = nes::Controller::new();
-                    machine.handle_input(UserInput::PlayerOne(input));
+                    input_source.handle_input(UserInput::PlayerOne(input));
                 }
             }
         }
 
-        machine
+        MachineRunner {
+            machine,
+            input: input_source,
+        }
     }
 
     pub fn with_debug_mem(mut self, addr: u16, size_kb: u16) -> Self {
@@ -151,6 +157,25 @@ impl Into<MachineBuilder> for String {
             region: Region::Ntsc,
             input: Vec::new(),
         }
+    }
+}
+
+struct MachineRunner {
+    machine: Machine,
+    input: SimpleInput,
+}
+
+impl MachineRunner {
+    fn run(&mut self) {
+        self.machine.run(&mut self.input);
+    }
+}
+
+impl Deref for MachineRunner {
+    type Target = Machine;
+
+    fn deref(&self) -> &Self::Target {
+        &self.machine
     }
 }
 

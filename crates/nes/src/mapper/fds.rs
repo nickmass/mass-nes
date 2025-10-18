@@ -6,8 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind, RangeAndMask},
-    machine::{FdsInput, MapperInput},
-    mapper::Mapper,
+    mapper::{FdsInput, Mapper, MapperInput},
     memory::{FixedMemoryBlock, Memory},
 };
 

@@ -8,14 +8,12 @@ use crate::bus::{AddressBus, BusKind, DeviceKind, RangeAndMask};
 use crate::cartridge::Cartridge;
 use crate::cpu::{Cpu, CpuPinIn, TickResult};
 use crate::debug::{Debug, DebugEvent};
-use crate::input::Input;
+use crate::input::{Input, InputSource};
 use crate::mapper::{RcMapper, SaveWram};
 use crate::memory::{FixedMemoryBlock, Memory};
 use crate::ppu::{FrameEnd, Ppu};
 use crate::region::Region;
 use crate::run_until::RunUntil;
-
-pub use crate::input::{Controller, InputDevice};
 
 pub trait BreakpointHandler {
     fn breakpoint(&mut self, debug: &Debug) -> bool;
@@ -37,25 +35,6 @@ impl<T: FnMut(&Debug) -> bool> BreakpointHandler for T {
 pub enum RunResult {
     Breakpoint,
     Done,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum UserInput {
-    PlayerOne(Controller),
-    PlayerTwo(Controller),
-    Mapper(MapperInput),
-    Power,
-    Reset,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum MapperInput {
-    Fds(FdsInput),
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum FdsInput {
-    SetDisk(Option<usize>),
 }
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
@@ -151,28 +130,47 @@ impl Machine {
         self.ppu.frame()
     }
 
-    pub fn run_with_breakpoints<H: BreakpointHandler, U: RunUntil>(
+    pub fn run_with_breakpoints<H: BreakpointHandler, U: RunUntil, I: InputSource>(
         &mut self,
         frame_end: FrameEnd,
         until: U,
         break_handler: H,
+        input_source: &mut I,
     ) -> RunResult {
-        self.do_run(frame_end, until, break_handler)
+        self.do_run(frame_end, until, break_handler, input_source)
     }
 
-    pub fn run(&mut self) {
-        self.do_run(FrameEnd::ClearVblank, crate::run_until::Frames(1), ());
+    pub fn run<I: InputSource>(&mut self, input_source: &mut I) {
+        self.do_run(
+            FrameEnd::ClearVblank,
+            crate::run_until::Frames(1),
+            (),
+            input_source,
+        );
     }
 
-    fn do_run<H: BreakpointHandler, U: RunUntil>(
+    fn do_run<H: BreakpointHandler, U: RunUntil, I: InputSource>(
         &mut self,
         frame_end: FrameEnd,
         mut until: U,
         mut break_handler: H,
+        input_source: &mut I,
     ) -> RunResult {
         #[cfg(feature = "debugger")]
         let _ = self.debug.take_interest_notification();
         self.step_start_tick = self.tick;
+
+        if input_source.power() {
+            self.power();
+        }
+
+        if input_source.reset() {
+            self.reset();
+        }
+
+        if let Some(input) = input_source.mapper() {
+            self.mapper.input(input);
+        }
 
         while !until.done() {
             if self.tick % 3 == 0 {
@@ -205,7 +203,7 @@ impl Machine {
 
                 self.apu.tick(&mut until);
 
-                self.input.tick();
+                self.input.tick(input_source);
                 self.mapper.tick();
             } else {
                 self.tick_ppu(frame_end, &mut until);
@@ -414,23 +412,6 @@ impl Machine {
 
     pub fn set_channel_playback(&mut self, playback: ChannelPlayback) {
         self.apu.set_channel_playback(playback);
-    }
-
-    pub fn set_input<T: IntoIterator<Item = UserInput>>(&mut self, input: T) {
-        let input = input.into_iter();
-        for i in input {
-            self.handle_input(i);
-        }
-    }
-
-    pub fn handle_input(&mut self, input: UserInput) {
-        match input {
-            UserInput::PlayerOne(c) => self.input.set_port_one(c.to_byte()),
-            UserInput::PlayerTwo(c) => self.input.set_port_two(c.to_byte()),
-            UserInput::Power => self.power(),
-            UserInput::Reset => self.reset(),
-            UserInput::Mapper(mapper_input) => self.mapper.input(mapper_input),
-        }
     }
 
     pub fn power(&mut self) {

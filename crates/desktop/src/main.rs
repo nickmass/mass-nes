@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand, ValueEnum};
-use nes::{Cartridge, Machine};
+use nes::{Cartridge, Machine, SimpleInput};
 use runner::Runner;
 use ui::audio::{Audio, AudioDevices, Null, PipewireAudio, SamplesSender};
 use ui::filters::NesNtscSetup;
@@ -69,8 +69,9 @@ fn bench(path: PathBuf, region: nes::Region, mut frames: u32) {
         .unwrap_or_default();
     let cart = Cartridge::load(&mut file, None, None, file_name).unwrap();
     let mut machine = Machine::new(region, cart);
+    let mut input_source = SimpleInput::new();
     loop {
-        machine.run();
+        machine.run(&mut input_source);
         frames -= 1;
         if frames == 0 {
             break;
@@ -104,6 +105,8 @@ fn mdf(out_file: PathBuf, sample_rate: Option<u32>) {
     let start_frame = 65;
     let end_frame = start_frame + (111 * 60);
 
+    let mut input_source = SimpleInput::new();
+
     for frame in 0..end_frame {
         if frame == start_frame {
             recording = true;
@@ -113,14 +116,14 @@ fn mdf(out_file: PathBuf, sample_rate: Option<u32>) {
             };
 
             let input = nes::UserInput::PlayerOne(controller);
-            machine.handle_input(input);
+            input_source.handle_input(input);
         }
 
         if frame != 0 && frame % (end_frame / 6) == 0 {
             tracing::info!("Frame: {frame}/{end_frame}");
         }
 
-        machine.run();
+        machine.run(&mut input_source);
 
         let samples = if let Some(blip) = blip.as_mut() {
             let samples = machine.take_samples();

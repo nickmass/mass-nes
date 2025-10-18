@@ -1,7 +1,10 @@
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 
-use crate::bus::{Address, AddressBus, AndEqualsAndMask, DeviceKind};
+use crate::{
+    MapperInput,
+    bus::{Address, AddressBus, AndEqualsAndMask, DeviceKind},
+};
 
 pub trait InputDevice {
     fn to_byte(&self) -> u8;
@@ -71,10 +74,10 @@ impl InputDevice for Controller {
 pub struct Input {
     current_tick: u32,
     strobe: bool,
+    did_stobe: bool,
     read_counter: [u32; 2],
     read_shifter: [u8; 2],
     input_buffer: [u8; 2],
-    input: [u8; 2],
 }
 
 impl Input {
@@ -146,6 +149,7 @@ impl Input {
             0x4016 => {
                 if value & 0x01 == 1 {
                     self.strobe = true;
+                    self.did_stobe = false;
                 } else {
                     self.strobe = false;
                     self.read_shifter = self.input_buffer;
@@ -155,19 +159,83 @@ impl Input {
         }
     }
 
-    pub fn tick(&mut self) {
+    pub fn tick<I: InputSource>(&mut self, input_source: &mut I) {
         self.current_tick += 1;
         if self.strobe && self.current_tick & 1 == 0 {
-            self.input_buffer = self.input;
+            if !self.did_stobe {
+                let (p1, p2) = input_source.strobe();
+                self.input_buffer = [p1.to_byte(), p2.to_byte()];
+                self.did_stobe = true;
+            }
             self.read_counter = [8, 8];
         }
     }
+}
 
-    pub fn set_port_one(&mut self, port_one: u8) {
-        self.input[0] = port_one;
+pub trait InputSource {
+    fn strobe(&mut self) -> (Controller, Controller);
+    fn power(&mut self) -> bool;
+    fn reset(&mut self) -> bool;
+    fn mapper(&mut self) -> Option<MapperInput>;
+}
+
+pub struct SimpleInput {
+    power: bool,
+    reset: bool,
+    mapper: Option<MapperInput>,
+    player_one: Controller,
+    player_two: Controller,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum UserInput {
+    PlayerOne(Controller),
+    PlayerTwo(Controller),
+    Mapper(MapperInput),
+    Power,
+    Reset,
+}
+
+impl SimpleInput {
+    pub fn new() -> Self {
+        Self {
+            power: false,
+            reset: false,
+            mapper: None,
+            player_one: Controller::default(),
+            player_two: Controller::default(),
+        }
     }
 
-    pub fn set_port_two(&mut self, port_two: u8) {
-        self.input[1] = port_two;
+    pub fn handle_input(&mut self, input: crate::UserInput) {
+        match input {
+            crate::UserInput::PlayerOne(controller) => self.player_one = controller,
+            crate::UserInput::PlayerTwo(controller) => self.player_two = controller,
+            crate::UserInput::Mapper(mapper_input) => self.mapper = Some(mapper_input),
+            crate::UserInput::Power => self.power = true,
+            crate::UserInput::Reset => self.reset = true,
+        }
+    }
+}
+
+impl InputSource for SimpleInput {
+    fn strobe(&mut self) -> (Controller, Controller) {
+        (self.player_one, self.player_two)
+    }
+
+    fn power(&mut self) -> bool {
+        let power = self.power;
+        self.power = false;
+        power
+    }
+
+    fn reset(&mut self) -> bool {
+        let reset = self.reset;
+        self.reset = false;
+        reset
+    }
+
+    fn mapper(&mut self) -> Option<MapperInput> {
+        self.mapper.take()
     }
 }

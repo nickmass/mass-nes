@@ -19,8 +19,9 @@ pub use cartridge::{Cartridge, CartridgeInfo};
 #[cfg(feature = "debugger")]
 pub use debug::WatchItem;
 pub use debug::{Debug, DebugEvent, MachineState};
-pub use machine::{Controller, FdsInput, Machine, MapperInput, RunResult, UserInput};
-pub use mapper::SaveWram;
+pub use input::{Controller, InputSource, SimpleInput, UserInput};
+pub use machine::{Machine, RunResult};
+pub use mapper::{FdsInput, MapperInput, SaveWram};
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;
 pub use ppu::FrameEnd;

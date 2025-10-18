@@ -3,7 +3,7 @@ use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, js_sys, wasm_bindgen};
 use winit::event_loop::EventLoopProxy;
 
-use nes::Region;
+use nes::{Region, SimpleInput};
 use ui::audio::Audio;
 
 mod app;
@@ -96,8 +96,9 @@ impl Emulator {
         let performance = window.performance()?;
 
         let start = performance.now();
+        let mut input = SimpleInput::new();
         for _ in 0..frames {
-            machine.run();
+            machine.run(&mut input);
             let _ = machine.get_samples();
         }
         let end = performance.now();

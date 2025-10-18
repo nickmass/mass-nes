@@ -2,7 +2,8 @@ use std::{collections::VecDeque, time::Duration};
 
 use blip_buf::BlipBuf;
 use nes::{
-    Cartridge, DebugEvent, FdsInput, Machine, MapperInput, Region, RunResult, SaveWram, UserInput,
+    Cartridge, DebugEvent, FdsInput, Machine, MapperInput, Region, RunResult, SaveWram,
+    SimpleInput, UserInput,
     run_until::{self, RunUntil},
 };
 use ui::{audio::SamplesSender, movie::MovieFile, wram::CartridgeId};
@@ -166,6 +167,7 @@ pub struct Runner {
     total_frames: u64,
     debug: DebugSwapState,
     debug_request: DebugRequest,
+    input_source: SimpleInput,
 }
 
 impl Runner {
@@ -216,6 +218,7 @@ impl Runner {
                 channels: false,
             },
             movie_input: None,
+            input_source: SimpleInput::new(),
         }
     }
 
@@ -230,10 +233,8 @@ impl Runner {
             while let Some(input) = self.commands.try_command() {
                 match input {
                     EmulatorInput::Nes(input) => {
-                        if let Some(machine) = &mut self.machine {
-                            if self.movie_input.is_none() {
-                                machine.handle_input(input)
-                            }
+                        if self.movie_input.is_none() {
+                            self.input_source.handle_input(input)
                         }
                     }
                     EmulatorInput::SaveState(slot) => {
@@ -323,6 +324,7 @@ impl Runner {
                                     (self.sample_rate as f64 / region.refresh_rate()).ceil()
                                         as usize;
                                 self.commands.send_cartridge_info(cart_info);
+                                self.input_source = SimpleInput::new();
                             }
                             Err(e) => tracing::error!("Unable to load cartridge: {e:?}"),
                         }
@@ -336,11 +338,10 @@ impl Runner {
                     }
                     EmulatorInput::FastForward(toggle) => fast_forwarding = toggle,
                     EmulatorInput::SetFdsDisk(disk) => {
-                        if let Some(machine) = self.machine.as_mut() {
-                            machine.handle_input(UserInput::Mapper(MapperInput::Fds(
-                                FdsInput::SetDisk(disk),
-                            )));
-                        }
+                        self.input_source
+                            .handle_input(UserInput::Mapper(MapperInput::Fds(FdsInput::SetDisk(
+                                disk,
+                            ))));
                     }
                     EmulatorInput::SaveWram => {
                         if let Some((wram, cart_id)) = self
@@ -352,7 +353,8 @@ impl Runner {
                             self.commands.send_wram(cart_id, wram);
                         }
                     }
-                    EmulatorInput::PlayMovie(movie) => {
+                    EmulatorInput::PlayMovie(mut movie) => {
+                        movie.prepare_frame();
                         self.movie_input = Some(movie);
                     }
                     EmulatorInput::ChannelPlayback(playback) => {
@@ -426,39 +428,58 @@ impl Runner {
 
     fn step<U: RunUntil>(&mut self, playback: Playback, until: U) {
         if let Some(machine) = self.machine.as_mut() {
-            let run_result = machine.run_with_breakpoints(
-                nes::FrameEnd::SetVblank,
-                until,
-                |debug: &nes::Debug| {
-                    let event_notif = debug.take_interest_notification();
-                    if event_notif & self.debug_request.interest_breakpoints != 0 {
-                        return true;
-                    }
+            let run_result = if let Some(movie) = self.movie_input.as_mut() {
+                let res = machine.run_with_breakpoints(
+                    nes::FrameEnd::SetVblank,
+                    until,
+                    |debug: &nes::Debug| {
+                        let event_notif = debug.take_interest_notification();
+                        if event_notif & self.debug_request.interest_breakpoints != 0 {
+                            return true;
+                        }
 
-                    let s = debug.machine_state();
-                    if let Some(addr) = s.cpu.instruction_addr {
-                        self.debug_request.breakpoints.is_set(addr)
-                    } else {
-                        false
-                    }
-                },
-            );
+                        let s = debug.machine_state();
+                        if let Some(addr) = s.cpu.instruction_addr {
+                            self.debug_request.breakpoints.is_set(addr)
+                        } else {
+                            false
+                        }
+                    },
+                    movie,
+                );
+                if movie.done() {
+                    self.movie_input = None;
+                }
+                res
+            } else {
+                machine.run_with_breakpoints(
+                    nes::FrameEnd::SetVblank,
+                    until,
+                    |debug: &nes::Debug| {
+                        let event_notif = debug.take_interest_notification();
+                        if event_notif & self.debug_request.interest_breakpoints != 0 {
+                            return true;
+                        }
+
+                        let s = debug.machine_state();
+                        if let Some(addr) = s.cpu.instruction_addr {
+                            self.debug_request.breakpoints.is_set(addr)
+                        } else {
+                            false
+                        }
+                    },
+                    &mut self.input_source,
+                )
+            };
 
             let frame = machine.frame() as usize;
 
             match run_result {
                 RunResult::Done => {
                     if self.frame != frame {
-                        while let Some(input) = self.movie_input.as_mut().map(|fm2| fm2.next()) {
-                            match input {
-                                None => self.movie_input = None,
-                                Some(ui::movie::MovieInput::Frame) => break,
-                                Some(ui::movie::MovieInput::Input(input)) => {
-                                    machine.handle_input(input)
-                                }
-                            }
+                        if let Some(movie) = self.movie_input.as_mut() {
+                            movie.prepare_frame();
                         }
-
                         self.frame = frame;
 
                         if playback.save_state() {

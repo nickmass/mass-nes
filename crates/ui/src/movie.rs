@@ -8,32 +8,128 @@ pub enum MovieInput {
     Frame,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum SubframeMode {
+    On,
+    Off,
+    Auto,
+}
+
 #[derive(Debug, Clone)]
-pub enum MovieFile {
-    Fm2(Fm2Input),
-    Bk2(Bk2Input),
+pub struct MovieFile {
+    subframe: bool,
+    inputs: VecDeque<MovieInput>,
+    player_one: Controller,
+    player_two: Controller,
+    reset: bool,
+    power: bool,
 }
 
 impl MovieFile {
-    pub fn fm2<R: Read>(reader: R, offset: i32) -> IoResult<Self> {
-        let fm2 = Fm2Input::read(reader, offset)?;
-        Ok(MovieFile::Fm2(fm2))
+    fn new(inputs: VecDeque<MovieInput>, subframe: bool) -> Self {
+        Self {
+            subframe,
+            inputs,
+            player_one: Controller::default(),
+            player_two: Controller::default(),
+            reset: false,
+            power: false,
+        }
     }
 
-    pub fn bk2<R: Read + Seek>(reader: R, offset: i32) -> IoResult<Self> {
+    pub fn fm2<R: Read>(reader: R, offset: i32, subframe: SubframeMode) -> IoResult<Self> {
+        let fm2 = Fm2Input::read(reader, offset)?;
+
+        let subframe = match subframe {
+            SubframeMode::On => true,
+            SubframeMode::Off => false,
+            SubframeMode::Auto => false,
+        };
+        Ok(MovieFile::new(fm2.inputs, subframe))
+    }
+
+    pub fn bk2<R: Read + Seek>(reader: R, offset: i32, subframe: SubframeMode) -> IoResult<Self> {
         let bk2 = Bk2Input::read(reader, offset)?;
-        Ok(MovieFile::Bk2(bk2))
+
+        let subframe = match subframe {
+            SubframeMode::On => true,
+            SubframeMode::Off => false,
+            SubframeMode::Auto => false,
+        };
+        Ok(MovieFile::new(bk2.inputs, subframe))
+    }
+
+    pub fn r08<R: Read>(reader: R, offset: i32, subframe: SubframeMode) -> IoResult<Self> {
+        let r08 = R08Input::read(reader, offset)?;
+
+        let subframe = match subframe {
+            SubframeMode::On => true,
+            SubframeMode::Off => false,
+            SubframeMode::Auto => true,
+        };
+        Ok(MovieFile::new(r08.inputs, subframe))
+    }
+
+    pub fn prepare_frame(&mut self) {
+        if !self.subframe {
+            while let Some(input) = self.inputs.pop_front() {
+                match input {
+                    MovieInput::Input(input) => match input {
+                        UserInput::PlayerOne(controller) => self.player_one = controller,
+                        UserInput::PlayerTwo(controller) => self.player_two = controller,
+                        UserInput::Mapper(_) => (),
+                        UserInput::Power => self.power = true,
+                        UserInput::Reset => self.reset = true,
+                    },
+                    MovieInput::Frame => break,
+                }
+            }
+        }
+    }
+
+    pub fn done(&self) -> bool {
+        self.inputs.is_empty()
     }
 }
 
-impl Iterator for MovieFile {
-    type Item = MovieInput;
+impl nes::InputSource for MovieFile {
+    fn strobe(&mut self) -> (Controller, Controller) {
+        if self.subframe {
+            let mut player_one = Controller::default();
+            let mut player_two = Controller::default();
+            while let Some(input) = self.inputs.pop_front() {
+                match input {
+                    MovieInput::Input(input) => match input {
+                        UserInput::PlayerOne(controller) => player_one = controller,
+                        UserInput::PlayerTwo(controller) => player_two = controller,
+                        UserInput::Mapper(_) => (),
+                        UserInput::Power => self.power = true,
+                        UserInput::Reset => self.reset = true,
+                    },
+                    MovieInput::Frame => break,
+                }
+            }
 
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            MovieFile::Fm2(fm2) => fm2.inputs.pop_front(),
-            MovieFile::Bk2(bk2) => bk2.inputs.pop_front(),
+            (player_one, player_two)
+        } else {
+            (self.player_one, self.player_two)
         }
+    }
+
+    fn power(&mut self) -> bool {
+        let power = self.power;
+        self.power = false;
+        power
+    }
+
+    fn reset(&mut self) -> bool {
+        let reset = self.reset;
+        self.reset = false;
+        reset
+    }
+
+    fn mapper(&mut self) -> Option<nes::MapperInput> {
+        None
     }
 }
 
@@ -48,11 +144,13 @@ impl Fm2Input {
         let mut inputs = VecDeque::new();
 
         inputs.push_back(MovieInput::Input(UserInput::Power));
+        inputs.push_back(MovieInput::Frame);
 
         while offset > 0 {
             inputs.push_back(MovieInput::Input(UserInput::PlayerOne(
                 Controller::default(),
             )));
+            inputs.push_back(MovieInput::Frame);
             offset -= 1;
         }
 
@@ -145,11 +243,13 @@ impl Bk2Input {
         let mut inputs = VecDeque::new();
 
         inputs.push_back(MovieInput::Input(UserInput::Power));
+        inputs.push_back(MovieInput::Frame);
 
         while offset > 0 {
             inputs.push_back(MovieInput::Input(UserInput::PlayerOne(
                 Controller::default(),
             )));
+            inputs.push_back(MovieInput::Frame);
             offset -= 1;
         }
 
@@ -219,5 +319,68 @@ impl Bk2Input {
         }
 
         Ok(Bk2Input { inputs })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct R08Input {
+    inputs: VecDeque<MovieInput>,
+}
+
+impl R08Input {
+    pub fn read<R: Read>(reader: R, mut offset: i32) -> IoResult<Self> {
+        let buf_reader = BufReader::new(reader);
+
+        let mut inputs = VecDeque::new();
+
+        inputs.push_back(MovieInput::Input(UserInput::Power));
+        inputs.push_back(MovieInput::Frame);
+
+        while offset > 0 {
+            inputs.push_back(MovieInput::Input(UserInput::PlayerOne(
+                Controller::default(),
+            )));
+            inputs.push_back(MovieInput::Frame);
+            offset -= 1;
+        }
+
+        let mut bytes = buf_reader.bytes();
+
+        loop {
+            let Some(p1) = bytes.next() else {
+                break;
+            };
+            let Some(p2) = bytes.next() else {
+                break;
+            };
+
+            let p1 = p1?;
+            let p2 = p2?;
+
+            if offset < 0 {
+                offset += 1;
+                continue;
+            }
+
+            let from_byte = |b: u8| Controller {
+                a: b & 0x80 != 0,
+                b: b & 0x40 != 0,
+                select: b & 0x20 != 0,
+                start: b & 0x10 != 0,
+                up: b & 0x8 != 0,
+                down: b & 0x4 != 0,
+                left: b & 0x2 != 0,
+                right: b & 0x1 != 0,
+            };
+
+            let p1 = from_byte(p1);
+            let p2 = from_byte(p2);
+
+            inputs.push_back(MovieInput::Input(UserInput::PlayerOne(p1)));
+            inputs.push_back(MovieInput::Input(UserInput::PlayerTwo(p2)));
+            inputs.push_back(MovieInput::Frame);
+        }
+
+        Ok(R08Input { inputs })
     }
 }

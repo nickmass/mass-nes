@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use nes::{FrameEnd, run_until::RunUntil};
+use nes::{FrameEnd, SimpleInput, run_until::RunUntil};
 use web_sys::{
     js_sys::Array,
     wasm_bindgen::{self, prelude::*},
@@ -63,6 +63,7 @@ struct MachineRunner {
     samples_tx: SamplesSender,
     nes_inputs: Option<NesInputs>,
     last_frame: Option<u32>,
+    input: SimpleInput,
 }
 
 impl MachineRunner {
@@ -87,6 +88,7 @@ impl MachineRunner {
             back_buffer,
             samples_tx,
             last_frame: None,
+            input: SimpleInput::new(),
         }
     }
 
@@ -126,11 +128,10 @@ impl MachineRunner {
                 let machine = nes::Machine::new(self.region, cart);
                 self.machine = Some(machine);
                 self.last_frame = None;
+                self.input = SimpleInput::new();
             }
             EmulatorInput::UserInput(input) => {
-                if let Some(machine) = self.machine.as_mut() {
-                    machine.handle_input(input);
-                }
+                self.input.handle_input(input);
             }
         }
     }
@@ -138,7 +139,7 @@ impl MachineRunner {
     fn step(&mut self, samples: u32) {
         if let Some(machine) = self.machine.as_mut() {
             let until = nes::run_until::Frames(1).or(nes::run_until::Samples(samples));
-            machine.run_with_breakpoints(FrameEnd::SetVblank, until, ());
+            machine.run_with_breakpoints(FrameEnd::SetVblank, until, (), &mut self.input);
             let frame = Some(machine.frame());
 
             if frame != self.last_frame {

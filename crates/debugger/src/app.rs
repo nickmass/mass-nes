@@ -443,17 +443,23 @@ impl<A: Audio> DebuggerApp<A> {
             AppEvent::MovieLoaded(file_name, bytes) => {
                 let file = std::io::Cursor::new(bytes);
                 let offset = self.state.movie_settings.frame_offset;
+                let subframe = self.state.movie_settings.subframe.into();
                 let movie = if file_name.ends_with(".fm2") {
-                    Some(ui::movie::MovieFile::fm2(file, offset))
+                    Some(ui::movie::MovieFile::fm2(file, offset, subframe))
                 } else if file_name.ends_with(".bk2") {
-                    Some(ui::movie::MovieFile::bk2(file, offset))
+                    Some(ui::movie::MovieFile::bk2(file, offset, subframe))
+                } else if file_name.ends_with(".r08") {
+                    Some(ui::movie::MovieFile::r08(file, offset, subframe))
                 } else if file_name.ends_with(".zip") {
                     if let Some(bytes) = read_first_match_in_zip(".fm2", file.clone()) {
                         let file = std::io::Cursor::new(bytes);
-                        Some(ui::movie::MovieFile::fm2(file, offset))
-                    } else if let Some(bytes) = read_first_match_in_zip(".bk2", file) {
+                        Some(ui::movie::MovieFile::fm2(file, offset, subframe))
+                    } else if let Some(bytes) = read_first_match_in_zip(".bk2", file.clone()) {
                         let file = std::io::Cursor::new(bytes);
-                        Some(ui::movie::MovieFile::bk2(file, offset))
+                        Some(ui::movie::MovieFile::bk2(file, offset, subframe))
+                    } else if let Some(bytes) = read_first_match_in_zip(".r08", file) {
+                        let file = std::io::Cursor::new(bytes);
+                        Some(ui::movie::MovieFile::r08(file, offset, subframe))
                     } else {
                         None
                     }
@@ -1283,7 +1289,7 @@ fn pick_bios(proxy: AppEventsProxy) {
 fn pick_movie(proxy: AppEventsProxy) {
     std::thread::spawn(move || {
         let Some(movie_file) = rfd::FileDialog::new()
-            .add_filter("All Supported Files", &["fm2", "bk2", "zip"])
+            .add_filter("All Supported Files", &["fm2", "bk2", "r08", "zip"])
             .pick_file()
         else {
             return;
@@ -1301,8 +1307,8 @@ fn pick_movie(proxy: AppEventsProxy) {
 
 #[cfg(target_arch = "wasm32")]
 fn pick_movie(proxy: AppEventsProxy) {
-    let picker =
-        rfd::AsyncFileDialog::new().add_filter("All Supported Files", &["fm2", "bk2", "zip"]);
+    let picker = rfd::AsyncFileDialog::new()
+        .add_filter("All Supported Files", &["fm2", "bk2", "r08", "zip"]);
 
     let pick = async move {
         let movie_file = picker.pick_file().await;

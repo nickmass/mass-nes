@@ -30,7 +30,6 @@ use serde::{Deserialize, Serialize};
 use crate::bus::{AddressBus, BusKind};
 use crate::cartridge::{Fds, INes};
 use crate::debug::Debug;
-use crate::machine::MapperInput;
 use crate::memory::Memory;
 use crate::ppu::PpuFetchKind;
 
@@ -274,6 +273,16 @@ pub enum Mirroring {
     Vertical,
     Single(Nametable),
     FourScreen,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum MapperInput {
+    Fds(FdsInput),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum FdsInput {
+    SetDisk(Option<usize>),
 }
 
 impl Mirroring {

@@ -2,7 +2,7 @@ use std::{collections::VecDeque, time::Duration};
 
 use blip_buf::BlipBuf;
 use nes::{
-    Cartridge, FrameEnd, Machine, Region, UserInput,
+    Cartridge, FrameEnd, Machine, Region, SimpleInput, UserInput,
     run_until::{self, RunUntil},
 };
 use ui::audio::SamplesSender;
@@ -22,6 +22,7 @@ pub struct Runner {
     save_states: Vec<Option<(usize, nes::SaveData)>>,
     save_store: SaveStore,
     frame: Option<u32>,
+    input: SimpleInput,
 }
 
 impl Runner {
@@ -47,6 +48,7 @@ impl Runner {
             save_states: vec![None; 10],
             save_store: SaveStore::new(32000, 5),
             frame: None,
+            input: SimpleInput::new(),
         }
     }
 
@@ -91,7 +93,7 @@ impl Runner {
     }
 
     fn handle_input(&mut self, input: UserInput) {
-        self.machine.handle_input(input);
+        self.input.handle_input(input);
     }
 
     fn step(&mut self, samples: u32) {
@@ -99,6 +101,7 @@ impl Runner {
             FrameEnd::SetVblank,
             run_until::Frames(1).or(run_until::Samples(samples)),
             (),
+            &mut self.input,
         );
 
         self.update_audio();
