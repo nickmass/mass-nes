@@ -432,23 +432,25 @@ impl Runner {
 
     fn step<U: RunUntil>(&mut self, playback: Playback, until: U) {
         if let Some(machine) = self.machine.as_mut() {
+            let break_handler = |debug: &nes::Debug| {
+                let event_notif = debug.take_interest_notification();
+                if event_notif & self.debug_request.interest_breakpoints != 0 {
+                    return true;
+                }
+
+                let s = debug.machine_state();
+                if let Some(addr) = s.cpu.instruction_addr {
+                    self.debug_request.breakpoints.is_set(addr)
+                } else {
+                    false
+                }
+            };
+
             let run_result = if let Some(movie) = self.movie_input.as_mut() {
                 let res = machine.run_with_breakpoints(
                     nes::FrameEnd::SetVblank,
                     until,
-                    |debug: &nes::Debug| {
-                        let event_notif = debug.take_interest_notification();
-                        if event_notif & self.debug_request.interest_breakpoints != 0 {
-                            return true;
-                        }
-
-                        let s = debug.machine_state();
-                        if let Some(addr) = s.cpu.instruction_addr {
-                            self.debug_request.breakpoints.is_set(addr)
-                        } else {
-                            false
-                        }
-                    },
+                    break_handler,
                     movie,
                 );
                 if movie.done() {
@@ -459,19 +461,7 @@ impl Runner {
                 machine.run_with_breakpoints(
                     nes::FrameEnd::SetVblank,
                     until,
-                    |debug: &nes::Debug| {
-                        let event_notif = debug.take_interest_notification();
-                        if event_notif & self.debug_request.interest_breakpoints != 0 {
-                            return true;
-                        }
-
-                        let s = debug.machine_state();
-                        if let Some(addr) = s.cpu.instruction_addr {
-                            self.debug_request.breakpoints.is_set(addr)
-                        } else {
-                            false
-                        }
-                    },
+                    break_handler,
                     &mut self.input_source,
                 )
             };
