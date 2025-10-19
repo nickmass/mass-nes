@@ -95,13 +95,11 @@ impl MovieFile {
 impl nes::InputSource for MovieFile {
     fn strobe(&mut self) -> (Controller, Controller) {
         if self.subframe {
-            let mut player_one = Controller::default();
-            let mut player_two = Controller::default();
             while let Some(input) = self.inputs.pop_front() {
                 match input {
                     MovieInput::Input(input) => match input {
-                        UserInput::PlayerOne(controller) => player_one = controller,
-                        UserInput::PlayerTwo(controller) => player_two = controller,
+                        UserInput::PlayerOne(controller) => self.player_one = controller,
+                        UserInput::PlayerTwo(controller) => self.player_two = controller,
                         UserInput::Mapper(_) => (),
                         UserInput::Power => self.power = true,
                         UserInput::Reset => self.reset = true,
@@ -109,11 +107,12 @@ impl nes::InputSource for MovieFile {
                     MovieInput::Frame => break,
                 }
             }
-
-            (player_one, player_two)
-        } else {
-            (self.player_one, self.player_two)
         }
+        (self.player_one, self.player_two)
+    }
+
+    fn peek(&self) -> (Controller, Controller) {
+        (self.player_one, self.player_two)
     }
 
     fn power(&mut self) -> bool {

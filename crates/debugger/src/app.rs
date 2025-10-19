@@ -522,6 +522,8 @@ impl<A: Audio> DebuggerApp<A> {
             interest_breakpoints: self.state.interests.breakpoint_mask(),
             frame: self.state.show_events,
             channels: self.state.show_audio_channels,
+            variables: self.state.show_variables,
+            inputs: self.state.show_input_viewer,
         };
 
         if !debug.cpu_mem
@@ -532,7 +534,8 @@ impl<A: Audio> DebuggerApp<A> {
             && !debug.events
             && !debug.frame
             && !debug.channels
-            && !self.state.show_variables
+            && !debug.variables
+            && !debug.inputs
         {
             debug.interval = 0;
         }
@@ -681,7 +684,12 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
                     {
                         self.update_debug_req();
                     }
-                    ui.checkbox(&mut self.state.show_input_viewer, "Input Viewer");
+                    if ui
+                        .checkbox(&mut self.state.show_input_viewer, "Input Viewer")
+                        .changed()
+                    {
+                        self.update_debug_req();
+                    }
                     ui.checkbox(&mut self.state.show_messages, "Messages");
                 });
                 ui.menu_button("Filter", |ui| {
@@ -830,7 +838,7 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
         if self.state.show_input_viewer {
             egui::Window::new("Input Viewer").show(ctx, |ui| {
                 let mut buttons = svg::NesButtons::empty();
-                let controller = self.last_input.controller;
+                let controller = self.debug.inputs()[0];
 
                 if controller.up {
                     buttons |= svg::NesButtons::UP;

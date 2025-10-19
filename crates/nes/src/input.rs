@@ -174,6 +174,7 @@ impl Input {
 
 pub trait InputSource {
     fn strobe(&mut self) -> (Controller, Controller);
+    fn peek(&self) -> (Controller, Controller);
     fn power(&mut self) -> bool;
     fn reset(&mut self) -> bool;
     fn mapper(&mut self) -> Option<MapperInput>;
@@ -220,6 +221,10 @@ impl SimpleInput {
 
 impl InputSource for SimpleInput {
     fn strobe(&mut self) -> (Controller, Controller) {
+        (self.player_one, self.player_two)
+    }
+
+    fn peek(&self) -> (Controller, Controller) {
         (self.player_one, self.player_two)
     }
 

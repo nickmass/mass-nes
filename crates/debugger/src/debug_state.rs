@@ -60,6 +60,23 @@ impl DerefMut for WatchItems {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct Inputs([nes::Controller; 2]);
+
+impl Deref for Inputs {
+    type Target = [nes::Controller; 2];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Inputs {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 #[derive(Clone)]
 pub struct SwapBuffer<T> {
     updated: Arc<AtomicBool>,
@@ -105,6 +122,7 @@ pub struct DebugSwapState {
     pub frame: SwapBuffer<Vec<u16>>,
     pub channels: SwapBuffer<Channels>,
     pub watch_items: SwapBuffer<WatchItems>,
+    pub inputs: SwapBuffer<Inputs>,
 }
 
 impl DebugSwapState {
@@ -121,6 +139,7 @@ impl DebugSwapState {
             frame: SwapBuffer::new(vec![0; 256 * 240]),
             channels: SwapBuffer::new(Channels::default()),
             watch_items: SwapBuffer::new(WatchItems::default()),
+            inputs: SwapBuffer::new(Inputs::default()),
         }
     }
 
@@ -149,6 +168,7 @@ pub struct DebugUiState {
     frame: Vec<u16>,
     channels: Channels,
     watch_items: WatchItems,
+    inputs: Inputs,
 }
 
 impl DebugUiState {
@@ -169,6 +189,7 @@ impl DebugUiState {
             frame: vec![0; 256 * 240],
             channels: Channels::default(),
             watch_items: WatchItems::default(),
+            inputs: Inputs::default(),
         }
     }
 
@@ -234,6 +255,10 @@ impl DebugUiState {
         &self.watch_items.0
     }
 
+    pub fn inputs(&self) -> &[nes::Controller; 2] {
+        &self.inputs.0
+    }
+
     pub fn swap(&mut self) {
         self.swap.cpu_mem.attempt_swap(&mut self.cpu_mem);
         self.swap.ppu_mem.attempt_swap(&mut self.ppu_mem);
@@ -244,6 +269,7 @@ impl DebugUiState {
         self.swap.frame.attempt_swap(&mut self.frame);
         self.swap.channels.attempt_swap(&mut self.channels);
         self.swap.watch_items.attempt_swap(&mut self.watch_items);
+        self.swap.inputs.attempt_swap(&mut self.inputs);
     }
 }
 

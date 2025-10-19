@@ -417,7 +417,9 @@ impl Machine {
     pub fn power(&mut self) {
         self.cpu_pin_in.power = true;
         for addr in 0u16..0x800 {
-            self.cpu_mem.write(addr, 0xff);
+            // Matches NesHawk default pattern
+            let value = if addr & 0x4 != 0 { 0xff } else { 0x00 };
+            self.cpu_mem.write(addr, value);
         }
         self.apu.power();
         self.ppu.power();

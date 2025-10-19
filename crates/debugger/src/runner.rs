@@ -2,8 +2,8 @@ use std::{collections::VecDeque, time::Duration};
 
 use blip_buf::BlipBuf;
 use nes::{
-    Cartridge, DebugEvent, FdsInput, Machine, MapperInput, Region, RunResult, SaveWram,
-    SimpleInput, UserInput,
+    Cartridge, DebugEvent, FdsInput, InputSource, Machine, MapperInput, Region, RunResult,
+    SaveWram, SimpleInput, UserInput,
     run_until::{self, RunUntil},
 };
 use ui::{audio::SamplesSender, movie::MovieFile, wram::CartridgeId};
@@ -142,6 +142,8 @@ pub struct DebugRequest {
     pub interest_breakpoints: u16,
     pub frame: bool,
     pub channels: bool,
+    pub variables: bool,
+    pub inputs: bool,
 }
 
 use crate::{
@@ -216,6 +218,8 @@ impl Runner {
                 interest_breakpoints: 0,
                 frame: false,
                 channels: false,
+                variables: false,
+                inputs: false,
             },
             movie_input: None,
             input_source: SimpleInput::new(),
@@ -603,10 +607,24 @@ impl Runner {
                 let _ = machine.take_channel_samples();
             }
 
-            self.debug.watch_items.update(|data| {
-                data.clear();
-                data.extend(machine.get_debug().watch_items());
-            });
+            if self.debug_request.variables {
+                self.debug.watch_items.update(|data| {
+                    data.clear();
+                    data.extend(machine.get_debug().watch_items());
+                });
+            }
+
+            if self.debug_request.inputs {
+                let input = if let Some(movie) = self.movie_input.as_ref() {
+                    movie.peek()
+                } else {
+                    self.input_source.peek()
+                };
+                self.debug.inputs.update(|data| {
+                    data[0] = input.0;
+                    data[1] = input.1;
+                });
+            }
 
             self.debug.update();
         }
