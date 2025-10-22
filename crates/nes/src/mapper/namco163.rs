@@ -248,7 +248,7 @@ impl Mapper for Namco163 {
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
-struct Sound {
+pub struct Sound {
     #[cfg_attr(feature = "save-states", serde(with = "serde_arrays"))]
     mem: [u8; 128],
     addr: u8,
@@ -260,7 +260,7 @@ struct Sound {
 }
 
 impl Sound {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             mem: [0; 128],
             addr: 0,
@@ -272,7 +272,7 @@ impl Sound {
         }
     }
 
-    fn read(&mut self) -> u8 {
+    pub fn read(&mut self) -> u8 {
         let value = self.mem[self.addr as usize];
         if self.increment {
             self.addr = self.addr.wrapping_add(1);
@@ -281,7 +281,7 @@ impl Sound {
         value
     }
 
-    fn write(&mut self, value: u8) {
+    pub fn write(&mut self, value: u8) {
         self.mem[self.addr as usize] = value;
         if self.increment {
             self.addr = self.addr.wrapping_add(1);
@@ -289,11 +289,11 @@ impl Sound {
         }
     }
 
-    fn enable(&mut self, value: u8) {
+    pub fn enable(&mut self, value: u8) {
         self.enabled = value & 0x40 == 0;
     }
 
-    fn address_port(&mut self, value: u8) {
+    pub fn address_port(&mut self, value: u8) {
         self.addr = value & 0x7f;
         self.increment = value & 0x80 != 0;
     }
@@ -302,7 +302,7 @@ impl Sound {
         ((self.mem[0x7f] >> 4) & 0x7) + 1
     }
 
-    fn tick(&mut self) {
+    pub fn tick(&mut self) {
         if !self.enabled {
             return;
         }
@@ -329,7 +329,7 @@ impl Sound {
         }
     }
 
-    fn output(&self) -> i16 {
+    pub fn output(&self) -> i16 {
         self.output << 7
     }
 }

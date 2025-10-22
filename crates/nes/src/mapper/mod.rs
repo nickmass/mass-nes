@@ -17,6 +17,7 @@ mod namco163;
 mod nina001;
 mod nina006;
 mod nrom;
+mod nsf;
 mod rainbow;
 mod uxrom;
 mod vrc4;
@@ -27,8 +28,9 @@ mod vrc_irq;
 #[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
 
+use crate::Region;
 use crate::bus::{AddressBus, BusKind};
-use crate::cartridge::{Fds, INes};
+use crate::cartridge::{Fds, INes, NsfFile};
 use crate::debug::Debug;
 use crate::memory::Memory;
 use crate::ppu::PpuFetchKind;
@@ -264,6 +266,10 @@ pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
 
 pub fn fds(disk: Fds) -> RcMapper {
     RcMapper::new(fds::Fds::new(disk))
+}
+
+pub fn nsf(region: Region, data: NsfFile) -> RcMapper {
+    RcMapper::new(nsf::Nsf::new(region, data))
 }
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]

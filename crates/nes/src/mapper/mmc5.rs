@@ -894,7 +894,7 @@ impl Pulse {
         self.duty_sequence()[(self.sequencer & 7) as usize]
     }
 
-    fn write(&mut self, addr: u16, value: u8) {
+    pub fn write(&mut self, addr: u16, value: u8) {
         self.regs[addr as usize] = value;
         match addr {
             0 => (),
@@ -912,7 +912,7 @@ impl Pulse {
         }
     }
 
-    fn tick(&mut self) {
+    pub fn tick(&mut self) {
         self.current_tick += 1;
 
         if self.current_tick & 1 == 0 {
@@ -948,7 +948,7 @@ impl Pulse {
         }
     }
 
-    fn output(&self) -> u8 {
+    pub fn output(&self) -> u8 {
         if !self.duty() || self.length_counter == 0 {
             0
         } else {
@@ -956,31 +956,31 @@ impl Pulse {
         }
     }
 
-    fn enable(&mut self) {
+    pub fn enable(&mut self) {
         self.enabled = true;
     }
 
-    fn disable(&mut self) {
+    pub fn disable(&mut self) {
         self.enabled = false;
         self.length_counter = 0;
     }
 
-    fn get_state(&self) -> bool {
+    pub fn get_state(&self) -> bool {
         self.length_counter > 0
     }
 }
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
-struct Pcm {
+pub struct Pcm {
     output: u8,
-    write_mode: bool,
+    pub write_mode: bool,
     irq_enabled: bool,
     irq_pending: bool,
 }
 
 impl Pcm {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             output: 0,
             write_mode: true,
@@ -989,11 +989,11 @@ impl Pcm {
         }
     }
 
-    fn output(&self) -> u8 {
+    pub fn output(&self) -> u8 {
         self.output
     }
 
-    fn read(&mut self, addr: u16, value: u8) {
+    pub fn read(&mut self, addr: u16, value: u8) {
         if self.write_mode {
             return;
         }
@@ -1009,7 +1009,7 @@ impl Pcm {
         }
     }
 
-    fn write(&mut self, value: u8) {
+    pub fn write(&mut self, value: u8) {
         if !self.write_mode {
             return;
         }

@@ -311,6 +311,7 @@ impl Runner {
                                         current_side: Some(0),
                                         total_sides,
                                     },
+                                    nes::CartridgeInfo::Nsf => CartridgeKind::Cartridge,
                                 };
                                 self.save_store.clear();
                                 self.frame = 0;

@@ -72,26 +72,8 @@ pub struct Fme7 {
     ram_protect: bool,
     ram_enable: bool,
     mirroring: SimpleMirroring,
-
-    audio_enabled: bool,
-    audio_protect: bool,
-    audio_regs: [u8; 0x10],
-    audio_reg_select: u8,
-    audio_counter: u64,
-
-    tone_counters: [u16; 3],
-    noise_counter: u16,
-    envelope_counter: u16,
-
-    tone_state: [bool; 3],
-    noise_seed: u32,
-    envelope_volume: u8,
-    envelope_ascending: bool,
-    envelope_holding: bool,
-
-    #[cfg_attr(feature = "save-states", save(skip))]
-    audio_lookup: Vec<i16>,
-    sample: i16,
+    #[cfg_attr(feature = "save-states", save(nested))]
+    sound: Sound,
 }
 
 impl Fme7 {
@@ -116,22 +98,7 @@ impl Fme7 {
         let chr_banks = [0; 8];
 
         let mirroring = SimpleMirroring::new(cartridge.mirroring);
-
-        let inc = 10.0f32.powf(1.0 / 20.0);
-        let max = inc.powf(29.0);
-        let sample_max = i16::MAX as f32;
-        let channel_count = 3.0;
-
-        let audio_lookup = (0..32)
-            .map(|i| {
-                if i < 2 {
-                    return 0;
-                }
-                let factor = inc.powf(i as f32 - 2.0);
-                let ratio = factor / max;
-                (sample_max * ratio / channel_count) as i16
-            })
-            .collect();
+        let sound = Sound::new();
 
         Fme7 {
             cartridge,
@@ -148,25 +115,7 @@ impl Fme7 {
             ram_protect: false,
             ram_enable: false,
             mirroring,
-
-            audio_enabled: false,
-            audio_protect: false,
-            audio_regs: [0; 0x10],
-            audio_reg_select: 0,
-            audio_counter: 0,
-
-            tone_counters: [0; 3],
-            noise_counter: 0,
-            envelope_counter: 0,
-
-            tone_state: [false; 3],
-            noise_seed: 0xffff,
-            envelope_volume: 7,
-            envelope_ascending: true,
-            envelope_holding: true,
-
-            audio_lookup,
-            sample: 0,
+            sound,
         }
     }
 
@@ -194,27 +143,8 @@ impl Fme7 {
         match addr {
             0x8000 => self.command = value & 0xf,
             0xa000 => self.command(value),
-            0xc000 => {
-                self.audio_protect = value & 0xf0 != 0;
-                self.audio_reg_select = value & 0xf;
-            }
-            0xe000 => {
-                if !self.audio_protect {
-                    self.audio_enabled = true;
-                    self.audio_regs[self.audio_reg_select as usize] = value;
-                    if self.audio_reg_select == 0x0d {
-                        self.envelope_counter = 0;
-                        if self.envelope_attack() {
-                            self.envelope_volume = 0;
-                            self.envelope_ascending = true;
-                        } else {
-                            self.envelope_volume = 31;
-                            self.envelope_ascending = false;
-                        }
-                        self.envelope_holding = false;
-                    }
-                }
-            }
+            0xc000 => self.sound.select(value),
+            0xe000 => self.sound.value(value),
             _ => unreachable!(),
         }
     }
@@ -270,6 +200,161 @@ impl Fme7 {
                 self.irq_counter = (self.irq_counter & 0x00ff) | ((parameter as u16) << 8);
             }
             _ => unreachable!(),
+        }
+    }
+}
+
+impl Mapper for Fme7 {
+    fn register(&self, cpu: &mut AddressBus) {
+        cpu.register_read(DeviceKind::Mapper, AndEqualsAndMask(0xe000, 0x6000, 0x7fff));
+        cpu.register_write(DeviceKind::Mapper, AndEqualsAndMask(0xe000, 0x6000, 0x7fff));
+        cpu.register_read(DeviceKind::Mapper, AndAndMask(0x8000, 0xffff));
+        cpu.register_write(DeviceKind::Mapper, AndAndMask(0x8000, 0xe000));
+    }
+
+    fn peek(&self, bus: BusKind, addr: u16) -> u8 {
+        match bus {
+            BusKind::Cpu => self.read_cpu(addr),
+            BusKind::Ppu => self.read_ppu(addr),
+        }
+    }
+
+    fn write(&mut self, bus: BusKind, addr: u16, value: u8) {
+        match bus {
+            BusKind::Cpu => self.write_cpu(addr, value),
+            BusKind::Ppu => self.write_ppu(addr, value),
+        }
+    }
+
+    fn tick(&mut self) {
+        if self.irq_counter_enable {
+            self.irq_counter = self.irq_counter.wrapping_sub(1);
+            if self.irq_counter == 0xffff && self.irq_enable {
+                if !self.irq {
+                    self.debug.event(crate::DebugEvent::MapperIrq);
+                }
+                self.irq = true;
+            }
+        }
+
+        self.sound.tick()
+    }
+
+    fn get_irq(&self) -> bool {
+        self.irq
+    }
+
+    fn peek_ppu_fetch(&self, address: u16, _kind: PpuFetchKind) -> super::Nametable {
+        self.mirroring.ppu_fetch(address)
+    }
+
+    fn get_sample(&self) -> Option<i16> {
+        Some(self.sound.output())
+    }
+
+    fn save_wram(&self) -> Option<super::SaveWram> {
+        if self.cartridge.battery {
+            self.prg_ram.save_wram()
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg_attr(feature = "save-states", derive(SaveState))]
+#[derive(Debug, Clone)]
+pub struct Sound {
+    audio_enabled: bool,
+    audio_protect: bool,
+    audio_regs: [u8; 0x10],
+    audio_reg_select: u8,
+    audio_counter: u64,
+
+    tone_counters: [u16; 3],
+    noise_counter: u16,
+    envelope_counter: u16,
+
+    tone_state: [bool; 3],
+    noise_seed: u32,
+    envelope_volume: u8,
+    envelope_ascending: bool,
+    envelope_holding: bool,
+
+    #[cfg_attr(feature = "save-states", save(skip))]
+    audio_lookup: Vec<i16>,
+    sample: i16,
+}
+
+impl Sound {
+    pub fn new() -> Self {
+        let inc = 10.0f32.powf(1.0 / 20.0);
+        let max = inc.powf(29.0);
+        let sample_max = i16::MAX as f32;
+        let channel_count = 3.0;
+
+        let audio_lookup = (0..32)
+            .map(|i| {
+                if i < 2 {
+                    return 0;
+                }
+                let factor = inc.powf(i as f32 - 2.0);
+                let ratio = factor / max;
+                (sample_max * ratio / channel_count) as i16
+            })
+            .collect();
+
+        Self {
+            audio_enabled: false,
+            audio_protect: false,
+            audio_regs: [0; 0x10],
+            audio_reg_select: 0,
+            audio_counter: 0,
+
+            tone_counters: [0; 3],
+            noise_counter: 0,
+            envelope_counter: 0,
+
+            tone_state: [false; 3],
+            noise_seed: 0xffff,
+            envelope_volume: 7,
+            envelope_ascending: true,
+            envelope_holding: true,
+
+            audio_lookup,
+            sample: 0,
+        }
+    }
+
+    pub fn tick(&mut self) {
+        if self.audio_enabled {
+            self.audio_tick();
+        }
+    }
+
+    pub fn output(&self) -> i16 {
+        self.sample
+    }
+
+    pub fn select(&mut self, value: u8) {
+        self.audio_protect = value & 0xf0 != 0;
+        self.audio_reg_select = value & 0xf;
+    }
+
+    pub fn value(&mut self, value: u8) {
+        if !self.audio_protect {
+            self.audio_enabled = true;
+            self.audio_regs[self.audio_reg_select as usize] = value;
+            if self.audio_reg_select == 0x0d {
+                self.envelope_counter = 0;
+                if self.envelope_attack() {
+                    self.envelope_volume = 0;
+                    self.envelope_ascending = true;
+                } else {
+                    self.envelope_volume = 31;
+                    self.envelope_ascending = false;
+                }
+                self.envelope_holding = false;
+            }
         }
     }
 
@@ -425,64 +510,5 @@ impl Fme7 {
         }
 
         self.sample = sample;
-    }
-}
-
-impl Mapper for Fme7 {
-    fn register(&self, cpu: &mut AddressBus) {
-        cpu.register_read(DeviceKind::Mapper, AndEqualsAndMask(0xe000, 0x6000, 0x7fff));
-        cpu.register_write(DeviceKind::Mapper, AndEqualsAndMask(0xe000, 0x6000, 0x7fff));
-        cpu.register_read(DeviceKind::Mapper, AndAndMask(0x8000, 0xffff));
-        cpu.register_write(DeviceKind::Mapper, AndAndMask(0x8000, 0xe000));
-    }
-
-    fn peek(&self, bus: BusKind, addr: u16) -> u8 {
-        match bus {
-            BusKind::Cpu => self.read_cpu(addr),
-            BusKind::Ppu => self.read_ppu(addr),
-        }
-    }
-
-    fn write(&mut self, bus: BusKind, addr: u16, value: u8) {
-        match bus {
-            BusKind::Cpu => self.write_cpu(addr, value),
-            BusKind::Ppu => self.write_ppu(addr, value),
-        }
-    }
-
-    fn tick(&mut self) {
-        if self.irq_counter_enable {
-            self.irq_counter = self.irq_counter.wrapping_sub(1);
-            if self.irq_counter == 0xffff && self.irq_enable {
-                if !self.irq {
-                    self.debug.event(crate::DebugEvent::MapperIrq);
-                }
-                self.irq = true;
-            }
-        }
-
-        if self.audio_enabled {
-            self.audio_tick();
-        }
-    }
-
-    fn get_irq(&self) -> bool {
-        self.irq
-    }
-
-    fn peek_ppu_fetch(&self, address: u16, _kind: PpuFetchKind) -> super::Nametable {
-        self.mirroring.ppu_fetch(address)
-    }
-
-    fn get_sample(&self) -> Option<i16> {
-        Some(self.sample)
-    }
-
-    fn save_wram(&self) -> Option<super::SaveWram> {
-        if self.cartridge.battery {
-            self.prg_ram.save_wram()
-        } else {
-            None
-        }
     }
 }

@@ -212,7 +212,7 @@ impl Mapper for Vrc7 {
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
-struct Audio {
+pub struct Audio {
     silence: bool,
     reg_select: u8,
     #[cfg_attr(feature = "save-states", serde(with = "serde_arrays"))]
@@ -225,7 +225,7 @@ struct Audio {
 }
 
 impl Audio {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let patches = [
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Custom
             0x03, 0x21, 0x05, 0x06, 0xE8, 0x81, 0x42, 0x27, // Buzzy Bell
@@ -256,7 +256,7 @@ impl Audio {
         }
     }
 
-    fn write(&mut self, addr: u16, value: u8) {
+    pub fn write(&mut self, addr: u16, value: u8) {
         match addr {
             0xe000 => {
                 self.silence = value & 0x40 != 0;
@@ -292,7 +292,7 @@ impl Audio {
         }
     }
 
-    fn tick(&mut self) {
+    pub fn tick(&mut self) {
         self.tick += 1;
 
         if self.silence {
@@ -312,7 +312,7 @@ impl Audio {
         }
     }
 
-    fn output(&self) -> i16 {
+    pub fn output(&self) -> i16 {
         if self.silence {
             return i16::MAX / 2;
         }

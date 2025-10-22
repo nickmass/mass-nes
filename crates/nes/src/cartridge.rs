@@ -1,7 +1,9 @@
+use crate::Region;
 use crate::debug::Debug;
 use crate::mapper::{self, Nametable, SaveWram};
 use crate::memory::RomBlock;
 
+use std::ffi::CStr;
 use std::{fmt, io, rc::Rc};
 
 #[derive(Debug)]
@@ -36,6 +38,7 @@ enum RomType {
     Ines,
     Fds,
     Unif,
+    Nsf,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -86,15 +89,132 @@ pub struct Fds {
     pub bios: Vec<u8>,
 }
 
+pub struct NsfFile {
+    pub version: u8,
+    pub total_songs: u8,
+    pub starting_song: u8,
+    pub load_addr: u16,
+    pub init_addr: u16,
+    pub play_addr: u16,
+    pub song_name: Option<String>,
+    pub artist_name: Option<String>,
+    pub copyright_name: Option<String>,
+    pub ntsc_speed: u16,
+    pub pal_speed: u16,
+    pub region: NsfRegion,
+    pub chips: NsfSoundChips,
+    pub data: RomBlock,
+    pub init_banks: Option<[u8; 8]>,
+}
+
+pub enum NsfRegion {
+    Ntsc,
+    Pal,
+    Dual,
+}
+
+impl From<u8> for NsfRegion {
+    fn from(value: u8) -> Self {
+        if value & 2 != 0 {
+            NsfRegion::Dual
+        } else if value & 1 == 1 {
+            NsfRegion::Pal
+        } else {
+            NsfRegion::Ntsc
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct NsfSoundChips(u8);
+
+impl NsfSoundChips {
+    pub fn vrc6(&self) -> bool {
+        self.0 & 0x01 != 0
+    }
+
+    pub fn vrc7(&self) -> bool {
+        self.0 & 0x02 != 0
+    }
+
+    pub fn fds(&self) -> bool {
+        self.0 & 0x04 != 0
+    }
+
+    pub fn mmc5(&self) -> bool {
+        self.0 & 0x08 != 0
+    }
+
+    pub fn namco163(&self) -> bool {
+        self.0 & 0x10 != 0
+    }
+
+    pub fn sunsoft5b(&self) -> bool {
+        self.0 & 0x20 != 0
+    }
+
+    pub fn vt02(&self) -> bool {
+        self.0 & 0x40 != 0
+    }
+}
+
+impl std::fmt::Display for NsfSoundChips {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.0 == 0 {
+            return write!(f, "");
+        }
+
+        write!(f, "[")?;
+
+        if self.vrc6() {
+            write!(f, " vrc6")?;
+        }
+
+        if self.vrc7() {
+            write!(f, " vrc7")?;
+        }
+
+        if self.fds() {
+            write!(f, " fds")?;
+        }
+
+        if self.mmc5() {
+            write!(f, " mmc5")?;
+        }
+
+        if self.namco163() {
+            write!(f, " namco163")?;
+        }
+
+        if self.sunsoft5b() {
+            write!(f, " sunsoft5b")?;
+        }
+
+        if self.vt02() {
+            write!(f, " vt02")?;
+        }
+
+        write!(f, " ]")
+    }
+}
+
+impl From<u8> for NsfSoundChips {
+    fn from(value: u8) -> Self {
+        Self(value)
+    }
+}
+
 pub enum CartridgeInfo {
     Cartridge,
     Fds { total_sides: usize },
+    Nsf,
 }
 
 pub enum Cartridge {
     INes(INes),
     GameGenie(INes),
     Fds(Fds),
+    Nsf(NsfFile),
 }
 
 impl Cartridge {
@@ -112,6 +232,7 @@ impl Cartridge {
             Some(RomType::Ines) => Cartridge::load_ines(file, ident, wram),
             Some(RomType::Fds) => Cartridge::load_fds(file, ident, bios),
             Some(RomType::Unif) => Cartridge::load_unif(file),
+            Some(RomType::Nsf) => Cartridge::load_nsf(file, ident),
             None => Err(CartridgeError::InvalidFileType),
         }
     }
@@ -322,6 +443,98 @@ impl Cartridge {
         Err(CartridgeError::NotSupported)
     }
 
+    fn load_nsf<T: std::io::Read>(
+        file: &mut T,
+        ident: [u8; 4],
+    ) -> Result<Cartridge, CartridgeError> {
+        let mut header = [0; 128];
+        header[0..4].copy_from_slice(&ident);
+        file.read_exact(&mut header[4..])?;
+
+        if !header.starts_with(b"NESM\x1a") {
+            return Err(CartridgeError::InvalidFileType);
+        }
+
+        let version = header[5];
+        let total_songs = header[6];
+        let starting_song = header[7];
+        let load_addr = u16::from_le_bytes([header[8], header[9]]);
+        let init_addr = u16::from_le_bytes([header[10], header[11]]);
+        let play_addr = u16::from_le_bytes([header[12], header[13]]);
+        let song_name = CStr::from_bytes_until_nul(&header[14..14 + 32])
+            .ok()
+            .map(|s| s.to_string_lossy().into_owned());
+        let artist_name = CStr::from_bytes_until_nul(&header[46..46 + 32])
+            .ok()
+            .map(|s| s.to_string_lossy().into_owned());
+        let copyright_name = CStr::from_bytes_until_nul(&header[78..78 + 32])
+            .ok()
+            .map(|s| s.to_string_lossy().into_owned());
+        let ntsc_speed = u16::from_le_bytes([header[110], header[111]]);
+        let init_banks: [u8; 8] = header[112..112 + 8]
+            .try_into()
+            .map_err(|_| CartridgeError::InvalidFileType)?;
+        let init_banks = if init_banks.iter().any(|&n| n != 0) {
+            Some(init_banks)
+        } else {
+            None
+        };
+        let pal_speed = u16::from_le_bytes([header[120], header[121]]);
+        let region: NsfRegion = header[122].into();
+        let chips: NsfSoundChips = header[123].into();
+        let length = u32::from_le_bytes([header[125], header[126], header[127], 0]);
+
+        let mut data = if length == 0 {
+            let mut data = Vec::new();
+            file.read_to_end(&mut data)?;
+            data
+        } else {
+            let mut data = vec![0; length as usize];
+            file.read_exact(&mut data)?;
+            data
+        };
+
+        let padding = if init_banks.is_some() {
+            (load_addr & 0xfff) as usize
+        } else {
+            0
+        };
+
+        let data = data.split_off(padding);
+        let data = RomBlock::new(data);
+
+        tracing::info!("NSF Version: {version} {chips}");
+        if let Some(song) = song_name.as_ref() {
+            tracing::info!("Title: {song}");
+        }
+        if let Some(artist) = artist_name.as_ref() {
+            tracing::info!("Artist: {artist}");
+        }
+        if let Some(copyright) = copyright_name.as_ref() {
+            tracing::info!("Copyright: {copyright}");
+        }
+
+        let nsf = NsfFile {
+            version,
+            total_songs,
+            starting_song,
+            load_addr,
+            init_addr,
+            play_addr,
+            init_banks,
+            song_name,
+            artist_name,
+            copyright_name,
+            ntsc_speed,
+            pal_speed,
+            region,
+            chips,
+            data,
+        };
+
+        Ok(Cartridge::Nsf(nsf))
+    }
+
     fn get_rom_type(rom: &[u8], file_name: &str) -> Option<RomType> {
         let ines_header = b"NES\x1a";
         if rom.starts_with(ines_header) {
@@ -342,14 +555,20 @@ impl Cartridge {
             return Some(RomType::Unif);
         }
 
+        let nsf_header = b"NESM";
+        if rom.starts_with(nsf_header) {
+            return Some(RomType::Nsf);
+        }
+
         None
     }
 
-    pub fn build_mapper(self, debug: Rc<Debug>) -> mapper::RcMapper {
+    pub fn build_mapper(self, region: Region, debug: Rc<Debug>) -> mapper::RcMapper {
         match self {
             Cartridge::INes(ines) => mapper::ines(ines, debug),
             Cartridge::GameGenie(ines) => mapper::ines(ines, debug).with_game_genie(),
             Cartridge::Fds(fds) => mapper::fds(fds),
+            Cartridge::Nsf(nsf) => mapper::nsf(region, nsf),
         }
     }
 
@@ -359,6 +578,7 @@ impl Cartridge {
             Cartridge::Fds(fds) => CartridgeInfo::Fds {
                 total_sides: fds.disk_sides.len(),
             },
+            Cartridge::Nsf(_) => CartridgeInfo::Nsf,
         }
     }
 

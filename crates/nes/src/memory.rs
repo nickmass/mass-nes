@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 #[cfg(feature = "save-states")]
 use serde::{Deserialize, Serialize};
 
@@ -130,12 +132,12 @@ impl<const KB: usize> Memory for FixedMemoryBlock<KB> {
 }
 
 pub struct RomBlock {
-    rom: Vec<u8>,
+    rom: Cow<'static, [u8]>,
 }
 
 impl RomBlock {
-    pub fn new(rom: Vec<u8>) -> RomBlock {
-        RomBlock { rom }
+    pub fn new<R: Into<Cow<'static, [u8]>>>(rom: R) -> RomBlock {
+        RomBlock { rom: rom.into() }
     }
 }
 

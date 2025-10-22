@@ -70,7 +70,7 @@ impl Machine {
         let mut cpu_bus = AddressBus::new(0, 0xffff);
         let cpu_mem = FixedMemoryBlock::new();
         let input = Input::new();
-        let mapper = cartridge.build_mapper(debug.clone());
+        let mapper = cartridge.build_mapper(region, debug.clone());
         let apu = Apu::new(region, mapper.clone());
         let ppu = Ppu::new(region, mapper.clone(), debug.clone());
 
