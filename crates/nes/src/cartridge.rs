@@ -484,23 +484,22 @@ impl Cartridge {
         let chips: NsfSoundChips = header[123].into();
         let length = u32::from_le_bytes([header[125], header[126], header[127], 0]);
 
-        let mut data = if length == 0 {
-            let mut data = Vec::new();
-            file.read_to_end(&mut data)?;
-            data
-        } else {
-            let mut data = vec![0; length as usize];
-            file.read_exact(&mut data)?;
-            data
-        };
-
         let padding = if init_banks.is_some() {
             (load_addr & 0xfff) as usize
         } else {
             0
         };
 
-        let data = data.split_off(padding);
+        let data = if length == 0 {
+            let mut data = vec![0; padding];
+            file.read_to_end(&mut data)?;
+            data
+        } else {
+            let mut data = vec![0; length as usize + padding];
+            file.read_exact(&mut data[padding..])?;
+            data
+        };
+
         let data = RomBlock::new(data);
 
         tracing::debug!("NSF Version: {version} {chips}");

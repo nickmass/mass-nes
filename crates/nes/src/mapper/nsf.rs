@@ -576,6 +576,37 @@ impl Mapper for Nsf {
         number_line(&mut self.sys_nt_ram, 13, Some(self.file.total_songs));
         text_line(&mut self.sys_nt_ram, 14, None);
     }
+
+    #[cfg(feature = "debugger")]
+    fn watch(&self, visitor: &mut crate::debug::WatchVisitor) {
+        let mut visitor = visitor.group("NSF");
+        visitor.value("Load Address", self.file.load_addr);
+        visitor.value("Init. Address", self.file.init_addr);
+        visitor.value("Play Address", self.file.play_addr);
+        visitor.value("Play Rate", self.play_timer_load);
+        if let Some(banks) = self.file.init_banks {
+            let mut grp = visitor.group("Init. Banks");
+            grp.value("[0]", banks[0]);
+            grp.value("[1]", banks[1]);
+            grp.value("[2]", banks[2]);
+            grp.value("[3]", banks[3]);
+            grp.value("[4]", banks[4]);
+            grp.value("[5]", banks[5]);
+            grp.value("[6]", banks[6]);
+            grp.value("[7]", banks[7]);
+        }
+        if let Some(banks) = self.banks {
+            let mut grp = visitor.group("Current Banks");
+            grp.value("[0]", banks[0]);
+            grp.value("[1]", banks[1]);
+            grp.value("[2]", banks[2]);
+            grp.value("[3]", banks[3]);
+            grp.value("[4]", banks[4]);
+            grp.value("[5]", banks[5]);
+            grp.value("[6]", banks[6]);
+            grp.value("[7]", banks[7]);
+        }
+    }
 }
 
 fn number_line(nt: &mut FixedMemoryBlock<1>, line: u16, num: Option<u8>) {
