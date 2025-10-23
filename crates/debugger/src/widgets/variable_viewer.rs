@@ -81,15 +81,23 @@ impl VariableViewer {
                                 }
                                 self.group_stack.push(open);
                             }
-                            nes::WatchItem::Field(name, value) if state.display_hex => {
-                                ui.allocate_space(Vec2::splat(1.0));
-                                ui.label(*name);
-                                ui.label(egui::RichText::new(format!("{:#X}", value)).monospace());
-                            }
                             nes::WatchItem::Field(name, value) => {
                                 ui.allocate_space(Vec2::splat(1.0));
-                                ui.label(*name);
-                                ui.label(egui::RichText::new(format!("{}", value)).monospace());
+                                match name {
+                                    nes::WatchFieldName::Str(n) => {
+                                        ui.label(*n);
+                                    }
+                                    nes::WatchFieldName::Index(index) => {
+                                        ui.label(format!("[{}]", index));
+                                    }
+                                }
+                                if state.display_hex {
+                                    ui.label(
+                                        egui::RichText::new(format!("{:#X}", value)).monospace(),
+                                    );
+                                } else {
+                                    ui.label(egui::RichText::new(format!("{}", value)).monospace());
+                                }
                             }
                         }
                         ui.end_row();

@@ -585,26 +585,10 @@ impl Mapper for Nsf {
         visitor.value("Play Address", self.file.play_addr);
         visitor.value("Play Rate", self.play_timer_load);
         if let Some(banks) = self.file.init_banks {
-            let mut grp = visitor.group("Init. Banks");
-            grp.value("[0]", banks[0]);
-            grp.value("[1]", banks[1]);
-            grp.value("[2]", banks[2]);
-            grp.value("[3]", banks[3]);
-            grp.value("[4]", banks[4]);
-            grp.value("[5]", banks[5]);
-            grp.value("[6]", banks[6]);
-            grp.value("[7]", banks[7]);
+            visitor.list("Init. Banks", &banks);
         }
         if let Some(banks) = self.banks {
-            let mut grp = visitor.group("Current Banks");
-            grp.value("[0]", banks[0]);
-            grp.value("[1]", banks[1]);
-            grp.value("[2]", banks[2]);
-            grp.value("[3]", banks[3]);
-            grp.value("[4]", banks[4]);
-            grp.value("[5]", banks[5]);
-            grp.value("[6]", banks[6]);
-            grp.value("[7]", banks[7]);
+            visitor.list("Current Banks", &banks);
         }
     }
 }

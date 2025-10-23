@@ -471,8 +471,14 @@ mod debugger {
     #[derive(Debug, Clone)]
     pub enum WatchItem {
         Group(&'static str),
-        Field(&'static str, WatchValue),
+        Field(WatchFieldName, WatchValue),
         EndGroup,
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum WatchFieldName {
+        Str(&'static str),
+        Index(usize),
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -552,7 +558,15 @@ mod debugger {
 
         pub fn value<V: Into<WatchValue>>(&mut self, name: &'static str, value: V) {
             let mut buf = self.buf.borrow_mut();
-            buf.push(WatchItem::Field(name, value.into()))
+            buf.push(WatchItem::Field(WatchFieldName::Str(name), value.into()))
+        }
+
+        pub fn list<V: Into<WatchValue> + Copy>(&mut self, name: &'static str, values: &[V]) {
+            let grp = self.group(name);
+            let mut buf = grp.buf.borrow_mut();
+            for (idx, &v) in values.iter().enumerate() {
+                buf.push(WatchItem::Field(WatchFieldName::Index(idx), v.into()));
+            }
         }
     }
 
