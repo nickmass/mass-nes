@@ -1191,11 +1191,11 @@ fn pick_file(
         let picker = rfd::FileDialog::new()
             .add_filter(
                 "All Supported Files",
-                &["nes", "NES", "fds", "FDS", "nsf", "NSF"],
+                &["nes", "NES", "fds", "FDS", "nsf", "NSF", "nsfe", "NSFE"],
             )
             .add_filter("NES Cartridges", &["nes", "NES"])
             .add_filter("Famicom Disk System", &["fds", "FDS"])
-            .add_filter("NES Sound Format", &["nsf", "NSF"]);
+            .add_filter("NES Sound Format", &["nsf", "NSF", "nsfe", "NSFE"]);
 
         let rom_file = if let Some(last_dir) = last_dir {
             picker.set_directory(last_dir).pick_file()
@@ -1238,11 +1238,11 @@ fn pick_file(
     let picker = rfd::AsyncFileDialog::new()
         .add_filter(
             "All Supported Files",
-            &["nes", "NES", "fds", "FDS", "nsf", "NSF"],
+            &["nes", "NES", "fds", "FDS", "nsf", "NSF", "nsfe", "NSFE"],
         )
         .add_filter("NES Cartridges", &["nes", "NES"])
         .add_filter("Famicom Disk System", &["fds", "FDS"])
-        .add_filter("NES Sound Format", &["nsf", "NSF"]);
+        .add_filter("NES Sound Format", &["nsf", "NSF", "nsfe", "NSFE"]);
 
     let pick = async move {
         let rom_file = if let Some(last_dir) = last_dir {

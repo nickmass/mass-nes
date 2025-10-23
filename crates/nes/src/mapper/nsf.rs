@@ -90,7 +90,7 @@ impl Nsf {
         let play_timer_load = play_timer_load as u32;
         let play_timer = 0;
         let play_pending = true;
-        let current_song = file.starting_song.saturating_sub(1);
+        let current_song = file.starting_song;
 
         let mut vrc7 = vrc7::Audio::new();
         vrc7.write(0xe000, 0x00);
@@ -553,7 +553,7 @@ impl Mapper for Nsf {
     fn power(&mut self) {
         self.play_timer = self.play_timer_load;
         self.play_pending = false;
-        self.current_song = self.file.starting_song.saturating_sub(1);
+        self.current_song = self.file.starting_song;
 
         for a in 0..0x400u16 {
             self.sys_nt_ram.write(a, 0x00);

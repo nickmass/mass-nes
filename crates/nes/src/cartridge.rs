@@ -39,6 +39,7 @@ enum RomType {
     Fds,
     Unif,
     Nsf,
+    Nsfe,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -233,6 +234,7 @@ impl Cartridge {
             Some(RomType::Fds) => Cartridge::load_fds(file, ident, bios),
             Some(RomType::Unif) => Cartridge::load_unif(file),
             Some(RomType::Nsf) => Cartridge::load_nsf(file, ident),
+            Some(RomType::Nsfe) => Cartridge::load_nsfe(file, ident),
             None => Err(CartridgeError::InvalidFileType),
         }
     }
@@ -457,7 +459,7 @@ impl Cartridge {
 
         let version = header[5];
         let total_songs = header[6];
-        let starting_song = header[7];
+        let starting_song = header[7].saturating_sub(1);
         let load_addr = u16::from_le_bytes([header[8], header[9]]);
         let init_addr = u16::from_le_bytes([header[10], header[11]]);
         let play_addr = u16::from_le_bytes([header[12], header[13]]);
@@ -537,6 +539,193 @@ impl Cartridge {
         Ok(Cartridge::Nsf(nsf))
     }
 
+    fn load_nsfe<T: std::io::Read>(
+        file: &mut T,
+        _ident: [u8; 4],
+    ) -> Result<Cartridge, CartridgeError> {
+        struct ChunkReader<'a, T: std::io::Read> {
+            ident: [u8; 4],
+            length: usize,
+            file: &'a mut T,
+        }
+
+        impl<'a, T: std::io::Read> ChunkReader<'a, T> {
+            fn new(file: &'a mut T) -> std::io::Result<Self> {
+                let mut buf = [0; 4];
+                file.read_exact(&mut buf)?;
+                let length = u32::from_le_bytes(buf) as usize;
+                file.read_exact(&mut buf)?;
+                Ok(Self {
+                    ident: buf,
+                    length,
+                    file,
+                })
+            }
+
+            fn ident(&self) -> &[u8; 4] {
+                &self.ident
+            }
+
+            fn skip(self) -> std::io::Result<()> {
+                let mut buf = [0; 256];
+                let mut cursor = self.length;
+
+                while cursor > 0 {
+                    let len = cursor.min(256);
+                    cursor -= self.file.read(&mut buf[..len])?;
+                }
+
+                Ok(())
+            }
+
+            fn read(self) -> std::io::Result<Vec<u8>> {
+                let mut data = vec![0; self.length];
+                self.file.read_exact(&mut data)?;
+
+                Ok(data)
+            }
+        }
+
+        let mut total_songs = 0;
+        let mut starting_song = 0;
+        let mut load_addr = 0;
+        let mut init_addr = 0;
+        let mut play_addr = 0;
+        let mut song_name = None;
+        let mut artist_name = None;
+        let mut copyright_name = None;
+        let mut ntsc_speed = 16639;
+        let mut pal_speed = 19997;
+        let mut region = NsfRegion::Ntsc;
+        let mut chips = NsfSoundChips(0);
+        let mut init_banks = None;
+        let mut data = Vec::new();
+
+        let mut read_chunks = std::collections::HashSet::new();
+        loop {
+            let reader = ChunkReader::new(file)?;
+            read_chunks.insert(reader.ident().clone());
+            match reader.ident() {
+                b"INFO" => {
+                    let info = reader.read()?;
+                    load_addr = u16::from_le_bytes([info[0], info[1]]);
+                    init_addr = u16::from_le_bytes([info[2], info[3]]);
+                    play_addr = u16::from_le_bytes([info[4], info[5]]);
+                    region = info[6].into();
+                    chips = info[7].into();
+                    total_songs = info[8];
+                    starting_song = info[9];
+                }
+                b"DATA" if !read_chunks.contains(b"INFO") => {
+                    tracing::error!("NSFE encountered DATA before INFO");
+                    return Err(CartridgeError::InvalidFileType);
+                }
+                b"DATA" => {
+                    data = reader.read()?;
+                }
+                b"BANK" => {
+                    let file_banks = reader.read()?;
+                    let mut banks = [0; 8];
+
+                    for (&f, b) in file_banks.iter().zip(banks.iter_mut()) {
+                        *b = f;
+                    }
+
+                    init_banks = Some(banks);
+                }
+                b"RATE" => {
+                    let rate_data = reader.read()?;
+                    ntsc_speed = u16::from_le_bytes([rate_data[0], rate_data[1]]);
+
+                    if rate_data.len() >= 4 {
+                        pal_speed = u16::from_le_bytes([rate_data[2], rate_data[3]]);
+                    }
+                }
+                b"auth" => {
+                    let auth_data = reader.read()?;
+                    let mut auth = auth_data.into_iter();
+
+                    fn read_str<I: Iterator<Item = u8>>(auth: I) -> Option<String> {
+                        let mut str = Vec::new();
+                        for c in auth {
+                            if c == 0 {
+                                break;
+                            }
+                            str.push(c);
+                        }
+                        let s = String::from_utf8_lossy(&str);
+                        if !s.is_empty() {
+                            Some(s.to_string())
+                        } else {
+                            None
+                        }
+                    }
+
+                    song_name = read_str(&mut auth);
+                    artist_name = read_str(&mut auth);
+                    copyright_name = read_str(&mut auth);
+                }
+                b"NEND" => {
+                    reader.skip()?;
+                    break;
+                }
+                _ => reader.skip()?,
+            }
+        }
+
+        if !read_chunks.contains(b"INFO") || !read_chunks.contains(b"DATA") {
+            tracing::error!("NSFE missing required chunks, found: {read_chunks:?}");
+            return Err(CartridgeError::InvalidFileType);
+        }
+
+        let padding = if init_banks.is_some() {
+            (load_addr & 0xfff) as usize
+        } else {
+            0
+        };
+
+        let data = if padding > 0 {
+            let mut padded_data = vec![0; padding];
+            padded_data.append(&mut data);
+            padded_data
+        } else {
+            data
+        };
+
+        let data = RomBlock::new(data);
+
+        tracing::debug!("NSFe {chips}");
+        if let Some(song) = song_name.as_ref() {
+            tracing::info!("Title: {song}");
+        }
+        if let Some(artist) = artist_name.as_ref() {
+            tracing::info!("Artist: {artist}");
+        }
+        if let Some(copyright) = copyright_name.as_ref() {
+            tracing::info!("Copyright: {copyright}");
+        }
+
+        let nsf = NsfFile {
+            version: 0,
+            total_songs,
+            starting_song,
+            load_addr,
+            init_addr,
+            play_addr,
+            init_banks,
+            song_name,
+            artist_name,
+            copyright_name,
+            ntsc_speed,
+            pal_speed,
+            region,
+            chips,
+            data,
+        };
+
+        Ok(Cartridge::Nsf(nsf))
+    }
+
     fn get_rom_type(rom: &[u8], file_name: &str) -> Option<RomType> {
         let ines_header = b"NES\x1a";
         if rom.starts_with(ines_header) {
@@ -560,6 +749,11 @@ impl Cartridge {
         let nsf_header = b"NESM";
         if rom.starts_with(nsf_header) {
             return Some(RomType::Nsf);
+        }
+
+        let nsf_header = b"NSFE";
+        if rom.starts_with(nsf_header) {
+            return Some(RomType::Nsfe);
         }
 
         None
