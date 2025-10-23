@@ -503,7 +503,10 @@ impl Cartridge {
         let data = data.split_off(padding);
         let data = RomBlock::new(data);
 
-        tracing::info!("NSF Version: {version} {chips}");
+        tracing::debug!("NSF Version: {version} {chips}");
+        if version > 2 {
+            tracing::warn!("Only NSF version 1 is supported");
+        }
         if let Some(song) = song_name.as_ref() {
             tracing::info!("Title: {song}");
         }

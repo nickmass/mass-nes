@@ -421,7 +421,7 @@ impl Mapper for Fds {
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
-struct Sound {
+pub struct Sound {
     #[cfg_attr(feature = "save-states", serde(with = "serde_arrays"))]
     wavetable_ram: [u8; 64],
     wavetable_idx: usize,
@@ -444,7 +444,7 @@ struct Sound {
 }
 
 impl Sound {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Sound {
             wavetable_ram: [0; 64],
             wavetable_idx: 0,
@@ -466,7 +466,8 @@ impl Sound {
             master_volume: Volume::Full,
         }
     }
-    fn read(&mut self, addr: u16) -> u8 {
+
+    pub fn read(&mut self, addr: u16) -> u8 {
         match addr {
             addr if addr >= 0x4040 && addr < 0x4080 && self.wavetable_hold => {
                 self.wavetable_ram[(addr & 0x3f) as usize]
@@ -499,12 +500,17 @@ impl Sound {
         }
     }
 
-    fn write(&mut self, addr: u16, value: u8) {
+    pub fn write(&mut self, addr: u16, value: u8) {
         match addr {
             addr if addr >= 0x4040 && addr < 0x4080 && self.wavetable_hold => {
                 self.wavetable_ram[(addr & 0x3f) as usize] = value & 0x3f;
             }
-            0x4080 => self.volume_envelope.write_ctl(value),
+            0x4080 => {
+                self.volume_envelope.write_ctl(value);
+                if value & 0x80 != 0 && value & 0x3f == 0 {
+                    self.wavetable_gain = 0;
+                }
+            }
             0x4082 => self.wavetable_freq = (self.wavetable_freq & 0xff00) | value as u16,
             0x4083 => {
                 self.wavetable_freq = (self.wavetable_freq & 0x00ff) | ((value as u16) << 8);
@@ -518,13 +524,7 @@ impl Sound {
                     self.wavetable_idx = 0;
                 }
             }
-            0x4084 => {
-                self.volume_envelope.write_ctl(value);
-                if value & 0x80 != 0 && value & 0x3f == 0 {
-                    self.wavetable_gain = 0;
-                }
-            }
-
+            0x4084 => self.mod_envelope.write_ctl(value),
             0x4085 => self.mod_counter = (value << 1) as i8,
             0x4086 => self.mod_freq = (self.mod_freq & 0xff00) | value as u16,
             0x4087 => {
@@ -580,7 +580,7 @@ impl Sound {
         (temp * self.wavetable_freq as u32) & 0xfffff
     }
 
-    fn tick(&mut self) {
+    pub fn tick(&mut self) {
         self.volume_envelope.tick();
         self.mod_envelope.tick();
 
@@ -623,10 +623,10 @@ impl Sound {
         }
     }
 
-    fn output(&self) -> i16 {
+    pub fn output(&self) -> i16 {
         let wave = self.wavetable_ram[self.wavetable_idx] as i16;
         let gain = self.wavetable_gain as i16;
-        let volume = (wave * gain) << 3;
+        let volume = (wave * gain) << 2;
 
         self.master_volume.apply(volume)
     }
@@ -676,7 +676,7 @@ impl Envelope {
     }
 
     fn period(&self) -> u64 {
-        8 * (self.speed as u64 + 1) * (self.multiplier as u64)
+        8 * (self.speed as u64 + 1) * (self.multiplier as u64 + 1)
     }
 
     fn tick(&mut self) {
