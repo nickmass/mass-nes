@@ -182,8 +182,7 @@ impl Nsf {
             0x5800..=0x5bff => self.sys_ram.read_mapped(0, 1024, addr),
             0x5c00..=0x5fff if self.file.chips.mmc5() => self.ex_ram.read_mapped(0, 1024, addr),
             0x6000..=0x7fff => self.read_prg_ram(addr),
-            0xffff | 0xfffd | 0xfffb => 0x54,
-            0xfffe => 0x00,
+            0xfffd | 0xfffb => 0x54,
             0xfffc => 0x03,
             0xfffa => 0x06,
             0x8000.. => self.read_prg(addr),
@@ -222,8 +221,7 @@ impl Nsf {
                 self.current_song = prev;
                 self.current_song
             }
-            0xffff | 0xfffd | 0xfffb => 0x54,
-            0xfffe => 0x00,
+            0xfffd | 0xfffb => 0x54,
             0xfffc => 0x03,
             0xfffa => 0x06,
             0x8000.. => {

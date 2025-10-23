@@ -10,7 +10,7 @@ use std::{
 use super::{Audio, SamplesReceiver, SamplesSender, samples_channel};
 
 const SAMPLE_RATE: u32 = 48000;
-const SAMPLE_LATENCY: u32 = 64;
+const SAMPLE_LATENCY: u32 = 128;
 
 #[derive(Debug)]
 pub enum Error {
