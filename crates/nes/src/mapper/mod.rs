@@ -9,6 +9,7 @@ mod fme7;
 mod game_genie;
 mod gxrom;
 mod j87;
+mod mapper_031;
 mod mmc1;
 mod mmc2;
 mod mmc3;
@@ -228,6 +229,7 @@ pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
         },
         26 => RcMapper::new(vrc6::Vrc6::new(cart, vrc6::Vrc6Variant::B, debug)),
         28 => RcMapper::new(action53::Action53::new(cart)),
+        31 => RcMapper::new(mapper_031::Mapper031::new(cart)),
         34 => match cart.submapper.unwrap_or_default() {
             1 => RcMapper::new(nina001::Nina001::new(cart)),
             2 => RcMapper::new(bxrom::Bxrom::new(cart)),
