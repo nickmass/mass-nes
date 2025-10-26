@@ -17,7 +17,7 @@ use crate::memory::{FixedMemoryBlock, Memory, MemoryBlock, RomBlock};
 use crate::ppu::PpuFetchKind;
 
 static NSF_PLAYER_ROM: &[u8] = include_bytes!("nsf_player/nsf_player.bin");
-static NSF_PLAYER_CHR: &[u8] = include_bytes!("nsf_player/ascii.chr");
+static NSF_PLAYER_CHR: &[u8] = include_bytes!("nsf_player/ascii-by-jroatch.chr");
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 pub struct Nsf {
@@ -237,6 +237,7 @@ impl Nsf {
 
     fn write_cpu(&mut self, addr: u16, value: u8) {
         match addr {
+            0x4023 if self.file.chips.fds() => self.fds.write(addr, value),
             0x4040..=0x4098 if self.file.chips.fds() => self.fds.write(addr, value),
             0x4800..=0x4fff if self.file.chips.namco163() => {
                 self.namco163.write(value);
@@ -396,7 +397,7 @@ impl Nsf {
 
     fn peek_ppu(&self, addr: u16) -> u8 {
         if addr & 0x2000 == 0 {
-            self.sys_chr.read(addr.wrapping_sub(0x20 * 16) & 0xfff)
+            self.sys_chr.read(addr & 0xfff)
         } else {
             self.sys_nt_ram.read(addr & 0x3ff)
         }
@@ -596,8 +597,8 @@ impl Mapper for Nsf {
 fn number_line(nt: &mut FixedMemoryBlock<1>, line: u16, num: Option<u8>) {
     let mut frac = 100;
     let mut empty = true;
-    for x in 0..30 {
-        let addr = line * 32 + (x + 2);
+    for x in 0..31 {
+        let addr = line * 32 + (x + 1);
         let addr = addr & 0x3ff;
 
         let value = if let Some(num) = num
@@ -619,8 +620,8 @@ fn number_line(nt: &mut FixedMemoryBlock<1>, line: u16, num: Option<u8>) {
 }
 
 fn text_line(nt: &mut FixedMemoryBlock<1>, line: u16, text: Option<&str>) {
-    for x in 0..30 {
-        let addr = line * 32 + (x + 2);
+    for x in 0..31 {
+        let addr = line * 32 + (x + 1);
         let addr = addr & 0x3ff;
 
         let value = if let Some(text) = text {

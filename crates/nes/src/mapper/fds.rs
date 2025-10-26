@@ -38,7 +38,6 @@ pub struct Fds {
     disk_irq: bool,
     disk_motor_enabled: bool,
     enable_disk_io: bool,
-    enable_sound_io: bool,
     disk_read_data: u8,
     disk_write_data: u8,
     disk_transfer_mode: DiskMode,
@@ -54,6 +53,7 @@ pub struct Fds {
     disk_side: Option<usize>,
     disk_swap_counter: u64,
     sound: Sound,
+    mirroring_mode: bool,
 }
 
 impl Fds {
@@ -76,7 +76,6 @@ impl Fds {
             disk_irq: false,
             disk_motor_enabled: false,
             enable_disk_io: true,
-            enable_sound_io: true,
             disk_read_data: 0,
             disk_write_data: 0,
             disk_transfer_mode: DiskMode::Read,
@@ -92,6 +91,7 @@ impl Fds {
             disk_side: Some(0),
             disk_swap_counter: 0,
             sound: Sound::new(),
+            mirroring_mode: false,
         }
     }
 
@@ -105,21 +105,20 @@ impl Fds {
 
     fn read_cpu(&mut self, addr: u16) -> u8 {
         if addr >= 0x4040 && addr < 0x4098 {
-            if self.enable_disk_io {
-                return self.sound.read(addr);
-            } else {
-                return 0;
-            }
+            return self.sound.read(addr);
         }
 
         match addr {
-            0x4030 if self.enable_disk_io => {
+            0x4030 => {
                 let mut value = 0;
                 if self.timer_irq {
                     value |= 0x1;
                 }
                 if self.disk_transfer_flag {
                     value |= 0x2;
+                }
+                if self.mirroring_mode {
+                    value |= 0x8;
                 }
 
                 self.timer_irq = false;
@@ -128,12 +127,12 @@ impl Fds {
 
                 value
             } //disk status
-            0x4031 if self.enable_disk_io => {
+            0x4031 => {
                 self.disk_irq = false;
                 self.disk_transfer_flag = false;
                 self.disk_read_data
             } //read data
-            0x4032 if self.enable_disk_io => {
+            0x4032 => {
                 let mut value = 0;
                 if self.disk_ejected() {
                     value |= 0x1;
@@ -150,7 +149,7 @@ impl Fds {
 
                 value
             } //drive status
-            0x4033 if self.enable_disk_io => 0x80, //external
+            0x4033 => 0x80, //external
             addr if addr >= 0x6000 && addr < 0xe000 => self.prg_ram.read(addr - 0x6000),
             addr if addr >= 0xe000 => self.bios[addr as usize & 0x1fff],
             _ => 0,
@@ -182,7 +181,7 @@ impl Fds {
             } //irq ctl
             0x4023 => {
                 self.enable_disk_io = value & 0x1 != 0;
-                self.enable_sound_io = value & 0x2 != 0;
+                self.sound.write(addr, value);
 
                 if !self.enable_disk_io {
                     self.disk_irq = false;
@@ -205,7 +204,8 @@ impl Fds {
                 } else {
                     DiskMode::Write
                 };
-                if value & 0x08 != 0 {
+                self.mirroring_mode = value & 0x08 != 0;
+                if self.mirroring_mode {
                     self.mirroring.horizontal();
                 } else {
                     self.mirroring.vertical();
@@ -441,6 +441,7 @@ pub struct Sound {
     mod_carry: bool,
     mod_accumulator: u32,
     master_volume: Volume,
+    enable_sound_io: bool,
 }
 
 impl Sound {
@@ -464,6 +465,7 @@ impl Sound {
             mod_carry: false,
             mod_accumulator: 0,
             master_volume: Volume::Full,
+            enable_sound_io: true,
         }
     }
 
@@ -501,6 +503,14 @@ impl Sound {
     }
 
     pub fn write(&mut self, addr: u16, value: u8) {
+        if addr == 0x4023 {
+            self.enable_sound_io = value & 0x2 != 0;
+        }
+
+        if !self.enable_sound_io {
+            return;
+        }
+
         match addr {
             addr if addr >= 0x4040 && addr < 0x4080 && self.wavetable_hold => {
                 self.wavetable_ram[(addr & 0x3f) as usize] = value & 0x3f;

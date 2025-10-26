@@ -54,11 +54,13 @@ InitSong:
     sta PpuAddr
     ldy #$08
 @SetPalette:
-    lda #$3f
+    lda #$0f
+    sta PpuData
+    lda #$00
+    sta PpuData
+    lda #$10
     sta PpuData
     lda #$30
-    sta PpuData
-    sta PpuData
     sta PpuData
     dey
     bne @SetPalette
