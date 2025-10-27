@@ -48,13 +48,7 @@ pub struct Vrc6 {
     prg_regs: [u8; 3],
     chr_regs: [u8; 8],
     chr_mode: u8,
-
-    halt_audio: bool,
-    freq_mode: FreqMode,
-    pulse_a: Pulse,
-    pulse_b: Pulse,
-    sawtooth: Sawtooth,
-    mix: i16,
+    sound: Sound,
 }
 
 impl Vrc6 {
@@ -65,8 +59,6 @@ impl Vrc6 {
         }
         let last_bank = ((cartridge.prg_rom.len() / 0x2000) - 1) as u8;
 
-        let mix = (i16::MAX as f32 / 64.0) as i16;
-
         Self {
             cartridge,
             variant,
@@ -76,12 +68,7 @@ impl Vrc6 {
             prg_regs: [0, 0, last_bank],
             chr_regs: [0; 8],
             chr_mode: 0x20,
-            halt_audio: true,
-            freq_mode: FreqMode::X1,
-            pulse_a: Pulse::new(),
-            pulse_b: Pulse::new(),
-            sawtooth: Sawtooth::new(),
-            mix,
+            sound: Sound::new(),
         }
     }
 
@@ -114,6 +101,8 @@ impl Vrc6 {
         }
 
         let addr = self.variant.address(addr);
+        self.sound.write(addr, value);
+
         match addr {
             0x8000..=0x8003 => self.prg_regs[0] = value & 0xf,
             0xc000..=0xc003 => self.prg_regs[1] = value & 0x1f,
@@ -128,28 +117,7 @@ impl Vrc6 {
             0xf000 => self.irq.latch(value),
             0xf001 => self.irq.control(value),
             0xf002 => self.irq.acknowledge(),
-            0xf003 => (),
-            0x9003 => {
-                self.halt_audio = value & 1 != 0;
-                if value & 4 != 0 {
-                    self.freq_mode = FreqMode::X256;
-                } else if value & 2 != 0 {
-                    self.freq_mode = FreqMode::X4;
-                } else {
-                    self.freq_mode = FreqMode::X1;
-                }
-            }
-            0x9000 => self.pulse_a.volume(value),
-            0x9001 => self.pulse_a.freq_low(value),
-            0x9002 => self.pulse_a.freq_high(value),
-            0xa000 => self.pulse_b.volume(value),
-            0xa001 => self.pulse_b.freq_low(value),
-            0xa002 => self.pulse_b.freq_high(value),
-            0xa003 => (),
-            0xb000 => self.sawtooth.accumulator_rate(value),
-            0xb001 => self.sawtooth.freq_low(value),
-            0xb002 => self.sawtooth.freq_high(value),
-            _ => unreachable!(),
+            _ => (),
         }
     }
 
@@ -271,19 +239,11 @@ impl Mapper for Vrc6 {
 
     fn tick(&mut self) {
         self.irq.tick();
-        if !self.halt_audio {
-            self.pulse_a.tick(self.freq_mode);
-            self.pulse_b.tick(self.freq_mode);
-            self.sawtooth.tick(self.freq_mode);
-        }
+        self.sound.tick();
     }
 
     fn get_sample(&self) -> Option<i16> {
-        let val = (self.pulse_a.sample() as i16
-            + self.pulse_b.sample() as i16
-            + self.sawtooth.sample() as i16)
-            * self.mix;
-        Some(val)
+        Some(self.sound.output())
     }
 
     fn save_wram(&self) -> Option<super::SaveWram> {
@@ -454,5 +414,71 @@ impl Sawtooth {
 
     pub fn sample(&self) -> u8 {
         self.sample
+    }
+}
+
+#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone)]
+pub struct Sound {
+    pulse_a: Pulse,
+    pulse_b: Pulse,
+    sawtooth: Sawtooth,
+    freq_mode: FreqMode,
+    halt_audio: bool,
+    mix: i16,
+}
+
+impl Sound {
+    pub fn new() -> Self {
+        let mix = (i16::MAX as f32 / 64.0) as i16;
+        Self {
+            pulse_a: Pulse::new(),
+            pulse_b: Pulse::new(),
+            sawtooth: Sawtooth::new(),
+            freq_mode: FreqMode::X1,
+            halt_audio: false,
+            mix,
+        }
+    }
+
+    pub fn write(&mut self, addr: u16, value: u8) {
+        match addr {
+            0x9003 => {
+                self.halt_audio = value & 1 != 0;
+                if value & 4 != 0 {
+                    self.freq_mode = FreqMode::X256;
+                } else if value & 2 != 0 {
+                    self.freq_mode = FreqMode::X4;
+                } else {
+                    self.freq_mode = FreqMode::X1;
+                }
+            }
+            0x9000 => self.pulse_a.volume(value),
+            0x9001 => self.pulse_a.freq_low(value),
+            0x9002 => self.pulse_a.freq_high(value),
+            0xa000 => self.pulse_b.volume(value),
+            0xa001 => self.pulse_b.freq_low(value),
+            0xa002 => self.pulse_b.freq_high(value),
+            0xb000 => self.sawtooth.accumulator_rate(value),
+            0xb001 => self.sawtooth.freq_low(value),
+            0xb002 => self.sawtooth.freq_high(value),
+            _ => (),
+        }
+    }
+
+    pub fn tick(&mut self) {
+        if !self.halt_audio {
+            self.pulse_a.tick(self.freq_mode);
+            self.pulse_b.tick(self.freq_mode);
+            self.sawtooth.tick(self.freq_mode);
+        }
+    }
+
+    pub fn output(&self) -> i16 {
+        let val = (self.pulse_a.sample() as i16
+            + self.pulse_b.sample() as i16
+            + self.sawtooth.sample() as i16)
+            * self.mix;
+        val
     }
 }

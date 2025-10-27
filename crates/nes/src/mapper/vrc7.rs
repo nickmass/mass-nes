@@ -51,7 +51,7 @@ pub struct Vrc7 {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
     mirroring: SimpleMirroring,
-    audio: Audio,
+    audio: Sound,
     variant: Vrc7Variant,
     #[cfg_attr(feature = "save-states", save(nested))]
     irq: VrcIrq,
@@ -77,7 +77,7 @@ impl Vrc7 {
         Self {
             cartridge,
             mirroring,
-            audio: Audio::new(),
+            audio: Sound::new(),
             variant,
             irq: VrcIrq::new(debug),
             prg_ram,
@@ -212,7 +212,7 @@ impl Mapper for Vrc7 {
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
-pub struct Audio {
+pub struct Sound {
     silence: bool,
     reg_select: u8,
     #[cfg_attr(feature = "save-states", serde(with = "serde_arrays"))]
@@ -224,7 +224,7 @@ pub struct Audio {
     output: [i32; 6],
 }
 
-impl Audio {
+impl Sound {
     pub fn new() -> Self {
         let patches = [
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Custom
@@ -244,7 +244,7 @@ impl Audio {
             0x61, 0x63, 0x0C, 0x00, 0x94, 0xC0, 0x33, 0xF6, // Synth Bass
             0x21, 0x72, 0x0D, 0x00, 0xC1, 0xD5, 0x56, 0x06, // Sweep
         ];
-        Audio {
+        Sound {
             silence: true,
             reg_select: 0,
             patches,

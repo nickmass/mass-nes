@@ -1,14 +1,12 @@
 #[cfg(feature = "save-states")]
 use nes_traits::SaveState;
-#[cfg(feature = "save-states")]
-use serde::{Deserialize, Serialize};
 
 use super::fds::Sound as Fds;
 use super::fme7::Sound as Sunsoft5b;
-use super::mmc5::{Pcm, Pulse as Mmc5Pulse};
-use super::namco163::Sound as N163;
-use super::vrc6::{FreqMode, Pulse as Vrc6Pulse, Sawtooth};
-use super::vrc7;
+use super::mmc5::Sound as Mmc5;
+use super::namco163::Sound as Namco163;
+use super::vrc6::Sound as Vrc6;
+use super::vrc7::Sound as Vrc7;
 use crate::Region;
 use crate::bus::{AddressBus, AndAndMask, AndEqualsAndMask, BusKind, DeviceKind, RangeAndMask};
 use crate::cartridge::NsfFile;
@@ -45,13 +43,13 @@ pub struct Nsf {
     mul_left: u8,
     mul_right: u8,
     #[cfg_attr(feature = "save-states", save(nested))]
-    sunsoft5b: Sunsoft5b,
-    namco163: N163,
-    vrc6: Vrc6,
-    vrc7: vrc7::Audio,
+    sunsoft5b: Option<Sunsoft5b>,
+    namco163: Option<Namco163>,
+    vrc6: Option<Vrc6>,
+    vrc7: Option<Vrc7>,
     #[cfg_attr(feature = "save-states", save(nested))]
-    mmc5: Mmc5,
-    fds: Fds,
+    mmc5: Option<Mmc5>,
+    fds: Option<Fds>,
 }
 
 impl Nsf {
@@ -94,15 +92,25 @@ impl Nsf {
         let play_pending = true;
         let current_song = file.starting_song;
 
-        let mut vrc7 = vrc7::Audio::new();
-        vrc7.write(0xe000, 0x00);
-
-        let mut namco163 = N163::new();
-        namco163.enable(0x00);
-
-        let mut fds = Fds::new();
-        fds.write(0x4080, 0x80);
-        fds.write(0x408a, 0xe8);
+        let sunsoft5b = file.chips.sunsoft5b().then(|| Sunsoft5b::new());
+        let namco163 = file.chips.namco163().then(|| {
+            let mut namco163 = Namco163::new();
+            namco163.enable(0x00);
+            namco163
+        });
+        let vrc6 = file.chips.vrc6().then(|| Vrc6::new());
+        let vrc7 = file.chips.vrc7().then(|| {
+            let mut vrc7 = Vrc7::new();
+            vrc7.write(0xe000, 0x00);
+            vrc7
+        });
+        let mmc5 = file.chips.mmc5().then(|| Mmc5::new());
+        let fds = file.chips.fds().then(|| {
+            let mut fds = Fds::new();
+            fds.write(0x4080, 0x80);
+            fds.write(0x408a, 0xe8);
+            fds
+        });
 
         Nsf {
             region,
@@ -121,19 +129,18 @@ impl Nsf {
             play_pending,
             mul_left: 0xff,
             mul_right: 0xff,
-            sunsoft5b: Sunsoft5b::new(),
             current_song,
+            sunsoft5b,
             namco163,
-            vrc6: Vrc6::new(),
+            vrc6,
             vrc7,
-            mmc5: Mmc5::new(),
+            mmc5,
             fds,
         }
     }
 
     fn peek_cpu(&self, addr: u16) -> u8 {
         match addr {
-            0x5010 | 0x5015 if self.file.chips.mmc5() => self.mmc5.read(addr),
             0x5205 if self.file.chips.mmc5() => {
                 let val = self.mul_left as u16 * self.mul_right as u16;
                 val as u8
@@ -193,9 +200,21 @@ impl Nsf {
     }
 
     fn read_cpu(&mut self, addr: u16) -> u8 {
+        if let Some(value) = self.sunsoft5b.read(addr) {
+            return value;
+        } else if let Some(value) = self.namco163.read(addr) {
+            return value;
+        } else if let Some(value) = self.vrc6.read(addr) {
+            return value;
+        } else if let Some(value) = self.vrc7.read(addr) {
+            return value;
+        } else if let Some(value) = self.mmc5.read(addr) {
+            return value;
+        } else if let Some(value) = self.fds.read(addr) {
+            return value;
+        }
+
         match addr {
-            0x4040..=0x4098 if self.file.chips.fds() => self.fds.read(addr),
-            0x4800..=0x4fff if self.file.chips.namco163() => self.namco163.read(),
             0x5300 => {
                 if self.play_pending {
                     self.play_pending = false;
@@ -228,8 +247,8 @@ impl Nsf {
             0xfffa => 0x06,
             0x8000.. => {
                 let value = self.read_prg(addr);
-                if self.file.chips.mmc5() {
-                    self.mmc5.pcm.read(addr, value);
+                if let Some(mmc5) = self.mmc5.as_mut() {
+                    mmc5.pcm_read(addr, value);
                 }
                 value
             }
@@ -238,47 +257,17 @@ impl Nsf {
     }
 
     fn write_cpu(&mut self, addr: u16, value: u8) {
+        self.sunsoft5b.write(addr, value);
+        self.namco163.write(addr, value);
+        self.vrc6.write(addr, value);
+        self.vrc7.write(addr, value);
+        self.mmc5.write(addr, value);
+        self.fds.write(addr, value);
+
         match addr {
-            0x4023 if self.file.chips.fds() => self.fds.write(addr, value),
-            0x4040..=0x4098 if self.file.chips.fds() => self.fds.write(addr, value),
-            0x4800..=0x4fff if self.file.chips.namco163() => {
-                self.namco163.write(value);
-            }
-            0x5000..=0x5015 if self.file.chips.mmc5() => self.mmc5.write(addr, value),
             0x5205 if self.file.chips.mmc5() => self.mul_left = value,
             0x5206 if self.file.chips.mmc5() => self.mul_right = value,
-            0x5302 => {
-                self.banks = self.file.init_banks;
-
-                if let Some((fds_banks, banks)) = self.fds_banks.as_mut().zip(self.banks.as_ref()) {
-                    fds_banks[0] = banks[6];
-                    fds_banks[1] = banks[7];
-                }
-
-                for a in 0..0x2000u16 {
-                    self.prg_ram.write(a, 0x00);
-                }
-
-                let _ = self.display_info();
-
-                if let Some(fds_ram) = self.fds_ram.as_mut() {
-                    let start = if self.banks.is_none() {
-                        self.file.load_addr.saturating_sub(0x8000)
-                    } else {
-                        0x00
-                    };
-                    let end = (start as usize + self.file.data.len()).min(0xffff) as u16;
-                    for a in 0..0x8000 {
-                        let v = if a < start || a >= end {
-                            0
-                        } else {
-                            let a = a - start;
-                            self.file.data.read(a)
-                        };
-                        fds_ram.write(a, v);
-                    }
-                }
-            }
+            0x5302 => self.init_song(),
             0x5800..=0x5bff => self.sys_ram.write_mapped(0, 1024, addr, value),
             0x5776 | 0x5777 if self.file.chips.fds() => {
                 if let Some(banks) = self.fds_banks.as_mut() {
@@ -295,13 +284,6 @@ impl Nsf {
             0x5c00..=0x5fff if self.file.chips.mmc5() => {
                 self.ex_ram.write_mapped(0, 1024, addr, value)
             }
-            0x9010 | 0x9030 if self.file.chips.vrc7() => self.vrc7.write(addr, value),
-            0x9000..=0x9003 | 0xa000..=0xa002 | 0xb000..=0xb002 if self.file.chips.vrc6() => {
-                self.vrc6.write(addr, value)
-            }
-            0xc000..=0xcfff if self.file.chips.sunsoft5b() => self.sunsoft5b.select(value),
-            0xe000..=0xefff if self.file.chips.sunsoft5b() => self.sunsoft5b.value(value),
-            0xf800..=0xffff if self.file.chips.namco163() => self.namco163.address_port(value),
             0x6000..=0x7fff => self.write_prg_ram(addr, value),
             _ => (),
         }
@@ -397,6 +379,39 @@ impl Nsf {
             self.sys_chr.read(addr & 0xfff)
         } else {
             self.sys_nt_ram.read(addr & 0x3ff)
+        }
+    }
+
+    fn init_song(&mut self) {
+        self.banks = self.file.init_banks;
+
+        if let Some((fds_banks, banks)) = self.fds_banks.as_mut().zip(self.banks.as_ref()) {
+            fds_banks[0] = banks[6];
+            fds_banks[1] = banks[7];
+        }
+
+        for a in 0..0x2000u16 {
+            self.prg_ram.write(a, 0x00);
+        }
+
+        let _ = self.display_info();
+
+        if let Some(fds_ram) = self.fds_ram.as_mut() {
+            let start = if self.banks.is_none() {
+                self.file.load_addr.saturating_sub(0x8000)
+            } else {
+                0x00
+            };
+            let end = (start as usize + self.file.data.len()).min(0xffff) as u16;
+            for a in 0..0x8000 {
+                let v = if a < start || a >= end {
+                    0
+                } else {
+                    let a = a - start;
+                    self.file.data.read(a)
+                };
+                fds_ram.write(a, v);
+            }
         }
     }
 
@@ -503,64 +518,24 @@ impl Mapper for Nsf {
             self.play_timer = self.play_timer_load;
         }
 
-        if self.file.chips.vrc7() {
-            self.vrc7.tick();
-        }
-
-        if self.file.chips.vrc6() {
-            self.vrc6.tick();
-        }
-
-        if self.file.chips.namco163() {
-            self.namco163.tick();
-        }
-
-        if self.file.chips.sunsoft5b() {
-            self.sunsoft5b.tick();
-        }
-
-        if self.file.chips.mmc5() {
-            self.mmc5.tick();
-        }
-
-        if self.file.chips.fds() {
-            self.fds.tick();
-        }
+        self.sunsoft5b.tick();
+        self.namco163.tick();
+        self.vrc6.tick();
+        self.vrc7.tick();
+        self.mmc5.tick();
+        self.fds.tick();
     }
 
     fn get_sample(&self) -> Option<i16> {
         let mut sample = 0;
         let mut count = 0;
 
-        if self.file.chips.vrc7() {
-            sample += self.vrc7.output() as i32;
-            count += 1;
-        }
-
-        if self.file.chips.vrc6() {
-            sample += self.vrc6.output() as i32;
-            count += 1;
-        }
-
-        if self.file.chips.namco163() {
-            sample += self.namco163.output() as i32;
-            count += 1;
-        }
-
-        if self.file.chips.sunsoft5b() {
-            sample += self.sunsoft5b.output() as i32;
-            count += 1;
-        }
-
-        if self.file.chips.mmc5() {
-            sample += self.mmc5.output() as i32;
-            count += 1;
-        }
-
-        if self.file.chips.fds() {
-            sample += self.fds.output() as i32;
-            count += 1;
-        }
+        self.sunsoft5b.add_output(&mut count, &mut sample);
+        self.namco163.add_output(&mut count, &mut sample);
+        self.vrc6.add_output(&mut count, &mut sample);
+        self.vrc7.add_output(&mut count, &mut sample);
+        self.mmc5.add_output(&mut count, &mut sample);
+        self.fds.add_output(&mut count, &mut sample);
 
         if count > 0 {
             Some((sample / count) as i16)
@@ -637,6 +612,7 @@ impl<'a, M: Memory> NametableCursor<'a, M> {
         } else {
             self.line = abs;
         }
+        self.column = 1;
     }
 }
 
@@ -665,156 +641,150 @@ impl<'a, M: Memory> std::fmt::Write for NametableCursor<'a, M> {
     }
 }
 
-#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
-#[derive(Debug, Clone)]
-struct Vrc6 {
-    pulse_a: Vrc6Pulse,
-    pulse_b: Vrc6Pulse,
-    sawtooth: Sawtooth,
-    freq_mode: FreqMode,
-    halt_audio: bool,
-    mix: i16,
+trait ExternalAudio {
+    fn read(&mut self, _address: u16) -> Option<u8> {
+        None
+    }
+
+    fn write(&mut self, address: u16, value: u8);
+    fn tick(&mut self);
+    fn output(&self) -> Option<i16>;
+    fn add_output(&self, count: &mut i32, accum: &mut i32) {
+        if let Some(output) = self.output() {
+            *count += 1;
+            *accum += output as i32;
+        }
+    }
 }
 
-impl Vrc6 {
-    fn new() -> Self {
-        let mix = (i16::MAX as f32 / 64.0) as i16;
-        Self {
-            pulse_a: Vrc6Pulse::new(),
-            pulse_b: Vrc6Pulse::new(),
-            sawtooth: Sawtooth::new(),
-            freq_mode: FreqMode::X1,
-            halt_audio: false,
-            mix,
+impl<T: ExternalAudio> ExternalAudio for Option<T> {
+    fn read(&mut self, address: u16) -> Option<u8> {
+        self.as_mut().and_then(|sound| sound.read(address))
+    }
+
+    fn write(&mut self, address: u16, value: u8) {
+        if let Some(sound) = self.as_mut() {
+            sound.write(address, value);
         }
     }
 
-    fn write(&mut self, addr: u16, value: u8) {
-        match addr {
-            0x9003 => {
-                self.halt_audio = value & 1 != 0;
-                if value & 4 != 0 {
-                    self.freq_mode = FreqMode::X256;
-                } else if value & 2 != 0 {
-                    self.freq_mode = FreqMode::X4;
-                } else {
-                    self.freq_mode = FreqMode::X1;
-                }
-            }
-            0x9000 => self.pulse_a.volume(value),
-            0x9001 => self.pulse_a.freq_low(value),
-            0x9002 => self.pulse_a.freq_high(value),
-            0xa000 => self.pulse_b.volume(value),
-            0xa001 => self.pulse_b.freq_low(value),
-            0xa002 => self.pulse_b.freq_high(value),
-            0xb000 => self.sawtooth.accumulator_rate(value),
-            0xb001 => self.sawtooth.freq_low(value),
-            0xb002 => self.sawtooth.freq_high(value),
+    fn tick(&mut self) {
+        if let Some(sound) = self.as_mut() {
+            sound.tick();
+        }
+    }
+
+    fn output(&self) -> Option<i16> {
+        self.as_ref().and_then(|sound| sound.output())
+    }
+}
+
+impl ExternalAudio for Sunsoft5b {
+    fn write(&mut self, address: u16, value: u8) {
+        match address {
+            0xc000..=0xcfff => self.select(value),
+            0xe000..=0xefff => self.value(value),
             _ => (),
         }
     }
 
     fn tick(&mut self) {
-        if !self.halt_audio {
-            self.pulse_a.tick(self.freq_mode);
-            self.pulse_b.tick(self.freq_mode);
-            self.sawtooth.tick(self.freq_mode);
-        }
+        self.tick();
     }
 
-    fn output(&self) -> i16 {
-        let val = (self.pulse_a.sample() as i16
-            + self.pulse_b.sample() as i16
-            + self.sawtooth.sample() as i16)
-            * self.mix;
-        val
+    fn output(&self) -> Option<i16> {
+        Some(self.output())
     }
 }
 
-#[cfg_attr(feature = "save-states", derive(SaveState))]
-struct Mmc5 {
-    #[cfg_attr(feature = "save-states", save(skip))]
-    pulse_table: Vec<i16>,
-    #[cfg_attr(feature = "save-states", save(nested))]
-    pulse_1: Mmc5Pulse,
-    #[cfg_attr(feature = "save-states", save(nested))]
-    pulse_2: Mmc5Pulse,
-    pcm: Pcm,
-}
-
-impl Mmc5 {
-    fn new() -> Self {
-        let mut pulse_table = Vec::new();
-        for x in 0..32 {
-            let f_val = 95.52 / (8128.0 / (x as f64) + 100.0);
-            pulse_table.push((f_val * ::std::i16::MAX as f64) as i16);
-        }
-
-        Self {
-            pulse_table,
-            pulse_1: Mmc5Pulse::new(),
-            pulse_2: Mmc5Pulse::new(),
-            pcm: Pcm::new(),
+impl ExternalAudio for Namco163 {
+    fn read(&mut self, address: u16) -> Option<u8> {
+        match address {
+            0x4800..=0x4fff => Some(self.read()),
+            _ => None,
         }
     }
 
-    fn read(&self, addr: u16) -> u8 {
-        match addr {
-            0x5010 => {
-                let mut value = 0;
-                if !self.pcm.write_mode {
-                    value |= 0x01;
-                }
-                value
-            }
-            0x5015 => {
-                let mut value = 0;
-                if self.pulse_1.get_state() {
-                    value |= 0x01;
-                }
-                if self.pulse_2.get_state() {
-                    value |= 0x02;
-                }
-                value
-            }
-            _ => 0,
-        }
-    }
-
-    fn write(&mut self, addr: u16, value: u8) {
-        match addr {
-            0x5000..=0x5003 => self.pulse_1.write(addr & 3, value),
-            0x5004..=0x5007 => self.pulse_2.write(addr & 3, value),
-            0x5010 => {
-                self.pcm.write_mode = value & 0x01 == 0;
-            }
-            0x5011 => self.pcm.write(value),
-            0x5015 => {
-                if value & 0x01 != 0 {
-                    self.pulse_1.enable();
-                } else {
-                    self.pulse_1.disable();
-                }
-                if value & 0x02 != 0 {
-                    self.pulse_2.enable();
-                } else {
-                    self.pulse_2.disable();
-                }
-            }
+    fn write(&mut self, address: u16, value: u8) {
+        match address {
+            0x4800..=0x4fff => self.write(value),
+            0xf800..=0xffff => self.address_port(value),
             _ => (),
         }
     }
 
     fn tick(&mut self) {
-        self.pulse_1.tick();
-        self.pulse_2.tick();
+        self.tick();
     }
 
-    fn output(&self) -> i16 {
-        let pulse_1 = self.pulse_1.output() as usize;
-        let pulse_2 = self.pulse_2.output() as usize;
+    fn output(&self) -> Option<i16> {
+        Some(self.output())
+    }
+}
 
-        let out = self.pulse_table[pulse_1 + pulse_2] + self.pcm.output() as i16;
-        out
+impl ExternalAudio for Vrc6 {
+    fn write(&mut self, address: u16, value: u8) {
+        self.write(address, value);
+    }
+
+    fn tick(&mut self) {
+        self.tick();
+    }
+
+    fn output(&self) -> Option<i16> {
+        Some(self.output())
+    }
+}
+
+impl ExternalAudio for Vrc7 {
+    fn write(&mut self, address: u16, value: u8) {
+        self.write(address, value);
+    }
+
+    fn tick(&mut self) {
+        self.tick();
+    }
+
+    fn output(&self) -> Option<i16> {
+        Some(self.output())
+    }
+}
+
+impl ExternalAudio for Mmc5 {
+    fn read(&mut self, address: u16) -> Option<u8> {
+        self.read(address)
+    }
+
+    fn write(&mut self, address: u16, value: u8) {
+        self.write(address, value);
+    }
+
+    fn tick(&mut self) {
+        self.tick()
+    }
+
+    fn output(&self) -> Option<i16> {
+        Some(self.output())
+    }
+}
+
+impl ExternalAudio for Fds {
+    fn read(&mut self, address: u16) -> Option<u8> {
+        match address {
+            0x4040..=0x4097 => Some(self.read(address)),
+            _ => None,
+        }
+    }
+
+    fn write(&mut self, address: u16, value: u8) {
+        self.write(address, value);
+    }
+
+    fn tick(&mut self) {
+        self.tick()
+    }
+
+    fn output(&self) -> Option<i16> {
+        Some(self.output())
     }
 }

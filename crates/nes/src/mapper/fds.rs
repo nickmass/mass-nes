@@ -471,12 +471,8 @@ impl Sound {
 
     pub fn read(&mut self, addr: u16) -> u8 {
         match addr {
-            addr if addr >= 0x4040 && addr < 0x4080 && self.wavetable_hold => {
-                self.wavetable_ram[(addr & 0x3f) as usize]
-            }
-            addr if addr >= 0x4040 && addr < 0x4080 => {
-                self.wavetable_ram[self.wavetable_idx & 0x3f]
-            }
+            0x4040..=0x407f if self.wavetable_hold => self.wavetable_ram[(addr & 0x3f) as usize],
+            0x4040..=0x407f => self.wavetable_ram[self.wavetable_idx & 0x3f],
             0x4090 => self.volume_envelope.gain() | 0x40,
             0x4091 => (self.wavetable_accumulator >> 12) as u8,
             0x4092 => self.mod_envelope.gain() | 0x40,
@@ -512,7 +508,7 @@ impl Sound {
         }
 
         match addr {
-            addr if addr >= 0x4040 && addr < 0x4080 && self.wavetable_hold => {
+            0x4040..=0x407f if self.wavetable_hold => {
                 self.wavetable_ram[(addr & 0x3f) as usize] = value & 0x3f;
             }
             0x4080 => {

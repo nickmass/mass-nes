@@ -10,6 +10,49 @@ pub trait SaveState {
     fn restore_state(&mut self, state: &Self::Data);
 }
 
+pub struct OptionData<T: SaveState>(Option<<T as SaveState>::Data>);
+
+impl<T: SaveState> Clone for OptionData<T>
+where
+    T::Data: Clone,
+{
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<T: SaveState> Serialize for OptionData<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de, T: SaveState> Deserialize<'de> for OptionData<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Option::deserialize(deserializer).map(OptionData)
+    }
+}
+
+impl<T: SaveState> SaveState for Option<T> {
+    type Data = OptionData<T>;
+
+    fn save_state(&self) -> Self::Data {
+        OptionData(self.as_ref().map(|s| s.save_state()))
+    }
+
+    fn restore_state(&mut self, state: &Self::Data) {
+        if let Some((item, state)) = self.as_mut().zip(state.0.as_ref()) {
+            item.restore_state(state);
+        }
+    }
+}
+
 pub struct VecData<T: SaveState>(Vec<<T as SaveState>::Data>);
 
 impl<T: SaveState> Serialize for VecData<T> {

@@ -270,13 +270,8 @@ pub struct Mmc5 {
     vert_chr_bank: u8,
     ex_attr_bank: u8,
     ex_attr_pal: u8,
-    #[cfg_attr(feature = "save-states", save(skip))]
-    pulse_table: Vec<i16>,
     #[cfg_attr(feature = "save-states", save(nested))]
-    pulse_1: Pulse,
-    #[cfg_attr(feature = "save-states", save(nested))]
-    pulse_2: Pulse,
-    pcm: Pcm,
+    sound: Sound,
 }
 
 impl Mmc5 {
@@ -300,12 +295,6 @@ impl Mmc5 {
         } else {
             None
         };
-
-        let mut pulse_table = Vec::new();
-        for x in 0..32 {
-            let f_val = 95.52 / (8128.0 / (x as f64) + 100.0);
-            pulse_table.push((f_val * ::std::i16::MAX as f64) as i16);
-        }
 
         use MmcNametable as M;
         let mirroring = match cartridge.mirroring {
@@ -348,10 +337,7 @@ impl Mmc5 {
             vert_chr_bank: 0,
             ex_attr_bank: 0,
             ex_attr_pal: 0,
-            pulse_table,
-            pulse_1: Pulse::new(),
-            pulse_2: Pulse::new(),
-            pcm: Pcm::new(),
+            sound: Sound::new(),
         }
     }
 
@@ -370,28 +356,11 @@ impl Mmc5 {
     }
 
     fn read_cpu(&mut self, addr: u16) -> u8 {
+        if let Some(value) = self.sound.read(addr) {
+            return value;
+        }
+
         match addr {
-            0x5010 => {
-                let mut value = 0;
-                if !self.pcm.write_mode {
-                    value |= 0x01;
-                }
-                if self.pcm.irq_enabled && self.pcm.irq_pending {
-                    value |= 0x80;
-                }
-                self.pcm.irq_pending = false;
-                value
-            }
-            0x5015 => {
-                let mut value = 0;
-                if self.pulse_1.get_state() {
-                    value |= 0x01;
-                }
-                if self.pulse_2.get_state() {
-                    value |= 0x02;
-                }
-                value
-            }
             0x5204 => {
                 let mut val = 0;
                 if self.ppu_state.irq_pending {
@@ -417,7 +386,7 @@ impl Mmc5 {
                     self.ppu_state.leave_frame();
                 }
                 let value = self.peek_cpu(addr);
-                self.pcm.read(addr, value);
+                self.sound.pcm_read(addr, value);
                 value
             }
             _ => 0,
@@ -425,6 +394,8 @@ impl Mmc5 {
     }
 
     fn write_cpu(&mut self, addr: u16, value: u8) {
+        self.sound.write(addr, value);
+
         match addr {
             0x2000 => {
                 self.tall_sprites = value & 0x20 != 0;
@@ -436,25 +407,6 @@ impl Mmc5 {
                 self.ppu_substitution = value & 0x18 != 0;
                 if !self.ppu_substitution {
                     self.ppu_state.leave_frame();
-                }
-            }
-            0x5000..=0x5003 => self.pulse_1.write(addr & 3, value),
-            0x5004..=0x5007 => self.pulse_2.write(addr & 3, value),
-            0x5010 => {
-                self.pcm.write_mode = value & 0x01 == 0;
-                self.pcm.irq_enabled = value & 0x80 != 0;
-            }
-            0x5011 => self.pcm.write(value),
-            0x5015 => {
-                if value & 0x01 != 0 {
-                    self.pulse_1.enable();
-                } else {
-                    self.pulse_1.disable();
-                }
-                if value & 0x02 != 0 {
-                    self.pulse_2.enable();
-                } else {
-                    self.pulse_2.disable();
                 }
             }
             0x5100 => self.prg_bank_mode = value & 0x3,
@@ -772,14 +724,12 @@ impl Mapper for Mmc5 {
     }
 
     fn get_irq(&self) -> bool {
-        (self.ppu_state.irq_pending && self.irq_enabled)
-            || (self.pcm.irq_pending && self.pcm.irq_enabled)
+        (self.ppu_state.irq_pending && self.irq_enabled) || self.sound.pcm_irq()
     }
 
     fn tick(&mut self) {
         self.ppu_state.tick();
-        self.pulse_1.tick();
-        self.pulse_2.tick();
+        self.sound.tick();
     }
 
     fn ppu_fetch(&mut self, address: u16, kind: PpuFetchKind) -> super::Nametable {
@@ -810,11 +760,7 @@ impl Mapper for Mmc5 {
     }
 
     fn get_sample(&self) -> Option<i16> {
-        let pulse_1 = self.pulse_1.output() as usize;
-        let pulse_2 = self.pulse_2.output() as usize;
-
-        let out = self.pulse_table[pulse_1 + pulse_2] + self.pcm.output() as i16;
-        Some(out)
+        Some(self.sound.output())
     }
 
     fn save_wram(&self) -> Option<super::SaveWram> {
@@ -828,7 +774,7 @@ impl Mapper for Mmc5 {
 
 #[cfg_attr(feature = "save-states", derive(SaveState))]
 #[derive(Default)]
-pub struct Pulse {
+struct Pulse {
     period: u16,
     timer_counter: u16,
     length_counter: u8,
@@ -842,7 +788,7 @@ pub struct Pulse {
 }
 
 impl Pulse {
-    pub fn new() -> Pulse {
+    fn new() -> Pulse {
         Pulse {
             ..Default::default()
         }
@@ -894,7 +840,7 @@ impl Pulse {
         self.duty_sequence()[(self.sequencer & 7) as usize]
     }
 
-    pub fn write(&mut self, addr: u16, value: u8) {
+    fn write(&mut self, addr: u16, value: u8) {
         self.regs[addr as usize] = value;
         match addr {
             0 => (),
@@ -912,7 +858,7 @@ impl Pulse {
         }
     }
 
-    pub fn tick(&mut self) {
+    fn tick(&mut self) {
         self.current_tick += 1;
 
         if self.current_tick & 1 == 0 {
@@ -948,7 +894,7 @@ impl Pulse {
         }
     }
 
-    pub fn output(&self) -> u8 {
+    fn output(&self) -> u8 {
         if !self.duty() || self.length_counter == 0 {
             0
         } else {
@@ -956,16 +902,16 @@ impl Pulse {
         }
     }
 
-    pub fn enable(&mut self) {
+    fn enable(&mut self) {
         self.enabled = true;
     }
 
-    pub fn disable(&mut self) {
+    fn disable(&mut self) {
         self.enabled = false;
         self.length_counter = 0;
     }
 
-    pub fn get_state(&self) -> bool {
+    fn get_state(&self) -> bool {
         self.length_counter > 0
     }
 }
@@ -974,13 +920,13 @@ impl Pulse {
 #[derive(Debug, Clone)]
 pub struct Pcm {
     output: u8,
-    pub write_mode: bool,
+    write_mode: bool,
     irq_enabled: bool,
     irq_pending: bool,
 }
 
 impl Pcm {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             output: 0,
             write_mode: true,
@@ -989,11 +935,11 @@ impl Pcm {
         }
     }
 
-    pub fn output(&self) -> u8 {
+    fn output(&self) -> u8 {
         self.output
     }
 
-    pub fn read(&mut self, addr: u16, value: u8) {
+    fn read(&mut self, addr: u16, value: u8) {
         if self.write_mode {
             return;
         }
@@ -1009,7 +955,7 @@ impl Pcm {
         }
     }
 
-    pub fn write(&mut self, value: u8) {
+    fn write(&mut self, value: u8) {
         if !self.write_mode {
             return;
         }
@@ -1019,5 +965,108 @@ impl Pcm {
         } else {
             self.output = value;
         }
+    }
+}
+
+#[cfg_attr(feature = "save-states", derive(SaveState))]
+pub struct Sound {
+    #[cfg_attr(feature = "save-states", save(skip))]
+    pulse_table: Vec<i16>,
+    #[cfg_attr(feature = "save-states", save(nested))]
+    pulse_1: Pulse,
+    #[cfg_attr(feature = "save-states", save(nested))]
+    pulse_2: Pulse,
+    pcm: Pcm,
+}
+
+impl Sound {
+    pub fn new() -> Self {
+        let mut pulse_table = Vec::new();
+        for x in 0..32 {
+            let f_val = 95.52 / (8128.0 / (x as f64) + 100.0);
+            pulse_table.push((f_val * ::std::i16::MAX as f64) as i16);
+        }
+
+        Self {
+            pulse_table,
+            pulse_1: Pulse::new(),
+            pulse_2: Pulse::new(),
+            pcm: Pcm::new(),
+        }
+    }
+
+    pub fn read(&mut self, addr: u16) -> Option<u8> {
+        let value = match addr {
+            0x5010 => {
+                let mut value = 0;
+                if !self.pcm.write_mode {
+                    value |= 0x01;
+                }
+                if self.pcm.irq_enabled && self.pcm.irq_pending {
+                    value |= 0x80;
+                }
+                self.pcm.irq_pending = false;
+                value
+            }
+            0x5015 => {
+                let mut value = 0;
+                if self.pulse_1.get_state() {
+                    value |= 0x01;
+                }
+                if self.pulse_2.get_state() {
+                    value |= 0x02;
+                }
+                value
+            }
+            _ => return None,
+        };
+
+        Some(value)
+    }
+
+    pub fn pcm_read(&mut self, addr: u16, value: u8) {
+        self.pcm.read(addr, value);
+    }
+
+    pub fn write(&mut self, addr: u16, value: u8) {
+        match addr {
+            0x5000..=0x5003 => self.pulse_1.write(addr & 3, value),
+            0x5004..=0x5007 => self.pulse_2.write(addr & 3, value),
+            0x5010 => {
+                self.pcm.write_mode = value & 0x01 == 0;
+                self.pcm.irq_enabled = value & 0x80 != 0;
+            }
+            0x5011 => self.pcm.write(value),
+            0x5015 => {
+                if value & 0x01 != 0 {
+                    self.pulse_1.enable();
+                } else {
+                    self.pulse_1.disable();
+                }
+                if value & 0x02 != 0 {
+                    self.pulse_2.enable();
+                } else {
+                    self.pulse_2.disable();
+                }
+            }
+            _ => (),
+        }
+    }
+
+    pub fn tick(&mut self) {
+        self.pulse_1.tick();
+        self.pulse_2.tick();
+    }
+
+    pub fn pcm_irq(&self) -> bool {
+        self.pcm.irq_pending && self.pcm.irq_enabled
+    }
+
+    pub fn output(&self) -> i16 {
+        let pulse_1 = self.pulse_1.output() as usize;
+        let pulse_2 = self.pulse_2.output() as usize;
+
+        let out = self.pulse_table[pulse_1 + pulse_2] + self.pcm.output() as i16;
+        out
     }
 }
