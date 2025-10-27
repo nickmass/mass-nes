@@ -16,6 +16,8 @@ use crate::mapper::Mapper;
 use crate::memory::{FixedMemoryBlock, Memory, MemoryBlock, RomBlock};
 use crate::ppu::PpuFetchKind;
 
+use std::fmt::Write;
+
 static NSF_PLAYER_ROM: &[u8] = include_bytes!("nsf_player/nsf_player.bin");
 static NSF_PLAYER_CHR: &[u8] = include_bytes!("nsf_player/ascii-by-jroatch.chr");
 
@@ -257,12 +259,7 @@ impl Nsf {
                     self.prg_ram.write(a, 0x00);
                 }
 
-                text_line(&mut self.sys_nt_ram, 15, Some("Current Track:"));
-                number_line(
-                    &mut self.sys_nt_ram,
-                    16,
-                    Some(self.current_song.saturating_add(1)),
-                );
+                let _ = self.display_info();
 
                 if let Some(fds_ram) = self.fds_ram.as_mut() {
                     let start = if self.banks.is_none() {
@@ -401,6 +398,27 @@ impl Nsf {
         } else {
             self.sys_nt_ram.read(addr & 0x3ff)
         }
+    }
+
+    fn display_info(&mut self) -> std::fmt::Result {
+        let mut cursor = NametableCursor::new(&mut self.sys_nt_ram);
+
+        writeln!(cursor)?;
+        writeln!(cursor)?;
+
+        cursor.write_label("Title:", self.file.song_name.as_ref())?;
+        cursor.write_label("Artist:", self.file.artist_name.as_ref())?;
+        cursor.write_label("Copyright:", self.file.copyright_name.as_ref())?;
+
+        if self.file.total_songs > 1 {
+            cursor.move_to_line(-7);
+            let current_track = self.current_song.saturating_add(1);
+            writeln!(cursor, "Track {current_track} of {}", self.file.total_songs)?;
+            writeln!(cursor)?;
+            writeln!(cursor, "Use left/right to change track")?;
+        }
+
+        Ok(())
     }
 }
 
@@ -560,22 +578,7 @@ impl Mapper for Nsf {
             self.sys_nt_ram.write(a, 0x00);
         }
 
-        text_line(&mut self.sys_nt_ram, 0, None);
-        text_line(&mut self.sys_nt_ram, 1, None);
-        text_line(&mut self.sys_nt_ram, 2, Some("Title:"));
-        text_line(&mut self.sys_nt_ram, 3, self.file.song_name.as_deref());
-        text_line(&mut self.sys_nt_ram, 4, None);
-        text_line(&mut self.sys_nt_ram, 5, Some("Artist:"));
-        text_line(&mut self.sys_nt_ram, 6, self.file.artist_name.as_deref());
-        text_line(&mut self.sys_nt_ram, 7, None);
-        text_line(&mut self.sys_nt_ram, 8, Some("Copyright:"));
-        text_line(&mut self.sys_nt_ram, 9, self.file.copyright_name.as_deref());
-        text_line(&mut self.sys_nt_ram, 10, None);
-        text_line(&mut self.sys_nt_ram, 11, None);
-
-        text_line(&mut self.sys_nt_ram, 12, Some("Total Tracks:"));
-        number_line(&mut self.sys_nt_ram, 13, Some(self.file.total_songs));
-        text_line(&mut self.sys_nt_ram, 14, None);
+        let _ = self.display_info();
     }
 
     #[cfg(feature = "debugger")]
@@ -594,43 +597,71 @@ impl Mapper for Nsf {
     }
 }
 
-fn number_line(nt: &mut FixedMemoryBlock<1>, line: u16, num: Option<u8>) {
-    let mut frac = 100;
-    let mut empty = true;
-    for x in 0..31 {
-        let addr = line * 32 + (x + 1);
-        let addr = addr & 0x3ff;
+struct NametableCursor<'a, M: Memory> {
+    nt: &'a mut M,
+    line: u8,
+    column: u8,
+}
 
-        let value = if let Some(num) = num
-            && frac > 0
-        {
-            let n = (num / frac) % 10;
-            empty &= n == 0;
-            if frac > 1 && empty { 0x00 } else { n + 0x30 }
-        } else {
-            0x00
-        };
-
-        if frac > 0 {
-            frac /= 10;
+impl<'a, M: Memory> NametableCursor<'a, M> {
+    fn new(nt: &'a mut M) -> Self {
+        for a in 0..0x400u16 {
+            nt.write(a, 0x00);
         }
 
-        nt.write(addr, value);
+        Self {
+            nt,
+            line: 0,
+            column: 1,
+        }
+    }
+
+    fn write_label(&mut self, label: &str, value: Option<&String>) -> std::fmt::Result {
+        if let Some(value) = value.filter(|v| !v.is_empty()) {
+            if label.len() + value.len() < 30 {
+                writeln!(self, "{label} {value}")?;
+            } else {
+                writeln!(self, "{label}")?;
+                writeln!(self, "{value}")?;
+            }
+            writeln!(self)?;
+        }
+
+        Ok(())
+    }
+
+    fn move_to_line(&mut self, line: i8) {
+        let abs = line.abs() as u8;
+        if line < 0 {
+            self.line = 31 - abs;
+        } else {
+            self.line = abs;
+        }
     }
 }
 
-fn text_line(nt: &mut FixedMemoryBlock<1>, line: u16, text: Option<&str>) {
-    for x in 0..31 {
-        let addr = line * 32 + (x + 1);
-        let addr = addr & 0x3ff;
+impl<'a, M: Memory> std::fmt::Write for NametableCursor<'a, M> {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        for c in s.chars() {
+            self.write_char(c)?;
+        }
 
-        let value = if let Some(text) = text {
-            text.as_bytes().get(x as usize).copied().unwrap_or(0x00)
-        } else {
-            0x00
-        };
+        Ok(())
+    }
 
-        nt.write(addr, value);
+    fn write_char(&mut self, c: char) -> std::fmt::Result {
+        if c == '\n' {
+            self.line += 1;
+            self.column = 1;
+        } else if c.is_ascii() && !c.is_ascii_control() {
+            if self.column < 32 && self.line < 32 {
+                let addr = (self.line as u16 * 32 + self.column as u16) & 0x3ff;
+                self.nt.write(addr, c as u8);
+            }
+            self.column += 1;
+        }
+
+        Ok(())
     }
 }
 
