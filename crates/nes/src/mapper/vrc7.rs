@@ -220,6 +220,7 @@ pub struct Sound {
     am_unit: AmUnit,
     fm_unit: FmUnit,
     channels: [Channel; 6],
+    active_channel: usize,
     tick: u64,
     output: [i32; 6],
 }
@@ -251,6 +252,7 @@ impl Sound {
             am_unit: AmUnit::new(),
             fm_unit: FmUnit::new(),
             channels: Default::default(),
+            active_channel: 0,
             tick: 0,
             output: [0; 6],
         }
@@ -269,6 +271,8 @@ impl Sound {
                     for i in 0..6 {
                         self.channels[i].reset(&self.patches);
                     }
+
+                    self.am_unit.reset();
                 }
             }
             0x9010 if !self.silence => self.reg_select = value,
@@ -294,21 +298,23 @@ impl Sound {
 
     pub fn tick(&mut self) {
         self.tick += 1;
+        if self.tick == 36 {
+            self.tick = 0;
+        }
+        self.active_channel = (self.tick / 6) as usize;
 
         if self.silence {
             return;
         }
 
-        let cycle = self.tick % 36;
-        if cycle == 0 {
+        if self.tick == 0 {
             self.am_unit.tick();
             self.fm_unit.tick();
         }
 
-        if cycle % 6 == 0 {
-            let channel = (cycle / 6) as usize;
-            self.output[channel] =
-                self.channels[channel].tick(self.am_unit.output, self.fm_unit.output);
+        if self.tick % 6 == 0 {
+            self.output[self.active_channel] =
+                self.channels[self.active_channel].tick(self.am_unit.output(), &self.fm_unit);
         }
     }
 
@@ -317,12 +323,8 @@ impl Sound {
             return i16::MAX / 2;
         }
 
-        let mut output = 0.0;
-        for out in &self.output {
-            output += *out as f32;
-        }
+        let out = (self.output[self.active_channel] >> 5) + (i16::MAX as i32 / 2);
 
-        let out = ((output / 6.0) as i32 >> 5) + (i16::MAX as i32 / 2);
         out.min(i16::MAX as i32).max(0) as i16
     }
 }
@@ -498,7 +500,9 @@ impl Channel {
         }
     }
 
-    fn tick(&mut self, am_out: f32, fm_out: f32) -> i32 {
+    fn tick(&mut self, am_out: u8, fm_unit: &FmUnit) -> i32 {
+        let fm_out = fm_unit.output(self.frequency());
+
         self.mod_output = self.modulator.tick(
             self.frequency() as u32,
             self.octave() as u32,
@@ -574,7 +578,7 @@ static HALF_SIN_TABLE: LazyLock<[f32; SIN_LUT_LEN]> = LazyLock::new(|| {
     table
 });
 
-const MAX_DB: u32 = 1 << 23;
+const MAX_DB: u32 = (1 << 23) - 1;
 
 fn to_linear(db: f32) -> f32 {
     if db >= 48.0 {
@@ -610,12 +614,14 @@ impl Slot {
         volume: u8,
         sustain_on: bool,
         mod_out: i32,
-        fm_out: f32,
-        am_out: f32,
+        fm_out: i32,
+        am_out: u8,
     ) -> i32 {
-        let fm = if self.inst.fm() { fm_out } else { 1.0 };
-        let phase_inc = (freq * (1 << octave) * self.inst.multi() as u32) as f32 * fm / 2.0;
-        self.phase = self.phase.wrapping_add(phase_inc as u32);
+        let fm = if self.inst.fm() { fm_out } else { 0 };
+
+        let phase_inc =
+            ((((2 * freq) as i32 + fm) as u32 * self.inst.multi() as u32) << octave) >> 2;
+        self.phase = self.phase.wrapping_add(phase_inc);
         self.phase &= 0x3ffff;
 
         let adj = match self.kind {
@@ -631,36 +637,33 @@ impl Slot {
         let sin_index = (phase_secondary & 0x1ffff) >> (17 - SIN_LUT_BIT_WIDTH);
 
         let base = match self.kind {
-            SlotKind::Modulator => 0.75 * self.inst.base_attenuation() as f32,
-            SlotKind::Carrier => 3.0 * volume as f32,
+            SlotKind::Modulator => 2 * self.inst.base_attenuation() as u32,
+            SlotKind::Carrier => 8 * volume as u32,
         };
 
         let key_scale = match self.inst.ksl() {
-            0 => 0.0,
+            0 => 0,
             k => {
-                const KEY_SCALE_LUT: [f32; 16] = [
-                    0.00, 18.00, 24.00, 27.75, 30.00, 32.25, 33.75, 35.25, 36.00, 37.50, 38.25,
-                    39.00, 39.75, 40.50, 41.25, 42.00,
+                const KEY_SCALE_LUT: [i32; 16] = [
+                    0, 48, 64, 74, 80, 86, 90, 94, 96, 100, 102, 104, 106, 108, 110, 112,
                 ];
 
                 let f = (freq >> 5) as usize;
-                let b = octave as f32;
-                let a = KEY_SCALE_LUT[f] - 6.0 * (7.0 - b);
-
-                if a <= 0.0 {
-                    0.0
-                } else if k == 3 {
-                    a
-                } else {
-                    a / (2.0f32.powi(3 - k as i32))
-                }
+                let b = octave as i32;
+                let a = KEY_SCALE_LUT[f] - 16 * (7 - b);
+                if a <= 0 { 0 } else { a as u32 >> (3 - k) }
             }
         };
-        let am = if self.inst.am() { am_out } else { 0.0 };
 
-        let envelope = self.envelope(sustain_on, freq, octave) * 48.0;
+        let am = if self.inst.am() { am_out as u32 } else { 0 };
 
-        let total = HALF_SIN_TABLE[sin_index as usize] + base + key_scale + envelope + am;
+        let envelope = self.envelope(sustain_on, freq, octave);
+
+        // until I can move everything to integer math, convert to f32 db units here
+        // using am unit scale (am out is 0..13, and 13 am is 4.8db)
+        let combo = (am + key_scale + base + envelope) as f32 * (4.8 / 13.0);
+
+        let total = HALF_SIN_TABLE[sin_index as usize] + combo;
 
         let linear = to_linear(total).min(1.0).max(0.0);
 
@@ -677,7 +680,7 @@ impl Slot {
         mixed
     }
 
-    fn envelope(&mut self, sustain_on: bool, freq: u32, octave: u32) -> f32 {
+    fn envelope(&mut self, sustain_on: bool, freq: u32, octave: u32) -> u32 {
         let bf = (freq >> 8) + (octave << 1);
         let kb = if self.inst.ksr() { bf } else { bf >> 2 };
 
@@ -707,15 +710,15 @@ impl Slot {
 
         self.egc += adj;
 
-        match self.envelope_phase {
+        let out = match self.envelope_phase {
             EnvelopePhase::Attack => {
                 if self.egc >= MAX_DB {
                     self.egc = 0;
                     self.envelope_phase = EnvelopePhase::Decay;
-                    return 0.0;
+                    self.egc
+                } else {
+                    MAX_DB - self.egc
                 }
-
-                return 1.0 - ((self.egc as f32).ln() / (MAX_DB as f32).ln());
             }
             EnvelopePhase::Decay => {
                 let sustain = 3.0 * self.inst.sustain_level() as f32 * MAX_DB as f32 / 48.0;
@@ -724,23 +727,26 @@ impl Slot {
                     self.egc = sustain;
                     self.envelope_phase = EnvelopePhase::Sustain;
                 }
+                self.egc
             }
             EnvelopePhase::Sustain => {
                 if self.egc >= MAX_DB {
                     self.egc = MAX_DB;
                     self.envelope_phase = EnvelopePhase::Idle;
                 }
+                self.egc
             }
             EnvelopePhase::Release => {
                 if self.egc >= MAX_DB {
                     self.egc = MAX_DB;
                     self.envelope_phase = EnvelopePhase::Idle;
                 }
+                self.egc
             }
-            EnvelopePhase::Idle => return 1.0,
-        }
+            EnvelopePhase::Idle => MAX_DB,
+        };
 
-        self.egc as f32 / MAX_DB as f32
+        (out >> 16) & 0x7f
     }
 
     fn key_on(&mut self) {
@@ -751,8 +757,7 @@ impl Slot {
 
     fn key_off(&mut self) {
         if matches!(self.envelope_phase, EnvelopePhase::Attack) {
-            let output = 1.0 - ((self.egc as f32).ln() / (MAX_DB as f32).ln());
-            self.egc = (output * MAX_DB as f32) as u32;
+            self.egc = MAX_DB - self.egc;
         }
         self.envelope_phase = EnvelopePhase::Release;
     }
@@ -762,25 +767,49 @@ impl Slot {
 #[derive(Debug, Clone)]
 struct AmUnit {
     counter: u32,
-    output: f32,
+    index: usize,
 }
 
 impl AmUnit {
     fn new() -> Self {
         Self {
             counter: 0,
-            output: 0.0,
+            index: 0,
         }
     }
 
     fn tick(&mut self) {
-        self.counter += 78;
-        self.counter &= 0xfffff;
+        self.counter += 1;
+        self.counter &= 0x3f;
 
-        let counter = self.counter as f32 / (1 << 20) as f32;
-        let sinx = (2.0 * PI * counter).sin();
+        if self.counter == 0 {
+            self.index += 1;
+            if self.index == 210 {
+                self.index = 0;
+            }
+        }
+    }
 
-        self.output = (1.0 + sinx) * 0.6;
+    fn reset(&mut self) {
+        self.counter = 0;
+        self.index = 0;
+    }
+
+    fn output(&self) -> u8 {
+        const AM_TABLE: [u8; 210] = [
+            0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6,
+            6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 9, 10, 10, 10, 10, 11, 11, 11, 11, 12, 12, 12,
+            12, 13, 13, 13, 13, 14, 14, 14, 14, 15, 15, 15, 15, 16, 16, 16, 16, 17, 17, 17, 17, 18,
+            18, 18, 18, 19, 19, 19, 19, 20, 20, 20, 20, 21, 21, 21, 21, 22, 22, 22, 22, 23, 23, 23,
+            23, 24, 24, 24, 24, 25, 25, 25, 25, 26, 26, 26, 25, 25, 25, 25, 24, 24, 24, 24, 23, 23,
+            23, 23, 22, 22, 22, 22, 21, 21, 21, 21, 20, 20, 20, 20, 19, 19, 19, 19, 18, 18, 18, 18,
+            17, 17, 17, 17, 16, 16, 16, 16, 15, 15, 15, 15, 14, 14, 14, 14, 13, 13, 13, 13, 12, 12,
+            12, 12, 11, 11, 11, 11, 10, 10, 10, 10, 9, 9, 9, 9, 8, 8, 8, 8, 7, 7, 7, 7, 6, 6, 6, 6,
+            5, 5, 5, 5, 4, 4, 4, 4, 3, 3, 3, 3, 2, 2, 2, 2, 1, 1, 1, 1,
+        ];
+
+        let val = AM_TABLE[self.index];
+        val >> 1
     }
 }
 
@@ -788,24 +817,41 @@ impl AmUnit {
 #[derive(Debug, Clone)]
 struct FmUnit {
     counter: u32,
-    output: f32,
+    index: usize,
 }
 
 impl FmUnit {
     fn new() -> Self {
         Self {
             counter: 0,
-            output: 0.0,
+            index: 0,
         }
     }
 
     fn tick(&mut self) {
-        self.counter += 105;
-        self.counter &= 0xfffff;
+        self.counter += 1;
+        self.counter &= 0x3ff;
 
-        let counter = self.counter as f32 / (1 << 20) as f32;
-        let sinx = (2.0 * PI * counter).sin();
+        if self.counter == 0 {
+            self.index += 1;
+            self.index &= 7;
+        }
+    }
 
-        self.output = 2.0f32.powf(13.75 / 1200.0 * sinx);
+    fn output(&self, freq: u16) -> i32 {
+        const FM_TABLE: [[i32; 8]; 8] = [
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 1, 0, 0, 0, -1, 0],
+            [0, 1, 2, 1, 0, -1, -2, -1],
+            [0, 1, 3, 1, 0, -1, -3, -1],
+            [0, 2, 4, 2, 0, -2, -4, -2],
+            [0, 2, 5, 2, 0, -2, -5, -2],
+            [0, 3, 6, 3, 0, -3, -6, -3],
+            [0, 3, 7, 3, 0, -3, -7, -3],
+        ];
+
+        let row_idx = ((freq >> 6) & 7) as usize;
+        let row = FM_TABLE[row_idx];
+        row[self.index]
     }
 }
