@@ -392,7 +392,7 @@ declare_ops! {
         0x49 => Immediate, Cycles(2);
         0x45 => ZeroPage, Cycles(3);
         0x55 => ZeroPageX, Cycles(4);
-        0x40 => Absolute, Cycles(4);
+        0x4D => Absolute, Cycles(4);
         0x5D => AbsoluteX, Cycles(4), Dummy;
         0x59 => AbsoluteY, Cycles(4), Dummy;
         0x41 => IndirectX, Cycles(6);
@@ -568,7 +568,7 @@ declare_ops! {
         0x73 => IndirectY, Cycles(8), Illegal;
     }
     RTI("Return from interrupt") {
-        0x4d => Implied, Cycles(6);
+        0x40 => Implied, Cycles(6);
     }
     RTS("Return from subroutine") {
         0x60 => Implied, Cycles(6);

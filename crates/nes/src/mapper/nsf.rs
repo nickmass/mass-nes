@@ -242,9 +242,8 @@ impl Nsf {
                 self.current_song = prev;
                 self.current_song
             }
-            0xfffd | 0xfffb => 0x54,
             0xfffc => 0x03,
-            0xfffa => 0x06,
+            0xfffd => 0x54,
             0x8000.. => {
                 let value = self.read_prg(addr);
                 if let Some(mmc5) = self.mmc5.as_mut() {
@@ -419,6 +418,7 @@ impl Nsf {
         let mut cursor = NametableCursor::new(&mut self.sys_nt_ram);
 
         writeln!(cursor)?;
+        writeln!(cursor, "NSF Player")?;
         writeln!(cursor)?;
 
         cursor.write_label("Title:", self.file.song_name.as_ref())?;

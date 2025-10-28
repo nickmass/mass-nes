@@ -32,8 +32,11 @@ InterruptVector:
 ResetVector:
     jmp InitSystem
 NmiVector:
-    jmp InitSystem
+    jmp InitSystemNmi
 
+InitSystemNmi:
+    lda #$00
+    sta PpuCtrl
 InitSystem:
     bit PpuStatus
 @PpuWait1:

@@ -972,6 +972,8 @@ impl Pcm {
 pub struct Sound {
     #[cfg_attr(feature = "save-states", save(skip))]
     pulse_table: Vec<i16>,
+    #[cfg_attr(feature = "save-states", save(skip))]
+    pcm_table: Vec<i16>,
     #[cfg_attr(feature = "save-states", save(nested))]
     pulse_1: Pulse,
     #[cfg_attr(feature = "save-states", save(nested))]
@@ -984,11 +986,22 @@ impl Sound {
         let mut pulse_table = Vec::new();
         for x in 0..32 {
             let f_val = 95.52 / (8128.0 / (x as f64) + 100.0);
-            pulse_table.push((f_val * ::std::i16::MAX as f64) as i16);
+            pulse_table.push((f_val * std::i16::MAX as f64) as i16);
+        }
+
+        // This is based completely on the NES triangle/noise/dmc mixing - not informed by any documentation at all
+        let mut pcm_table = Vec::new();
+        pcm_table.push(0);
+        for x in 1..256 {
+            let x = x as f64;
+            let f_val = 163.67 / (24329.0 / x + 100.0);
+            let val = (f_val.clamp(0.0, 2.0) * i16::MAX as f64).round();
+            pcm_table.push(val as i16);
         }
 
         Self {
             pulse_table,
+            pcm_table,
             pulse_1: Pulse::new(),
             pulse_2: Pulse::new(),
             pcm: Pcm::new(),
@@ -1065,8 +1078,20 @@ impl Sound {
     pub fn output(&self) -> i16 {
         let pulse_1 = self.pulse_1.output() as usize;
         let pulse_2 = self.pulse_2.output() as usize;
+        let pcm = self.pcm.output() as usize;
 
-        let out = self.pulse_table[pulse_1 + pulse_2] + self.pcm.output() as i16;
-        out
+        let pulse_out = self.pulse_table[pulse_1 + pulse_2];
+        let pcm_out = self.pcm_table[pcm];
+
+        let mix_out = pulse_out as i32 + pcm_out as i32;
+        let limit = std::i16::MAX as i32 - 1;
+
+        // With pulse mixing being the same as the NES APU, and PCM being twice as loud as DMC, there is potential for overflow
+
+        if mix_out > limit {
+            limit as i16
+        } else {
+            mix_out as i16
+        }
     }
 }
