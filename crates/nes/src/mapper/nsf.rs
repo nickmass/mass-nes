@@ -46,6 +46,7 @@ pub struct Nsf {
     sunsoft5b: Option<Sunsoft5b>,
     namco163: Option<Namco163>,
     vrc6: Option<Vrc6>,
+    #[cfg_attr(feature = "save-states", save(nested))]
     vrc7: Option<Vrc7>,
     #[cfg_attr(feature = "save-states", save(nested))]
     mmc5: Option<Mmc5>,

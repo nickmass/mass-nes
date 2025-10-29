@@ -3076,6 +3076,7 @@ dependencies = [
  "nes-derive",
  "postcard",
  "serde",
+ "serde_arrays",
 ]
 
 [[package]]

@@ -108,7 +108,7 @@ macro_rules! impl_arr_save_state {
                 where
                     D: serde::Deserializer<'de>,
                 {
-                    <[T::Data; $n]>::deserialize(deserializer).map(Arr)
+                   serde_arrays::deserialize(deserializer).map(Arr)
                 }
             }
 
@@ -135,7 +135,7 @@ macro_rules! impl_arr_save_state {
     };
 }
 
-impl_arr_save_state!(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 32);
+impl_arr_save_state!(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 32 64 128);
 
 impl<T: SaveState> SaveState for RefCell<T> {
     type Data = T::Data;

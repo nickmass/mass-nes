@@ -28,10 +28,14 @@ fn save_data(container_name: &Ident, data: &Data) -> TokenStream {
                 let fields = fields.named.iter().filter_map(|f| {
                     let name = &f.ident;
                     let ty = &f.ty;
+                    let array = matches!(ty, syn::Type::Array(_));
                     let span = f.span();
                     match DataField::parse(f) {
                         DataField::Nested => {
                             Some(quote_spanned!(span=> #name: <#ty as SaveState>::Data ))
+                        }
+                        DataField::Normal if array => {
+                            Some(quote_spanned!(span=> #[serde(with = "serde_arrays")] #name: #ty ))
                         }
                         DataField::Normal => Some(quote_spanned!(span=> #name: #ty )),
                         DataField::Skip => None,

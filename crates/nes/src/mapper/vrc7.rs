@@ -51,6 +51,7 @@ pub struct Vrc7 {
     #[cfg_attr(feature = "save-states", save(skip))]
     cartridge: INes,
     mirroring: SimpleMirroring,
+    #[cfg_attr(feature = "save-states", save(nested))]
     audio: Sound,
     variant: Vrc7Variant,
     #[cfg_attr(feature = "save-states", save(nested))]
@@ -210,19 +211,20 @@ impl Mapper for Vrc7 {
     }
 }
 
-#[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "save-states", derive(SaveState))]
 #[derive(Debug, Clone)]
 pub struct Sound {
     silence: bool,
     reg_select: u8,
-    #[cfg_attr(feature = "save-states", serde(with = "serde_arrays"))]
     patches: [u8; 128],
     am_unit: AmUnit,
     fm_unit: FmUnit,
     channels: [Channel; 6],
     active_channel: usize,
     tick: u64,
-    output: [i32; 6],
+    output: [i16; 6],
+    #[cfg_attr(feature = "save-states", save(skip))]
+    tables: LookupTables,
 }
 
 impl Sound {
@@ -255,6 +257,7 @@ impl Sound {
             active_channel: 0,
             tick: 0,
             output: [0; 6],
+            tables: LookupTables::new(),
         }
     }
 
@@ -313,8 +316,11 @@ impl Sound {
         }
 
         if self.tick % 6 == 0 {
-            self.output[self.active_channel] =
-                self.channels[self.active_channel].tick(self.am_unit.output(), &self.fm_unit);
+            self.output[self.active_channel] = self.channels[self.active_channel].tick(
+                &self.tables,
+                self.am_unit.output(),
+                &self.fm_unit,
+            );
         }
     }
 
@@ -323,8 +329,8 @@ impl Sound {
             return i16::MAX / 2;
         }
 
-        let out = (self.output[self.active_channel] >> 5) + (i16::MAX as i32 / 2);
-
+        // output range is -4096..4096 shifting by more than 2 MAY clip, but I need the extra volume
+        let out = ((self.output[self.active_channel] as i32) << 4) + (i16::MAX as i32 / 2);
         out.min(i16::MAX as i32).max(0) as i16
     }
 }
@@ -448,7 +454,8 @@ struct Channel {
     carrier: Slot,
     modulator: Slot,
     regs: [u8; 3],
-    mod_output: i32,
+    mod_output: i16,
+    prev_mod_output: i16,
 }
 
 impl Channel {
@@ -500,20 +507,24 @@ impl Channel {
         }
     }
 
-    fn tick(&mut self, am_out: u8, fm_unit: &FmUnit) -> i32 {
+    fn tick(&mut self, tables: &LookupTables, am_out: u8, fm_unit: &FmUnit) -> i16 {
         let fm_out = fm_unit.output(self.frequency());
 
+        let current_mod = self.mod_output + self.prev_mod_output;
+        self.prev_mod_output = self.mod_output;
         self.mod_output = self.modulator.tick(
+            tables,
             self.frequency() as u32,
             self.octave() as u32,
             self.volume(),
             self.sustain_on(),
-            self.mod_output,
+            current_mod,
             fm_out,
             am_out,
-        );
+        ) >> 1;
 
         self.carrier.tick(
+            tables,
             self.frequency() as u32,
             self.octave() as u32,
             self.volume(),
@@ -538,6 +549,7 @@ impl Default for Channel {
             modulator: Slot::new(SlotKind::Modulator, &[0; 8]),
             regs: [0; 3],
             mod_output: 0,
+            prev_mod_output: 0,
         }
     }
 }
@@ -552,47 +564,66 @@ enum EnvelopePhase {
     Idle,
 }
 
+#[derive(Debug, Clone)]
+struct LookupTables {
+    log_sin_entries: Vec<u16>,
+    exp_entries: Vec<u16>,
+}
+
+impl LookupTables {
+    fn new() -> Self {
+        let mut log_sin_entries = Vec::with_capacity(256);
+        let mut exp_entries = Vec::with_capacity(256);
+
+        use std::f32::consts::PI;
+
+        for n in 0..256 {
+            let n = n as f32;
+            let log_sin = (-(((n + 0.5) * PI / 256.0 / 2.0).sin()).log2() * 256.0).round();
+            let exp = (((n / 256.0).exp2() - 1.0) * 1024.0).round();
+            log_sin_entries.push(log_sin as u16);
+            exp_entries.push(exp as u16);
+        }
+
+        Self {
+            log_sin_entries,
+            exp_entries,
+        }
+    }
+
+    fn log_sin(&self, phase: u16, half_sin: bool) -> u16 {
+        let sign = phase & 0x200 != 0;
+        let mirror = phase & 0x100 != 0;
+        let phase = phase & 0xff;
+        let phase = if mirror { phase ^ 0xff } else { phase };
+
+        let entry = self.log_sin_entries[phase as usize];
+        if sign {
+            if half_sin { 0xfff } else { entry | 0x8000 }
+        } else {
+            entry
+        }
+    }
+
+    fn exp(&self, value: u16) -> i16 {
+        let sign = value & 0x8000 != 0;
+        let entry = self.exp_entries[(value as usize & 0xff) ^ 0xff] as u32;
+        let t = (entry << 1) | 0x0800;
+        let result = (t >> ((value & 0x7f00) >> 8)) as i16;
+        if sign { !result } else { result }
+    }
+}
+
+const MAX_DB: u32 = (1 << 23) - 1;
+
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
 struct Slot {
     kind: SlotKind,
     inst: Instrument,
     phase: u32,
-    prev_output: i32,
     envelope_phase: EnvelopePhase,
     egc: u32,
-}
-
-use std::f32::consts::PI;
-
-use std::sync::LazyLock;
-const SIN_LUT_BIT_WIDTH: usize = 12;
-const SIN_LUT_LEN: usize = 1 << SIN_LUT_BIT_WIDTH;
-
-static HALF_SIN_TABLE: LazyLock<[f32; SIN_LUT_LEN]> = LazyLock::new(|| {
-    let mut table = [0.0; SIN_LUT_LEN];
-    for i in 0..SIN_LUT_LEN {
-        let scale = i as f32 / SIN_LUT_LEN as f32;
-        table[i] = to_db((PI * scale).sin());
-    }
-    table
-});
-
-const MAX_DB: u32 = (1 << 23) - 1;
-
-fn to_linear(db: f32) -> f32 {
-    if db >= 48.0 {
-        return 0.0;
-    }
-    10.0f32.powf(db / -20.0)
-}
-
-fn to_db(linear: f32) -> f32 {
-    if linear == 0.0 {
-        return f32::INFINITY;
-    }
-
-    -20.0 * linear.log10()
 }
 
 impl Slot {
@@ -601,7 +632,6 @@ impl Slot {
             kind,
             inst: Instrument::new(inst, kind),
             phase: 0,
-            prev_output: 0,
             envelope_phase: EnvelopePhase::Idle,
             egc: 0,
         }
@@ -609,32 +639,34 @@ impl Slot {
 
     fn tick(
         &mut self,
+        tables: &LookupTables,
         freq: u32,
         octave: u32,
         volume: u8,
         sustain_on: bool,
-        mod_out: i32,
+        mod_out: i16,
         fm_out: i32,
         am_out: u8,
-    ) -> i32 {
+    ) -> i16 {
         let fm = if self.inst.fm() { fm_out } else { 0 };
 
-        let phase_inc =
-            ((((2 * freq) as i32 + fm) as u32 * self.inst.multi() as u32) << octave) >> 2;
-        self.phase = self.phase.wrapping_add(phase_inc);
-        self.phase &= 0x3ffff;
+        let phase_inc = ((((2 * freq) as i32 + fm) * self.inst.multi() as i32) << octave) >> 2;
+        self.phase = self.phase.wrapping_add_signed(phase_inc);
+        self.phase &= 0x7ffff;
 
         let adj = match self.kind {
-            SlotKind::Modulator => match self.inst.feedback_level() {
-                0 => 0,
-                f => mod_out >> (9 - f),
-            },
-            SlotKind::Carrier => mod_out,
+            SlotKind::Modulator => {
+                let f = match self.inst.feedback_level() {
+                    0 => 0,
+                    f => mod_out >> (8 - f),
+                };
+                f - 1
+            }
+            SlotKind::Carrier => 2 * mod_out,
         };
 
-        let phase_secondary = (self.phase as i32).wrapping_add(adj);
-        let rectify = phase_secondary & 0x20000 != 0;
-        let sin_index = (phase_secondary & 0x1ffff) >> (17 - SIN_LUT_BIT_WIDTH);
+        let phase_secondary = (self.phase >> 9).wrapping_add_signed(adj as i32);
+        let sin_phase = (phase_secondary & 0x3ff) as u16;
 
         let base = match self.kind {
             SlotKind::Modulator => 2 * self.inst.base_attenuation() as u32,
@@ -644,13 +676,12 @@ impl Slot {
         let key_scale = match self.inst.ksl() {
             0 => 0,
             k => {
-                const KEY_SCALE_LUT: [i32; 16] = [
-                    0, 48, 64, 74, 80, 86, 90, 94, 96, 100, 102, 104, 106, 108, 110, 112,
-                ];
+                const KEY_SCALE_LUT: [i32; 16] =
+                    [112, 64, 48, 38, 32, 26, 22, 18, 16, 12, 10, 8, 6, 4, 2, 0];
 
                 let f = (freq >> 5) as usize;
                 let b = octave as i32;
-                let a = KEY_SCALE_LUT[f] - 16 * (7 - b);
+                let a = 16 * b - KEY_SCALE_LUT[f];
                 if a <= 0 { 0 } else { a as u32 >> (3 - k) }
             }
         };
@@ -659,25 +690,15 @@ impl Slot {
 
         let envelope = self.envelope(sustain_on, freq, octave);
 
-        // until I can move everything to integer math, convert to f32 db units here
-        // using am unit scale (am out is 0..13, and 13 am is 4.8db)
-        let combo = (am + key_scale + base + envelope) as f32 * (4.8 / 13.0);
-
-        let total = HALF_SIN_TABLE[sin_index as usize] + combo;
-
-        let linear = to_linear(total).min(1.0).max(0.0);
-
-        let output = (linear * (1 << 20) as f32) as i32;
-
-        let output = if rectify {
-            if self.inst.half_sin() { 0 } else { -output }
+        let output = if envelope & 0x7c == 0x7c {
+            0
         } else {
-            output
+            let sin = tables.log_sin(sin_phase, self.inst.half_sin());
+            let attenuation = (base + key_scale + envelope + am).min(127) as u16;
+            tables.exp(sin + 16 * attenuation)
         };
 
-        let mixed = (output + self.prev_output) / 2;
-        self.prev_output = output;
-        mixed
+        output
     }
 
     fn envelope(&mut self, sustain_on: bool, freq: u32, octave: u32) -> u32 {
@@ -722,7 +743,7 @@ impl Slot {
             }
             EnvelopePhase::Decay => {
                 let sustain = 3.0 * self.inst.sustain_level() as f32 * MAX_DB as f32 / 48.0;
-                let sustain = sustain as u32;
+                let sustain = (sustain as u32).min(MAX_DB);
                 if self.egc >= sustain {
                     self.egc = sustain;
                     self.envelope_phase = EnvelopePhase::Sustain;
