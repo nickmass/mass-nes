@@ -615,6 +615,7 @@ impl LookupTables {
 }
 
 const MAX_DB: u32 = (1 << 23) - 1;
+const ONE_DB: u32 = MAX_DB / 48;
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
@@ -742,8 +743,7 @@ impl Slot {
                 }
             }
             EnvelopePhase::Decay => {
-                let sustain = 3.0 * self.inst.sustain_level() as f32 * MAX_DB as f32 / 48.0;
-                let sustain = (sustain as u32).min(MAX_DB);
+                let sustain = (3 * self.inst.sustain_level() as u32 * ONE_DB).min(MAX_DB);
                 if self.egc >= sustain {
                     self.egc = sustain;
                     self.envelope_phase = EnvelopePhase::Sustain;
