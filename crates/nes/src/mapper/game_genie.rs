@@ -205,11 +205,27 @@ impl Mapper for GameGenie {
     }
 
     fn peek_ppu_fetch(&self, address: u16, kind: PpuFetchKind) -> super::Nametable {
-        self.rom.peek_ppu_fetch(address, kind)
+        if self.game_mode {
+            self.rom.peek_ppu_fetch(address, kind)
+        } else {
+            if address < 0x2000 {
+                super::Nametable::External
+            } else {
+                super::Nametable::InternalA
+            }
+        }
     }
 
     fn ppu_fetch(&mut self, address: u16, kind: PpuFetchKind) -> super::Nametable {
-        self.rom.ppu_fetch(address, kind)
+        if self.game_mode {
+            self.rom.ppu_fetch(address, kind)
+        } else {
+            if address < 0x2000 {
+                super::Nametable::External
+            } else {
+                super::Nametable::InternalA
+            }
+        }
     }
 
     fn get_irq(&self) -> bool {
