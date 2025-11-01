@@ -15,6 +15,7 @@ mod mmc2;
 mod mmc3;
 mod mmc5;
 mod namco163;
+mod namco175_340;
 mod nina001;
 mod nina006;
 mod nrom;
@@ -255,6 +256,23 @@ pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
             tracing::warn!("limited mapper support");
             RcMapper::new(mmc3::Mmc3::new(cart, mmc3::Mmc3Variant::Mmc3, debug))
         }
+        210 => match cart.submapper {
+            Some(1) => RcMapper::new(namco175_340::Namco175_340::new(
+                cart,
+                namco175_340::NamcoVariant::Namco175,
+            )),
+            Some(2) => RcMapper::new(namco175_340::Namco175_340::new(
+                cart,
+                namco175_340::NamcoVariant::Namco340,
+            )),
+            _ => {
+                tracing::warn!("iNES 210 rom unknown sub-mapper");
+                RcMapper::new(namco175_340::Namco175_340::new(
+                    cart,
+                    namco175_340::NamcoVariant::Unspecified,
+                ))
+            }
+        },
         682 | 3871 => {
             tracing::warn!("limited mapper support");
             RcMapper::new(rainbow::Rainbow::new(cart, debug))
