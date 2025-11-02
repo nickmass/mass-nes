@@ -60,7 +60,14 @@ mod traits {
     use super::{Mapper, RcMapper};
     use nes_traits::{BinarySaveState, SaveState};
 
-    pub trait MapperState: Mapper + BinarySaveState {}
+    pub trait MapperState: Mapper + BinarySaveState {
+        fn rc(self) -> super::RcMapper
+        where
+            Self: Sized + 'static,
+        {
+            super::RcMapper::new(self)
+        }
+    }
     impl<T: Mapper + BinarySaveState> MapperState for T {}
 
     impl SaveState for RcMapper {
@@ -78,7 +85,14 @@ mod traits {
 
 #[cfg(not(feature = "save-states"))]
 mod traits {
-    pub trait MapperState: super::Mapper {}
+    pub trait MapperState: super::Mapper {
+        fn rc(self) -> super::RcMapper
+        where
+            Self: Sized + 'static,
+        {
+            super::RcMapper::new(self)
+        }
+    }
     impl<T: super::Mapper> MapperState for T {}
 }
 
@@ -186,110 +200,105 @@ impl RcMapper {
     }
 
     pub fn with_game_genie(self) -> Self {
-        RcMapper::new(game_genie::GameGenie::new(self))
+        game_genie::GameGenie::new(self).rc()
     }
 }
 
 pub fn ines(cart: INes, debug: Rc<Debug>) -> RcMapper {
     match cart.mapper {
-        0 => RcMapper::new(nrom::Nrom::new(cart)),
-        1 | 65 => RcMapper::new(mmc1::Mmc1::new(cart)),
-        2 => RcMapper::new(uxrom::Uxrom::new(cart)),
-        3 => RcMapper::new(cnrom::Cnrom::new(cart)),
+        0 => nrom::Nrom::new(cart).rc(),
+        1 | 65 => mmc1::Mmc1::new(cart).rc(),
+        2 => uxrom::Uxrom::new(cart).rc(),
+        3 => cnrom::Cnrom::new(cart).rc(),
         148 => {
             tracing::warn!("limited mapper support");
-            RcMapper::new(cnrom::Cnrom::new(cart))
+            cnrom::Cnrom::new(cart).rc()
         }
         4 => match cart.submapper {
-            Some(1) => RcMapper::new(mmc3::Mmc3::new(cart, mmc3::Mmc3Variant::Mmc6, debug)),
-            Some(4) => RcMapper::new(mmc3::Mmc3::new(cart, mmc3::Mmc3Variant::Mmc3AltIrq, debug)),
-            _ => RcMapper::new(mmc3::Mmc3::new(cart, mmc3::Mmc3Variant::Mmc3, debug)),
+            Some(1) => mmc3::Mmc3::new(cart, mmc3::Mmc3Variant::Mmc6, debug).rc(),
+            Some(4) => mmc3::Mmc3::new(cart, mmc3::Mmc3Variant::Mmc3AltIrq, debug).rc(),
+            _ => mmc3::Mmc3::new(cart, mmc3::Mmc3Variant::Mmc3, debug).rc(),
         },
-        5 => RcMapper::new(mmc5::Mmc5::new(cart, debug)),
-        7 => RcMapper::new(axrom::Axrom::new(cart)),
-        9 => RcMapper::new(mmc2::Mmc2::new(cart, mmc2::Mmc2Variant::Mmc2)),
-        10 => RcMapper::new(mmc2::Mmc2::new(cart, mmc2::Mmc2Variant::Mmc4)),
-        11 => RcMapper::new(color_dreams::ColorDreams::new(cart)),
-        19 => RcMapper::new(namco163::Namco163::new(cart, debug)),
+        5 => mmc5::Mmc5::new(cart, debug).rc(),
+        7 => axrom::Axrom::new(cart).rc(),
+        9 => mmc2::Mmc2::new(cart, mmc2::Mmc2Variant::Mmc2).rc(),
+        10 => mmc2::Mmc2::new(cart, mmc2::Mmc2Variant::Mmc4).rc(),
+        11 => color_dreams::ColorDreams::new(cart).rc(),
+        19 => namco163::Namco163::new(cart, debug).rc(),
         21 => match cart.submapper {
-            Some(2) => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4c, debug)),
-            _ => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4a, debug)),
+            Some(2) => vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4c, debug).rc(),
+            _ => vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4a, debug).rc(),
         },
-        22 => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc2a, debug)),
+        22 => vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc2a, debug).rc(),
         23 => match cart.submapper {
-            Some(1) => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4f, debug)),
-            Some(2) => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4e, debug)),
-            Some(3) => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc2b, debug)),
-            _ => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc2b, debug)),
+            Some(1) => vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4f, debug).rc(),
+            Some(2) => vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4e, debug).rc(),
+            Some(3) => vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc2b, debug).rc(),
+            _ => vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc2b, debug).rc(),
         },
-        24 => RcMapper::new(vrc6::Vrc6::new(cart, vrc6::Vrc6Variant::A, debug)),
+        24 => vrc6::Vrc6::new(cart, vrc6::Vrc6Variant::A, debug).rc(),
         25 => match cart.submapper {
-            Some(2) => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4d, debug)),
-            Some(3) => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc2c, debug)),
-            _ => RcMapper::new(vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4b, debug)),
+            Some(2) => vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4d, debug).rc(),
+            Some(3) => vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc2c, debug).rc(),
+            _ => vrc4::Vrc4::new(cart, vrc4::Vrc4Variant::Vrc4b, debug).rc(),
         },
-        26 => RcMapper::new(vrc6::Vrc6::new(cart, vrc6::Vrc6Variant::B, debug)),
-        28 => RcMapper::new(action53::Action53::new(cart)),
-        31 => RcMapper::new(mapper_031::Mapper031::new(cart)),
+        26 => vrc6::Vrc6::new(cart, vrc6::Vrc6Variant::B, debug).rc(),
+        28 => action53::Action53::new(cart).rc(),
+        31 => mapper_031::Mapper031::new(cart).rc(),
         34 => match cart.submapper.unwrap_or_default() {
-            1 => RcMapper::new(nina001::Nina001::new(cart)),
-            2 => RcMapper::new(bxrom::Bxrom::new(cart)),
+            1 => nina001::Nina001::new(cart).rc(),
+            2 => bxrom::Bxrom::new(cart).rc(),
             0 | _ => {
                 if cart.chr_rom.len() > 8 * 1024 || cart.chr_ram_bytes == 0 {
-                    RcMapper::new(nina001::Nina001::new(cart))
+                    nina001::Nina001::new(cart).rc()
                 } else {
-                    RcMapper::new(bxrom::Bxrom::new(cart))
+                    bxrom::Bxrom::new(cart).rc()
                 }
             }
         },
-        66 => RcMapper::new(gxrom::Gxrom::new(cart)),
-        69 => RcMapper::new(fme7::Fme7::new(cart, debug)),
-        71 | 232 => RcMapper::new(bf909x::Bf909x::new(cart)),
-        79 | 146 => RcMapper::new(nina006::Nina006::new(cart)),
+        66 => gxrom::Gxrom::new(cart).rc(),
+        69 => fme7::Fme7::new(cart, debug).rc(),
+        71 | 232 => bf909x::Bf909x::new(cart).rc(),
+        79 | 146 => nina006::Nina006::new(cart).rc(),
         85 => match cart.submapper {
-            Some(1) => RcMapper::new(vrc7::Vrc7::new(cart, vrc7::Vrc7Variant::Vrc7b, debug)),
-            Some(2) => RcMapper::new(vrc7::Vrc7::new(cart, vrc7::Vrc7Variant::Vrc7a, debug)),
-            _ => RcMapper::new(vrc7::Vrc7::new(cart, vrc7::Vrc7Variant::Undefined, debug)),
+            Some(1) => vrc7::Vrc7::new(cart, vrc7::Vrc7Variant::Vrc7b, debug).rc(),
+            Some(2) => vrc7::Vrc7::new(cart, vrc7::Vrc7Variant::Vrc7a, debug).rc(),
+            _ => vrc7::Vrc7::new(cart, vrc7::Vrc7Variant::Undefined, debug).rc(),
         },
-        87 => RcMapper::new(j87::J87::new(cart)),
+        87 => j87::J87::new(cart).rc(),
         206 => {
             tracing::warn!("limited mapper support");
-            RcMapper::new(mmc3::Mmc3::new(cart, mmc3::Mmc3Variant::Mmc3, debug))
+            mmc3::Mmc3::new(cart, mmc3::Mmc3Variant::Mmc3, debug).rc()
         }
         210 => match cart.submapper {
-            Some(1) => RcMapper::new(namco175_340::Namco175_340::new(
-                cart,
-                namco175_340::NamcoVariant::Namco175,
-            )),
-            Some(2) => RcMapper::new(namco175_340::Namco175_340::new(
-                cart,
-                namco175_340::NamcoVariant::Namco340,
-            )),
+            Some(1) => {
+                namco175_340::Namco175_340::new(cart, namco175_340::NamcoVariant::Namco175).rc()
+            }
+            Some(2) => {
+                namco175_340::Namco175_340::new(cart, namco175_340::NamcoVariant::Namco340).rc()
+            }
             _ => {
                 tracing::warn!("iNES 210 rom unknown sub-mapper");
-                RcMapper::new(namco175_340::Namco175_340::new(
-                    cart,
-                    namco175_340::NamcoVariant::Unspecified,
-                ))
+                namco175_340::Namco175_340::new(cart, namco175_340::NamcoVariant::Unspecified).rc()
             }
         },
         682 | 3871 => {
             tracing::warn!("limited mapper support");
-            RcMapper::new(rainbow::Rainbow::new(cart, debug))
+            rainbow::Rainbow::new(cart, debug).rc()
         }
         _ => {
             tracing::error!("mapper not implemented");
-            RcMapper::new(nrom::Nrom::new(cart))
+            nrom::Nrom::new(cart).rc()
         }
     }
 }
 
 pub fn fds(disk: Fds) -> RcMapper {
-    RcMapper::new(fds::Fds::new(disk))
+    fds::Fds::new(disk).rc()
 }
 
 pub fn nsf(region: Region, data: NsfFile) -> RcMapper {
-    RcMapper::new(nsf::Nsf::new(region, data))
+    nsf::Nsf::new(region, data).rc()
 }
 
 #[cfg_attr(feature = "save-states", derive(Serialize, Deserialize))]
