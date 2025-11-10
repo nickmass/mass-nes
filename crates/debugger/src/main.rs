@@ -9,9 +9,24 @@ use debugger::{DebuggerApp, EguiMessageLayer, MessageStore};
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
+    use std::path::PathBuf;
+
     use ui::audio::Audio;
     let message_store = MessageStore::new(10_000);
     init_tracing(message_store.clone());
+
+    let mut args = std::env::args();
+    let _ = args.next(); // skip executable
+
+    let mut args: Vec<String> = args.collect();
+
+    for arg in args.iter().filter(|a| a.starts_with('-')) {
+        tracing::warn!("unrecognized option: '{arg}'");
+    }
+
+    args.retain(|a| !a.starts_with('-'));
+
+    let initial_file = args.get(0).map(PathBuf::from);
 
     let options = eframe::NativeOptions {
         vsync: true,
@@ -32,12 +47,8 @@ fn main() {
         debugger::APP_NAME,
         options,
         Box::new(|cc| {
-            Ok(Box::new(DebuggerApp::new(
-                cc,
-                message_store,
-                audio,
-                samples_tx,
-            )?))
+            let app = DebuggerApp::new(cc, message_store, audio, samples_tx, initial_file)?;
+            Ok(Box::new(app))
         }),
     )
     .unwrap();
@@ -76,6 +87,7 @@ pub fn main() {
                         message_store,
                         audio,
                         samples_tx,
+                        None,
                     )?))
                 }),
             )

@@ -156,6 +156,7 @@ impl<A: Audio> DebuggerApp<A> {
         message_store: MessageStore,
         audio: A,
         samples_tx: SamplesSender,
+        initial_file: Option<PathBuf>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
         // Force dark mode as it is currently the only version I ever test
         cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
@@ -248,12 +249,12 @@ impl<A: Audio> DebuggerApp<A> {
             recording_wav: false,
         };
 
-        app.hydrate();
+        app.hydrate(initial_file);
 
         Ok(app)
     }
 
-    fn hydrate(&mut self) {
+    fn hydrate(&mut self, initial_file: Option<PathBuf>) {
         if self.state.mute {
             self.set_volume(0.0);
         } else {
@@ -263,7 +264,9 @@ impl<A: Audio> DebuggerApp<A> {
         self.recents = Recents::new(&self.state.recent_files.as_slice(), 10);
         self.nes_screen.filter(self.state.filter);
 
-        if self.state.auto_open_most_recent {
+        if let Some(file) = initial_file {
+            self.load_rom(file, self.state.bios.clone());
+        } else if self.state.auto_open_most_recent {
             if let Some(recent) = self.state.recent_files.first() {
                 self.load_rom(recent.clone(), self.state.bios.clone())
             }
@@ -598,7 +601,7 @@ impl<A: Audio> eframe::App for DebuggerApp<A> {
 
                     if ui.button("Restore Defaults").clicked() {
                         self.state = Default::default();
-                        self.hydrate();
+                        self.hydrate(None);
                     }
                 });
                 ui.menu_button("Game", |ui| {
