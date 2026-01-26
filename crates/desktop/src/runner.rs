@@ -87,7 +87,8 @@ impl Runner {
                 .samples_tx
                 .wait_for_wants_samples(Duration::from_millis(1))
             {
-                self.step(samples as u32);
+                let samples = self.blip.clocks_needed(samples as u32);
+                self.step(samples);
             }
         }
     }
