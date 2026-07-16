@@ -104,14 +104,14 @@ impl PipewireMainThread {
         let sample_rate = status.sample_rate();
         tracing::debug!("pipewire sample rate: {sample_rate} latency: {SAMPLE_LATENCY}");
         pipewire::init();
-        let main_loop = pipewire::main_loop::MainLoop::new(None)?;
-        let context = pipewire::context::Context::new(&main_loop)?;
-        let core = context.connect(None)?;
+        let main_loop = pipewire::main_loop::MainLoopRc::new(None)?;
+        let context = pipewire::context::ContextRc::new(&main_loop, None)?;
+        let core = context.connect_rc(None)?;
 
         let node_latency = format!("{SAMPLE_LATENCY}/{sample_rate}");
 
-        let stream = pipewire::stream::Stream::new(
-            &core,
+        let stream = pipewire::stream::StreamRc::new(
+            core,
             "mass-nes",
             pipewire::properties::properties! {
                 *pipewire::keys::MEDIA_TYPE => "Audio",

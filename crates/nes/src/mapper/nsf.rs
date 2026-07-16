@@ -598,7 +598,12 @@ impl<'a, M: Memory> NametableCursor<'a, M> {
                 writeln!(self, "{label} {value}")?;
             } else {
                 writeln!(self, "{label}")?;
-                writeln!(self, "{value}")?;
+                let mut v = value.as_str().trim();
+                while v.len() > 0 {
+                    let len = v.len().min(31);
+                    writeln!(self, "{}", &v[0..len])?;
+                    v = &v[len..].trim_start();
+                }
             }
             writeln!(self)?;
         }
